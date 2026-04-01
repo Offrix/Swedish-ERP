@@ -41,6 +41,39 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
       actorId: "payroll-admin"
     });
   }
+  balancesPlatform.createBalanceType({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_PAID_DAYS",
+    label: "Vacation paid days",
+    unitCode: "days",
+    negativeAllowed: false,
+    carryForwardModeCode: "none",
+    expiryModeCode: "none",
+    actorId: "payroll-admin"
+  });
+  balancesPlatform.createBalanceType({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_SAVED_DAYS",
+    label: "Vacation saved days",
+    unitCode: "days",
+    negativeAllowed: false,
+    carryForwardModeCode: "none",
+    expiryModeCode: "fixed_date",
+    expiryMonthDay: "03-31",
+    expiryYearOffset: 5,
+    actorId: "payroll-admin"
+  });
+  balancesPlatform.createVacationBalanceProfile({
+    companyId: COMPANY_ID,
+    vacationBalanceProfileCode: "SEMESTERLAGEN",
+    label: "Semesterlagen",
+    paidDaysBalanceTypeCode: "VACATION_PAID_DAYS",
+    savedDaysBalanceTypeCode: "VACATION_SAVED_DAYS",
+    vacationYearStartMonthDay: "04-01",
+    minimumPaidDaysToRetain: 20,
+    maxSavedDaysPerYear: 5,
+    actorId: "payroll-admin"
+  });
 
   const employee = hrPlatform.createEmployee({
     companyId: COMPANY_ID,
@@ -116,6 +149,25 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
     managerEmploymentId: managerEmployment.employmentId,
     validFrom: "2026-01-01",
     actorId: "hr-admin"
+  });
+  const vacationPaidAccount = balancesPlatform.openBalanceAccount({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_PAID_DAYS",
+    ownerTypeCode: "employment",
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    actorId: "payroll-admin"
+  });
+  balancesPlatform.recordBalanceTransaction({
+    companyId: COMPANY_ID,
+    balanceAccountId: vacationPaidAccount.balanceAccountId,
+    effectiveDate: "2025-04-01",
+    transactionTypeCode: "baseline",
+    quantityDelta: 24,
+    sourceDomainCode: "PAYROLL_MIGRATION",
+    sourceObjectType: "migration_batch",
+    sourceObjectId: "vacation-days-baseline",
+    actorId: "payroll-admin"
   });
 
   const family = collectiveAgreementsPlatform.createAgreementFamily({
@@ -247,4 +299,7 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
 
   const overtimeSnapshot = timeBase.balanceSnapshots.find((candidate) => candidate.account.balanceTypeCode === "OVERTIME_MINUTES");
   assert.equal(overtimeSnapshot.snapshot.currentQuantity, 30);
+  assert.equal(timeBase.vacationBalance.paidDays, 24);
+  assert.equal(timeBase.vacationBalance.savedDays, 0);
+  assert.equal(timeBase.vacationBalance.vacationYearStartDate, "2025-04-01");
 });

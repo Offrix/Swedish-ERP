@@ -211,6 +211,152 @@ test("Step 17 API creates balance types, accounts, transactions, carry-forward a
       { token: adminToken }
     );
     assert.equal(expiredSnapshot.currentQuantity, 0);
+
+    await requestJson(baseUrl, "/v1/balances/types", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_PAID_DAYS",
+        label: "Vacation paid days",
+        unitCode: "days",
+        negativeAllowed: false,
+        carryForwardModeCode: "none",
+        expiryModeCode: "none"
+      }
+    });
+    await requestJson(baseUrl, "/v1/balances/types", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_SAVED_DAYS",
+        label: "Vacation saved days",
+        unitCode: "days",
+        negativeAllowed: false,
+        carryForwardModeCode: "none",
+        expiryModeCode: "fixed_date",
+        expiryMonthDay: "03-31",
+        expiryYearOffset: 5
+      }
+    });
+    const vacationProfile = await requestJson(baseUrl, "/v1/balances/vacation-profiles", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        vacationBalanceProfileCode: "SEMESTERLAGEN",
+        label: "Semesterlagen",
+        paidDaysBalanceTypeCode: "VACATION_PAID_DAYS",
+        savedDaysBalanceTypeCode: "VACATION_SAVED_DAYS",
+        vacationYearStartMonthDay: "04-01",
+        minimumPaidDaysToRetain: 20,
+        maxSavedDaysPerYear: 5
+      }
+    });
+    assert.equal(vacationProfile.minimumPaidDaysToRetain, 20);
+
+    const vacationProfiles = await requestJson(
+      baseUrl,
+      `/v1/balances/vacation-profiles?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(vacationProfiles.items.some((item) => item.vacationBalanceProfileCode === "SEMESTERLAGEN"), true);
+
+    const vacationPaidAccount = await requestJson(baseUrl, "/v1/balances/accounts", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_PAID_DAYS",
+        ownerTypeCode: "employment",
+        employeeId: employee.employeeId,
+        employmentId: employment.employmentId
+      }
+    });
+    const vacationSavedAccount = await requestJson(baseUrl, "/v1/balances/accounts", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_SAVED_DAYS",
+        ownerTypeCode: "employment",
+        employeeId: employee.employeeId,
+        employmentId: employment.employmentId
+      }
+    });
+    await requestJson(baseUrl, `/v1/balances/accounts/${vacationPaidAccount.balanceAccountId}/transactions`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        effectiveDate: "2025-04-01",
+        transactionTypeCode: "baseline",
+        quantityDelta: 24,
+        sourceDomainCode: "PAYROLL_MIGRATION",
+        sourceObjectType: "migration_batch",
+        sourceObjectId: "vacation-baseline-1"
+      }
+    });
+    await requestJson(baseUrl, `/v1/balances/accounts/${vacationSavedAccount.balanceAccountId}/transactions`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        effectiveDate: "2021-04-01",
+        transactionTypeCode: "baseline",
+        quantityDelta: 2,
+        sourceDomainCode: "PAYROLL_MIGRATION",
+        sourceObjectType: "migration_batch",
+        sourceObjectId: "vacation-baseline-2"
+      }
+    });
+
+    const vacationBalanceBeforeClose = await requestJson(
+      baseUrl,
+      `/v1/balances/vacation-balances?companyId=${DEMO_IDS.companyId}&employmentId=${employment.employmentId}&snapshotDate=2026-03-31`,
+      { token: adminToken }
+    );
+    assert.equal(vacationBalanceBeforeClose.paidDays, 24);
+    assert.equal(vacationBalanceBeforeClose.savedDays, 2);
+
+    const yearCloseRun = await requestJson(baseUrl, "/v1/balances/vacation-year-closes", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        snapshotDate: "2026-03-31",
+        employmentId: employment.employmentId,
+        vacationBalanceProfileCode: "SEMESTERLAGEN",
+        idempotencyKey: "vacation-year-close-1"
+      }
+    });
+    assert.equal(yearCloseRun.processedCount, 1);
+    assert.equal(yearCloseRun.processedItems[0].carriedPaidDays, 4);
+    assert.equal(yearCloseRun.processedItems[0].expiredSavedDays, 2);
+
+    const yearCloseRuns = await requestJson(
+      baseUrl,
+      `/v1/balances/vacation-year-closes?companyId=${DEMO_IDS.companyId}`,
+      { token: adminToken }
+    );
+    assert.equal(yearCloseRuns.items.length >= 1, true);
+
+    const vacationBalanceAfterClose = await requestJson(
+      baseUrl,
+      `/v1/balances/vacation-balances?companyId=${DEMO_IDS.companyId}&employmentId=${employment.employmentId}&snapshotDate=2026-04-01`,
+      { token: adminToken }
+    );
+    assert.equal(vacationBalanceAfterClose.paidDays, 0);
+    assert.equal(vacationBalanceAfterClose.savedDays, 4);
   } finally {
     await stopServer(server);
   }

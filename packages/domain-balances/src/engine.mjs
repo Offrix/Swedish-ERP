@@ -58,6 +58,12 @@ export function createBalancesEngine({
     expiryRuns: new Map(),
     expiryRunIdsByCompany: new Map(),
     expiryRunIdByKey: new Map(),
+    vacationBalanceProfiles: new Map(),
+    vacationBalanceProfileIdsByCompany: new Map(),
+    vacationBalanceProfileIdByCode: new Map(),
+    vacationYearCloseRuns: new Map(),
+    vacationYearCloseRunIdsByCompany: new Map(),
+    vacationYearCloseRunIdByKey: new Map(),
     auditEvents: []
   };
 
@@ -84,7 +90,13 @@ export function createBalancesEngine({
     runBalanceCarryForward,
     listBalanceCarryForwardRuns,
     runBalanceExpiry,
-    listBalanceExpiryRuns
+    listBalanceExpiryRuns,
+    createVacationBalanceProfile,
+    listVacationBalanceProfiles,
+    getVacationBalanceProfile,
+    getVacationBalance,
+    runVacationYearClose,
+    listVacationYearCloseRuns
   };
 
   Object.defineProperty(engine, "__durableState", {
@@ -659,6 +671,365 @@ export function createBalancesEngine({
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .map(presentExpiryRun);
   }
+
+  function createVacationBalanceProfile({
+    companyId,
+    vacationBalanceProfileCode,
+    label,
+    paidDaysBalanceTypeCode = "VACATION_PAID_DAYS",
+    savedDaysBalanceTypeCode = "VACATION_SAVED_DAYS",
+    vacationYearStartMonthDay = "04-01",
+    minimumPaidDaysToRetain = 20,
+    maxSavedDaysPerYear = 5,
+    active = true,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedProfileCode = normalizeCode(vacationBalanceProfileCode, "vacation_balance_profile_code_required");
+    if (getIndexValue(state.vacationBalanceProfileIdByCode, resolvedCompanyId, resolvedProfileCode)) {
+      throw createError(409, "vacation_balance_profile_code_exists", "Vacation balance profile code already exists.");
+    }
+    const paidDaysBalanceType = requireBalanceType(state, resolvedCompanyId, { balanceTypeCode: paidDaysBalanceTypeCode });
+    const savedDaysBalanceType = requireBalanceType(state, resolvedCompanyId, { balanceTypeCode: savedDaysBalanceTypeCode });
+    if (paidDaysBalanceType.unitCode !== "days" || savedDaysBalanceType.unitCode !== "days") {
+      throw createError(400, "vacation_balance_profile_requires_day_units", "Vacation balance profile types must use the days unit.");
+    }
+    const resolvedVacationYearStartMonthDay = normalizeMonthDay(vacationYearStartMonthDay, "vacation_year_start_month_day_invalid");
+    const resolvedMinimumPaidDaysToRetain = normalizeQuantity(minimumPaidDaysToRetain, "vacation_minimum_paid_days_to_retain_invalid");
+    if (resolvedMinimumPaidDaysToRetain < 0) {
+      throw createError(400, "vacation_minimum_paid_days_to_retain_invalid", "Vacation paid-day retention floor cannot be negative.");
+    }
+    const resolvedMaxSavedDaysPerYear = normalizeQuantity(maxSavedDaysPerYear, "vacation_max_saved_days_invalid");
+    if (resolvedMaxSavedDaysPerYear < 0) {
+      throw createError(400, "vacation_max_saved_days_invalid", "Vacation max saved days per year cannot be negative.");
+    }
+    const now = nowIso(clock);
+    const record = freezeRecord({
+      vacationBalanceProfileId: crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      vacationBalanceProfileCode: resolvedProfileCode,
+      label: requireText(label, "vacation_balance_profile_label_required"),
+      paidDaysBalanceTypeCode: paidDaysBalanceType.balanceTypeCode,
+      savedDaysBalanceTypeCode: savedDaysBalanceType.balanceTypeCode,
+      vacationYearStartMonthDay: resolvedVacationYearStartMonthDay,
+      minimumPaidDaysToRetain: resolvedMinimumPaidDaysToRetain,
+      maxSavedDaysPerYear: resolvedMaxSavedDaysPerYear,
+      active: active !== false,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: now,
+      updatedAt: now
+    });
+    state.vacationBalanceProfiles.set(record.vacationBalanceProfileId, record);
+    appendToIndex(state.vacationBalanceProfileIdsByCompany, resolvedCompanyId, record.vacationBalanceProfileId);
+    setIndexValue(state.vacationBalanceProfileIdByCode, resolvedCompanyId, record.vacationBalanceProfileCode, record.vacationBalanceProfileId);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: record.createdByActorId,
+      action: "balances.vacation_balance_profile.created",
+      entityType: "vacation_balance_profile",
+      entityId: record.vacationBalanceProfileId,
+      explanation: `Created vacation balance profile ${record.vacationBalanceProfileCode}.`
+    });
+    return presentVacationBalanceProfile(record);
+  }
+
+  function listVacationBalanceProfiles({ companyId, active = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.vacationBalanceProfileIdsByCompany.get(resolvedCompanyId) || [])
+      .map((profileId) => state.vacationBalanceProfiles.get(profileId))
+      .filter(Boolean)
+      .filter((record) => (active == null ? true : record.active === (active === true || active === "true")))
+      .sort((left, right) => left.vacationBalanceProfileCode.localeCompare(right.vacationBalanceProfileCode))
+      .map(presentVacationBalanceProfile);
+  }
+
+  function getVacationBalanceProfile({ companyId, vacationBalanceProfileId = null, vacationBalanceProfileCode = null } = {}) {
+    return presentVacationBalanceProfile(
+      requireVacationBalanceProfile(state, companyId, {
+        vacationBalanceProfileId,
+        vacationBalanceProfileCode
+      })
+    );
+  }
+
+  function getVacationBalance({
+    companyId,
+    employmentId,
+    snapshotDate = null,
+    vacationBalanceProfileCode = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+    const profile = selectVacationBalanceProfile(state, resolvedCompanyId, vacationBalanceProfileCode);
+    if (!profile) {
+      return null;
+    }
+    const resolvedSnapshotDate = snapshotDate ? normalizeRequiredDate(snapshotDate, "vacation_balance_snapshot_date_invalid") : currentDate(clock);
+    const employment = resolveEmploymentIdentity({ companyId: resolvedCompanyId, employmentId: resolvedEmploymentId, hrPlatform });
+    const window = resolveVacationYearWindow({
+      snapshotDate: resolvedSnapshotDate,
+      vacationYearStartMonthDay: profile.vacationYearStartMonthDay
+    });
+    const paidAccount = findEmploymentBalanceAccountRecord({
+      state,
+      companyId: resolvedCompanyId,
+      employmentId: resolvedEmploymentId,
+      balanceTypeCode: profile.paidDaysBalanceTypeCode
+    });
+    const savedAccount = findEmploymentBalanceAccountRecord({
+      state,
+      companyId: resolvedCompanyId,
+      employmentId: resolvedEmploymentId,
+      balanceTypeCode: profile.savedDaysBalanceTypeCode
+    });
+    const paidSnapshot = paidAccount
+      ? buildSnapshot({
+          state,
+          account: paidAccount,
+          balanceType: requireBalanceType(state, resolvedCompanyId, { balanceTypeId: paidAccount.balanceTypeId }),
+          cutoffDate: resolvedSnapshotDate
+        })
+      : buildEmptyVacationSnapshot({
+          companyId: resolvedCompanyId,
+          balanceTypeCode: profile.paidDaysBalanceTypeCode,
+          employmentId: resolvedEmploymentId,
+          employeeId: employment?.employeeId || null,
+          cutoffDate: resolvedSnapshotDate
+        });
+    const savedSnapshot = savedAccount
+      ? buildSnapshot({
+          state,
+          account: savedAccount,
+          balanceType: requireBalanceType(state, resolvedCompanyId, { balanceTypeId: savedAccount.balanceTypeId }),
+          cutoffDate: resolvedSnapshotDate
+        })
+      : buildEmptyVacationSnapshot({
+          companyId: resolvedCompanyId,
+          balanceTypeCode: profile.savedDaysBalanceTypeCode,
+          employmentId: resolvedEmploymentId,
+          employeeId: employment?.employeeId || null,
+          cutoffDate: resolvedSnapshotDate
+        });
+
+    return {
+      companyId: resolvedCompanyId,
+      employeeId: employment?.employeeId || paidSnapshot.employeeId || savedSnapshot.employeeId || null,
+      employmentId: resolvedEmploymentId,
+      snapshotDate: resolvedSnapshotDate,
+      vacationBalanceProfileId: profile.vacationBalanceProfileId,
+      vacationBalanceProfileCode: profile.vacationBalanceProfileCode,
+      vacationYearStartDate: window.startsOn,
+      vacationYearEndDate: window.endsOn,
+      nextVacationYearStartDate: window.nextStartsOn,
+      paidDaysBalanceAccountId: paidAccount?.balanceAccountId || null,
+      savedDaysBalanceAccountId: savedAccount?.balanceAccountId || null,
+      paidDays: roundQuantity(paidSnapshot.currentQuantity || 0),
+      savedDays: roundQuantity(savedSnapshot.currentQuantity || 0),
+      totalDays: roundQuantity(Number(paidSnapshot.currentQuantity || 0) + Number(savedSnapshot.currentQuantity || 0)),
+      expiresAt: savedSnapshot.nextExpiryDate || null,
+      minimumPaidDaysToRetain: profile.minimumPaidDaysToRetain,
+      maxSavedDaysPerYear: profile.maxSavedDaysPerYear
+    };
+  }
+
+  function runVacationYearClose({
+    companyId,
+    snapshotDate,
+    employmentId = null,
+    vacationBalanceProfileCode = null,
+    idempotencyKey = null,
+    actorId = "system"
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const profile = selectVacationBalanceProfile(state, resolvedCompanyId, vacationBalanceProfileCode);
+    if (!profile) {
+      throw createError(404, "vacation_balance_profile_not_found", "Vacation balance profile was not found.");
+    }
+    const resolvedSnapshotDate = normalizeRequiredDate(snapshotDate, "vacation_year_close_date_required");
+    const window = resolveVacationYearWindow({
+      snapshotDate: resolvedSnapshotDate,
+      vacationYearStartMonthDay: profile.vacationYearStartMonthDay
+    });
+    if (resolvedSnapshotDate !== window.endsOn) {
+      throw createError(409, "vacation_year_close_date_invalid", "Vacation year close must run on the configured vacation year end date.");
+    }
+    const runKey = createRunKey({
+      companyId: resolvedCompanyId,
+      actionCode: "vacation_year_close",
+      idempotencyKey,
+      sourceDate: window.endsOn,
+      targetDate: window.nextStartsOn,
+      balanceTypeCode: profile.vacationBalanceProfileCode
+    });
+    const existingRunId = state.vacationYearCloseRunIdByKey.get(runKey);
+    if (existingRunId) {
+      return presentVacationYearCloseRun(state.vacationYearCloseRuns.get(existingRunId));
+    }
+
+    const candidateEmploymentIds = employmentId
+      ? [requireText(employmentId, "employment_id_required")]
+      : listVacationBalanceEmploymentIdsForProfile(state, resolvedCompanyId, profile);
+    const runId = crypto.randomUUID();
+    const processedItems = [];
+
+    for (const resolvedEmploymentId of candidateEmploymentIds) {
+      const employment = resolveEmploymentIdentity({
+        companyId: resolvedCompanyId,
+        employmentId: resolvedEmploymentId,
+        hrPlatform
+      });
+      const paidAccount = ensureEmploymentBalanceAccount({
+        state,
+        companyId: resolvedCompanyId,
+        employmentId: resolvedEmploymentId,
+        employeeId: employment?.employeeId || null,
+        balanceTypeCode: profile.paidDaysBalanceTypeCode,
+        hrPlatform,
+        actorId
+      });
+      const savedAccount = ensureEmploymentBalanceAccount({
+        state,
+        companyId: resolvedCompanyId,
+        employmentId: resolvedEmploymentId,
+        employeeId: employment?.employeeId || null,
+        balanceTypeCode: profile.savedDaysBalanceTypeCode,
+        hrPlatform,
+        actorId
+      });
+      if (!paidAccount && !savedAccount) {
+        continue;
+      }
+
+      let expiredSavedDays = 0;
+      if (savedAccount) {
+        const expiryRun = runBalanceExpiry({
+          companyId: resolvedCompanyId,
+          runDate: window.endsOn,
+          balanceAccountId: savedAccount.balanceAccountId,
+          idempotencyKey: `${runKey}:${resolvedEmploymentId}:saved-expiry`,
+          actorId
+        });
+        expiredSavedDays = roundQuantity(
+          expiryRun.processedItems
+            .filter((item) => item.balanceAccountId === savedAccount.balanceAccountId)
+            .reduce((sum, item) => sum + Number(item.expiredQuantity || 0), 0)
+        );
+      }
+
+      const paidSnapshot = paidAccount
+        ? buildSnapshot({
+            state,
+            account: paidAccount,
+            balanceType: requireBalanceType(state, resolvedCompanyId, { balanceTypeId: paidAccount.balanceTypeId }),
+            cutoffDate: window.endsOn
+          })
+        : buildEmptyVacationSnapshot({
+            companyId: resolvedCompanyId,
+            balanceTypeCode: profile.paidDaysBalanceTypeCode,
+            employmentId: resolvedEmploymentId,
+            employeeId: employment?.employeeId || null,
+            cutoffDate: window.endsOn
+          });
+      if (paidSnapshot.currentQuantity < 0) {
+        throw createError(409, "vacation_paid_balance_negative", "Vacation paid-day balance cannot be negative at year close.");
+      }
+
+      const remainingPaidDays = roundQuantity(paidSnapshot.currentQuantity || 0);
+      const saveablePaidDays = roundQuantity(Math.max(0, remainingPaidDays - Number(profile.minimumPaidDaysToRetain || 0)));
+      const carriedPaidDays = roundQuantity(Math.min(saveablePaidDays, profile.maxSavedDaysPerYear));
+      const forfeitedPaidDays = roundQuantity(Math.max(0, remainingPaidDays - carriedPaidDays));
+
+      if (paidAccount && remainingPaidDays > 0) {
+        recordBalanceTransaction({
+          companyId: resolvedCompanyId,
+          balanceAccountId: paidAccount.balanceAccountId,
+          effectiveDate: window.endsOn,
+          transactionTypeCode: "carry_forward_out",
+          quantityDelta: roundQuantity(-remainingPaidDays),
+          sourceDomainCode: "BALANCES",
+          sourceObjectType: "vacation_year_close_run",
+          sourceObjectId: runId,
+          sourceReference: "vacation_year_close_out",
+          idempotencyKey: `${runId}:${resolvedEmploymentId}:paid-close-out`,
+          explanation: `Closed remaining paid vacation days for vacation year ending ${window.endsOn}.`,
+          actorId
+        });
+      }
+      if (savedAccount && carriedPaidDays > 0) {
+        recordBalanceTransaction({
+          companyId: resolvedCompanyId,
+          balanceAccountId: savedAccount.balanceAccountId,
+          effectiveDate: window.nextStartsOn,
+          transactionTypeCode: "carry_forward_in",
+          quantityDelta: carriedPaidDays,
+          sourceDomainCode: "BALANCES",
+          sourceObjectType: "vacation_year_close_run",
+          sourceObjectId: runId,
+          sourceReference: "vacation_year_close_in",
+          idempotencyKey: `${runId}:${resolvedEmploymentId}:saved-carry-in`,
+          explanation: `Carried saved vacation days into vacation year starting ${window.nextStartsOn}.`,
+          actorId
+        });
+      }
+
+      const vacationBalance = getVacationBalance({
+        companyId: resolvedCompanyId,
+        employmentId: resolvedEmploymentId,
+        snapshotDate: window.nextStartsOn,
+        vacationBalanceProfileCode: profile.vacationBalanceProfileCode
+      });
+      processedItems.push({
+        employmentId: resolvedEmploymentId,
+        employeeId: employment?.employeeId || vacationBalance?.employeeId || null,
+        paidDaysBalanceAccountId: paidAccount?.balanceAccountId || null,
+        savedDaysBalanceAccountId: savedAccount?.balanceAccountId || null,
+        vacationYearStartDate: window.startsOn,
+        vacationYearEndDate: window.endsOn,
+        minimumPaidDaysToRetain: profile.minimumPaidDaysToRetain,
+        carriedPaidDays,
+        forfeitedPaidDays,
+        expiredSavedDays,
+        savedDaysAfterClose: vacationBalance?.savedDays || 0
+      });
+    }
+
+    const run = freezeRecord({
+      vacationYearCloseRunId: runId,
+      companyId: resolvedCompanyId,
+      vacationBalanceProfileId: profile.vacationBalanceProfileId,
+      vacationBalanceProfileCode: profile.vacationBalanceProfileCode,
+      snapshotDate: resolvedSnapshotDate,
+      vacationYearStartDate: window.startsOn,
+      vacationYearEndDate: window.endsOn,
+      nextVacationYearStartDate: window.nextStartsOn,
+      processedCount: processedItems.length,
+      processedItems,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      idempotencyKey: normalizeOptionalText(idempotencyKey)
+    });
+    state.vacationYearCloseRuns.set(run.vacationYearCloseRunId, run);
+    appendToIndex(state.vacationYearCloseRunIdsByCompany, resolvedCompanyId, run.vacationYearCloseRunId);
+    state.vacationYearCloseRunIdByKey.set(runKey, run.vacationYearCloseRunId);
+    pushAudit(state, clock, {
+      companyId: resolvedCompanyId,
+      actorId: run.createdByActorId,
+      action: "balances.vacation_year_close.executed",
+      entityType: "vacation_year_close_run",
+      entityId: run.vacationYearCloseRunId,
+      explanation: `Executed vacation year close for ${processedItems.length} employment balance sets.`
+    });
+    return presentVacationYearCloseRun(run);
+  }
+
+  function listVacationYearCloseRuns({ companyId } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    return (state.vacationYearCloseRunIdsByCompany.get(resolvedCompanyId) || [])
+      .map((runId) => state.vacationYearCloseRuns.get(runId))
+      .filter(Boolean)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(presentVacationYearCloseRun);
+  }
 }
 
 function presentBalanceType(record) {
@@ -683,6 +1054,14 @@ function presentExpiryRun(record) {
   return copy(record);
 }
 
+function presentVacationBalanceProfile(record) {
+  return copy(record);
+}
+
+function presentVacationYearCloseRun(record) {
+  return copy(record);
+}
+
 function requireBalanceType(state, companyId, { balanceTypeId = null, balanceTypeCode = null } = {}) {
   const resolvedCompanyId = requireText(companyId, "company_id_required");
   let record = null;
@@ -703,6 +1082,21 @@ function requireBalanceAccount(state, companyId, balanceAccountId) {
   const record = state.balanceAccounts.get(requireText(balanceAccountId, "balance_account_id_required")) || null;
   if (!record || record.companyId !== resolvedCompanyId) {
     throw createError(404, "balance_account_not_found", "Balance account was not found.");
+  }
+  return record;
+}
+
+function requireVacationBalanceProfile(state, companyId, { vacationBalanceProfileId = null, vacationBalanceProfileCode = null } = {}) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  let record = null;
+  if (vacationBalanceProfileId) {
+    record = state.vacationBalanceProfiles.get(requireText(vacationBalanceProfileId, "vacation_balance_profile_id_required")) || null;
+  } else if (vacationBalanceProfileCode) {
+    const recordId = getIndexValue(state.vacationBalanceProfileIdByCode, resolvedCompanyId, normalizeCode(vacationBalanceProfileCode, "vacation_balance_profile_code_required"));
+    record = recordId ? state.vacationBalanceProfiles.get(recordId) : null;
+  }
+  if (!record || record.companyId !== resolvedCompanyId) {
+    throw createError(404, "vacation_balance_profile_not_found", "Vacation balance profile was not found.");
   }
   return record;
 }
@@ -849,6 +1243,144 @@ function resolveLotExpiryDate(effectiveDate, balanceType) {
   }
   const baseYear = Number(effectiveDate.slice(0, 4)) + Number(balanceType.expiryYearOffset || 0);
   return `${String(baseYear).padStart(4, "0")}-${monthDay}`;
+}
+
+function normalizeMonthDay(value, code) {
+  const resolved = requireText(value, code);
+  if (!/^\d{2}-\d{2}$/.test(resolved)) {
+    throw createError(400, code, `${code} must be MM-DD.`);
+  }
+  return resolved;
+}
+
+function resolveVacationYearWindow({ snapshotDate, vacationYearStartMonthDay }) {
+  const resolvedSnapshotDate = normalizeRequiredDate(snapshotDate, "vacation_balance_snapshot_date_invalid");
+  const resolvedStartMonthDay = normalizeMonthDay(vacationYearStartMonthDay, "vacation_year_start_month_day_invalid");
+  const year = Number(resolvedSnapshotDate.slice(0, 4));
+  const currentYearStart = `${String(year).padStart(4, "0")}-${resolvedStartMonthDay}`;
+  const startsOn = resolvedSnapshotDate >= currentYearStart ? currentYearStart : `${String(year - 1).padStart(4, "0")}-${resolvedStartMonthDay}`;
+  const nextStartsOn = `${String(Number(startsOn.slice(0, 4)) + 1).padStart(4, "0")}-${resolvedStartMonthDay}`;
+  const endsOn = addDays(nextStartsOn, -1);
+  return {
+    startsOn,
+    endsOn,
+    nextStartsOn
+  };
+}
+
+function selectVacationBalanceProfile(state, companyId, vacationBalanceProfileCode = null) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  if (vacationBalanceProfileCode) {
+    return requireVacationBalanceProfile(state, resolvedCompanyId, { vacationBalanceProfileCode });
+  }
+  return (state.vacationBalanceProfileIdsByCompany.get(resolvedCompanyId) || [])
+    .map((profileId) => state.vacationBalanceProfiles.get(profileId))
+    .filter(Boolean)
+    .filter((profile) => profile.active)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))[0] || null;
+}
+
+function findEmploymentBalanceAccountRecord({ state, companyId, employmentId, balanceTypeCode }) {
+  const resolvedCompanyId = requireText(companyId, "company_id_required");
+  const resolvedEmploymentId = requireText(employmentId, "employment_id_required");
+  const resolvedBalanceTypeCode = resolveBalanceTypeCode(balanceTypeCode);
+  return (state.balanceAccountIdsByCompany.get(resolvedCompanyId) || [])
+    .map((balanceAccountId) => state.balanceAccounts.get(balanceAccountId))
+    .filter(Boolean)
+    .find(
+      (record) =>
+        record.ownerTypeCode === "employment" &&
+        record.employmentId === resolvedEmploymentId &&
+        record.balanceTypeCode === resolvedBalanceTypeCode &&
+        record.status === "open"
+    ) || null;
+}
+
+function resolveEmploymentIdentity({ companyId, employmentId, hrPlatform = null }) {
+  if (!hrPlatform || typeof hrPlatform.listEmployees !== "function" || typeof hrPlatform.listEmployments !== "function") {
+    return null;
+  }
+  for (const employee of hrPlatform.listEmployees({ companyId })) {
+    const employment =
+      hrPlatform
+        .listEmployments({
+          companyId,
+          employeeId: employee.employeeId
+        })
+        .find((candidate) => candidate.employmentId === employmentId) || null;
+    if (employment) {
+      return employment;
+    }
+  }
+  return null;
+}
+
+function ensureEmploymentBalanceAccount({
+  state,
+  companyId,
+  employmentId,
+  employeeId = null,
+  balanceTypeCode,
+  hrPlatform = null,
+  actorId = "system"
+}) {
+  const existing = findEmploymentBalanceAccountRecord({
+    state,
+    companyId,
+    employmentId,
+    balanceTypeCode
+  });
+  if (existing) {
+    return existing;
+  }
+  const employment = employeeId
+    ? { employeeId }
+    : resolveEmploymentIdentity({
+        companyId,
+        employmentId,
+        hrPlatform
+      });
+  if (!employment?.employeeId) {
+    return null;
+  }
+  const openedAccount = openBalanceAccount({
+    companyId,
+    balanceTypeCode,
+    ownerTypeCode: "employment",
+    employeeId: employment.employeeId,
+    employmentId,
+    actorId
+  });
+  return requireBalanceAccount(state, companyId, openedAccount.balanceAccountId);
+}
+
+function buildEmptyVacationSnapshot({ companyId, balanceTypeCode, employmentId, employeeId, cutoffDate }) {
+  return {
+    balanceAccountId: null,
+    companyId,
+    balanceTypeCode,
+    unitCode: "days",
+    ownerTypeCode: "employment",
+    employeeId,
+    employmentId,
+    cutoffDate,
+    currentQuantity: 0,
+    transactionCount: 0,
+    nextExpiryDate: null
+  };
+}
+
+function listVacationBalanceEmploymentIdsForProfile(state, companyId, profile) {
+  const ids = new Set();
+  for (const record of (state.balanceAccountIdsByCompany.get(companyId) || []).map((balanceAccountId) => state.balanceAccounts.get(balanceAccountId)).filter(Boolean)) {
+    if (record.ownerTypeCode !== "employment" || !record.employmentId) {
+      continue;
+    }
+    if (record.balanceTypeCode === profile.paidDaysBalanceTypeCode || record.balanceTypeCode === profile.savedDaysBalanceTypeCode) {
+      ids.add(record.employmentId);
+    }
+  }
+  return [...ids].sort();
 }
 
 function seedDemoState(state, clock) {

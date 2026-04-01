@@ -70,6 +70,85 @@ export async function tryHandlePhase14BalancesRoutes({ req, res, url, path, plat
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/balances/vacation-profiles") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "vacation_balance_profile",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listVacationBalanceProfiles({
+        companyId,
+        active: optionalText(url.searchParams.get("active"))
+      })
+    });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/balances/vacation-profiles") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "vacation_balance_profile",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createVacationBalanceProfile({
+        companyId,
+        vacationBalanceProfileCode: body.vacationBalanceProfileCode,
+        label: body.label,
+        paidDaysBalanceTypeCode: body.paidDaysBalanceTypeCode,
+        savedDaysBalanceTypeCode: body.savedDaysBalanceTypeCode,
+        vacationYearStartMonthDay: body.vacationYearStartMonthDay,
+        minimumPaidDaysToRetain: body.minimumPaidDaysToRetain ?? 20,
+        maxSavedDaysPerYear: body.maxSavedDaysPerYear ?? 5,
+        active: body.active !== false,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  const vacationProfileMatch = matchPath(path, "/v1/balances/vacation-profiles/:vacationBalanceProfileId");
+  if (req.method === "GET" && vacationProfileMatch) {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "vacation_balance_profile",
+      objectId: vacationProfileMatch.vacationBalanceProfileId,
+      scopeCode: "balances"
+    });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.getVacationBalanceProfile({
+        companyId,
+        vacationBalanceProfileId: vacationProfileMatch.vacationBalanceProfileId
+      })
+    );
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/balances/accounts") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
@@ -234,6 +313,33 @@ export async function tryHandlePhase14BalancesRoutes({ req, res, url, path, plat
     return true;
   }
 
+  if (req.method === "GET" && path === "/v1/balances/vacation-balances") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const employmentId = requireText(url.searchParams.get("employmentId"), "employment_id_required", "employmentId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "vacation_balance",
+      objectId: employmentId,
+      scopeCode: "balances"
+    });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(
+      res,
+      200,
+      platform.getVacationBalance({
+        companyId,
+        employmentId,
+        snapshotDate: optionalText(url.searchParams.get("snapshotDate")),
+        vacationBalanceProfileCode: optionalText(url.searchParams.get("vacationBalanceProfileCode"))
+      })
+    );
+    return true;
+  }
+
   if (req.method === "GET" && path === "/v1/balances/carry-forwards") {
     const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
     const sessionToken = readSessionToken(req);
@@ -273,6 +379,51 @@ export async function tryHandlePhase14BalancesRoutes({ req, res, url, path, plat
         targetDate: body.targetDate,
         balanceTypeCode: body.balanceTypeCode ?? null,
         balanceAccountId: body.balanceAccountId ?? null,
+        idempotencyKey: body.idempotencyKey ?? null,
+        actorId: principal.userId
+      })
+    );
+    return true;
+  }
+
+  if (req.method === "GET" && path === "/v1/balances/vacation-year-closes") {
+    const companyId = requireText(url.searchParams.get("companyId"), "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.read",
+      objectType: "vacation_year_close_run",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    assertPayrollOperationsReadAccess({ principal });
+    writeJson(res, 200, { items: platform.listVacationYearCloseRuns({ companyId }) });
+    return true;
+  }
+
+  if (req.method === "POST" && path === "/v1/balances/vacation-year-closes") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken,
+      companyId,
+      action: "company.manage",
+      objectType: "vacation_year_close_run",
+      objectId: companyId,
+      scopeCode: "balances"
+    });
+    writeJson(
+      res,
+      201,
+      platform.runVacationYearClose({
+        companyId,
+        snapshotDate: body.snapshotDate,
+        employmentId: body.employmentId ?? null,
+        vacationBalanceProfileCode: body.vacationBalanceProfileCode ?? null,
         idempotencyKey: body.idempotencyKey ?? null,
         actorId: principal.userId
       })

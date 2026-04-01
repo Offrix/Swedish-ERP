@@ -676,6 +676,12 @@ export function createTimeEngine({
       cutoffDate: resolvedCutoffDate,
       balancesPlatform
     });
+    const vacationBalance = resolveVacationBalance({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      cutoffDate: resolvedCutoffDate,
+      balancesPlatform
+    });
     const agreementOverlay =
       collectiveAgreementsPlatform && typeof collectiveAgreementsPlatform.evaluateAgreementOverlay === "function"
         ? collectiveAgreementsPlatform.evaluateAgreementOverlay({
@@ -701,6 +707,7 @@ export function createTimeEngine({
         : null,
       timeBalances,
       balanceSnapshots,
+      vacationBalance,
       agreementOverlay,
       approvedTimeSets,
       activeApprovedTimeSet:
@@ -1991,6 +1998,17 @@ function resolveExternalBalanceSnapshots({ companyId, employeeId, employmentId, 
             })
           : null
     }));
+}
+
+function resolveVacationBalance({ companyId, employmentId, cutoffDate, balancesPlatform = null }) {
+  if (!balancesPlatform || typeof balancesPlatform.getVacationBalance !== "function") {
+    return null;
+  }
+  return balancesPlatform.getVacationBalance({
+    companyId,
+    employmentId,
+    snapshotDate: cutoffDate
+  });
 }
 
 function weekdayFromDate(value) {

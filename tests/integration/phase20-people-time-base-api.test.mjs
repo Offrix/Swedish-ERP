@@ -38,6 +38,51 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
         }
       });
     }
+    await requestJson(baseUrl, "/v1/balances/types", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_PAID_DAYS",
+        label: "Vacation paid days",
+        unitCode: "days",
+        negativeAllowed: false,
+        carryForwardModeCode: "none",
+        expiryModeCode: "none"
+      }
+    });
+    await requestJson(baseUrl, "/v1/balances/types", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_SAVED_DAYS",
+        label: "Vacation saved days",
+        unitCode: "days",
+        negativeAllowed: false,
+        carryForwardModeCode: "none",
+        expiryModeCode: "fixed_date",
+        expiryMonthDay: "03-31",
+        expiryYearOffset: 5
+      }
+    });
+    await requestJson(baseUrl, "/v1/balances/vacation-profiles", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        vacationBalanceProfileCode: "SEMESTERLAGEN",
+        label: "Semesterlagen",
+        paidDaysBalanceTypeCode: "VACATION_PAID_DAYS",
+        savedDaysBalanceTypeCode: "VACATION_SAVED_DAYS",
+        vacationYearStartMonthDay: "04-01",
+        minimumPaidDaysToRetain: 20,
+        maxSavedDaysPerYear: 5
+      }
+    });
 
     const employee = await requestJson(baseUrl, "/v1/hr/employees", {
       method: "POST",
@@ -139,6 +184,32 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
         employmentId: employment.employmentId,
         managerEmploymentId: managerEmployment.employmentId,
         validFrom: "2026-01-01"
+      }
+    });
+    const vacationPaidAccount = await requestJson(baseUrl, "/v1/balances/accounts", {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        balanceTypeCode: "VACATION_PAID_DAYS",
+        ownerTypeCode: "employment",
+        employeeId: employee.employeeId,
+        employmentId: employment.employmentId
+      }
+    });
+    await requestJson(baseUrl, `/v1/balances/accounts/${vacationPaidAccount.balanceAccountId}/transactions`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        effectiveDate: "2025-04-01",
+        transactionTypeCode: "baseline",
+        quantityDelta: 24,
+        sourceDomainCode: "PAYROLL_MIGRATION",
+        sourceObjectType: "migration_batch",
+        sourceObjectId: "vacation-days-baseline"
       }
     });
 
@@ -296,6 +367,8 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
     assert.equal(timeBase.approvedTimeEntries.length, 1);
     assert.equal(timeBase.agreementOverlay.agreementVersionCode, "ALMEGA_SERVICE_2026_01");
     assert.equal(timeBase.timeBalances.balances.overtime_minutes, 30);
+    assert.equal(timeBase.vacationBalance.paidDays, 24);
+    assert.equal(timeBase.vacationBalance.savedDays, 0);
     assert.equal(
       timeBase.balanceSnapshots.some(
         (candidate) =>

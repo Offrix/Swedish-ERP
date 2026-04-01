@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../packages/domain-time/src/index.mjs";
+import { createBalancesPlatform } from "../../packages/domain-balances/src/index.mjs";
 import { PAYROLL_STEP_DEFINITIONS, createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -131,6 +132,86 @@ test("Phase 8.1 payroll core keeps retro corrections traceable and supports fina
   );
 });
 
+test("Phase 10.3 payroll final pay derives remaining vacation days from balances truth when explicit days are absent", () => {
+  const { payrollPlatform, balancesPlatform, employee, employment } = createPayrollFixture();
+  const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+
+  balancesPlatform.createBalanceType({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_PAID_DAYS",
+    label: "Vacation paid days",
+    unitCode: "days",
+    negativeAllowed: false,
+    carryForwardModeCode: "none",
+    expiryModeCode: "none",
+    actorId: "unit-test"
+  });
+  balancesPlatform.createBalanceType({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_SAVED_DAYS",
+    label: "Vacation saved days",
+    unitCode: "days",
+    negativeAllowed: false,
+    carryForwardModeCode: "none",
+    expiryModeCode: "fixed_date",
+    expiryMonthDay: "03-31",
+    expiryYearOffset: 5,
+    actorId: "unit-test"
+  });
+  balancesPlatform.createVacationBalanceProfile({
+    companyId: COMPANY_ID,
+    vacationBalanceProfileCode: "SEMESTERLAGEN",
+    label: "Semesterlagen",
+    paidDaysBalanceTypeCode: "VACATION_PAID_DAYS",
+    savedDaysBalanceTypeCode: "VACATION_SAVED_DAYS",
+    vacationYearStartMonthDay: "04-01",
+    minimumPaidDaysToRetain: 20,
+    maxSavedDaysPerYear: 5,
+    actorId: "unit-test"
+  });
+  const vacationPaidAccount = balancesPlatform.openBalanceAccount({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_PAID_DAYS",
+    ownerTypeCode: "employment",
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    actorId: "unit-test"
+  });
+  balancesPlatform.recordBalanceTransaction({
+    companyId: COMPANY_ID,
+    balanceAccountId: vacationPaidAccount.balanceAccountId,
+    effectiveDate: "2025-04-01",
+    transactionTypeCode: "baseline",
+    quantityDelta: 4,
+    sourceDomainCode: "PAYROLL_MIGRATION",
+    sourceObjectType: "migration_batch",
+    sourceObjectId: "vacation-days-baseline",
+    actorId: "unit-test"
+  });
+
+  const finalRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202604",
+    runType: "final",
+    finalPayAdjustments: [
+      {
+        employmentId: employment.employmentId,
+        terminationDate: "2026-04-12",
+        remainingVacationSettlementAmount: 4800,
+        note: "Final pay settlement."
+      }
+    ],
+    actorId: "unit-test"
+  });
+
+  const vacationPayLine = finalRun.lines.find((line) => line.payItemCode === "VACATION_PAY");
+  assert.ok(vacationPayLine);
+  assert.equal(vacationPayLine.quantity, 4);
+  assert.equal(vacationPayLine.amount, 4800);
+  assert.equal(finalRun.payrollInputSnapshot.sourceSnapshot[employment.employmentId].vacationBalance.totalDays, 4);
+});
+
 test("Phase 8.1 payroll auto-applies the temporary youth employer contribution reduction from April 2026", () => {
   const { payrollPlatform, employment } = createPayrollFixture({
     givenName: "Ylva",
@@ -176,9 +257,14 @@ function createPayrollFixture({
   const hrPlatform = createHrPlatform({
     clock: () => fixedNow
   });
-  const timePlatform = createTimePlatform({
+  const balancesPlatform = createBalancesPlatform({
     clock: () => fixedNow,
     hrPlatform
+  });
+  const timePlatform = createTimePlatform({
+    clock: () => fixedNow,
+    hrPlatform,
+    balancesPlatform
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
@@ -228,6 +314,8 @@ function createPayrollFixture({
 
   return {
     payrollPlatform,
+    balancesPlatform,
+    timePlatform,
     employee,
     employment
   };

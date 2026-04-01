@@ -1765,7 +1765,10 @@ export function createPayrollEngine({
       warnings.push(...result.warnings);
       sourceSnapshot[employment.employmentId] = result.sourceSnapshot;
       agreementSnapshots.push(result.sourceSnapshot.agreementOverlay || null);
-      balanceSnapshots.push(result.sourceSnapshot.externalBalanceSnapshots || []);
+      balanceSnapshots.push({
+        externalBalanceSnapshots: result.sourceSnapshot.externalBalanceSnapshots || [],
+        vacationBalance: result.sourceSnapshot.vacationBalance || null
+      });
     }
 
     run.sourceSnapshotHash = buildSnapshotHash(sourceSnapshot);
@@ -4932,6 +4935,7 @@ function calculateEmploymentRun({
     approvedTimeEntriesOutsideSet: payrollInputPeriod?.approvedTimeEntriesOutsideSet || [],
     approvedLeaveEntriesWithoutDecision: payrollInputPeriod?.approvedLeaveEntriesWithoutDecision || [],
     externalBalanceSnapshots: employmentTimeBase?.balanceSnapshots || [],
+    vacationBalance: employmentTimeBase?.vacationBalance || null,
     agreementOverlay,
     executionBoundary: copy(executionBoundary),
     benefitEvents: (benefitPayloadBundle.events || []).map((event) => ({
@@ -4996,7 +5000,10 @@ function calculateEmploymentRun({
     approvedTimeSetStatus: payrollInputPeriod?.approvedTimeSet?.status || null,
     absenceDecisionCount: (payrollInputPeriod?.approvedAbsenceDecisions || []).length,
     balanceSnapshotHash: buildSnapshotHash(balances),
-    externalBalanceSnapshotHash: buildSnapshotHash(employmentTimeBase?.balanceSnapshots || []),
+    externalBalanceSnapshotHash: buildSnapshotHash({
+      balanceSnapshots: employmentTimeBase?.balanceSnapshots || [],
+      vacationBalance: employmentTimeBase?.vacationBalance || null
+    }),
     agreementSnapshotHash: buildSnapshotHash(agreementOverlay)
   });
 
@@ -5026,6 +5033,7 @@ function calculateEmploymentRun({
     companyId: employment.companyId,
     employment,
     finalPayAdjustments,
+    employmentTimeBase,
     state
   });
   lines.push(...variableLines);
@@ -5602,7 +5610,7 @@ function createRetroCorrectionLines({ companyId, employment, retroAdjustments, s
   return lines;
 }
 
-function createFinalPayLines({ companyId, employment, finalPayAdjustments, state }) {
+function createFinalPayLines({ companyId, employment, finalPayAdjustments, employmentTimeBase = null, state }) {
   const grossAdditions = [];
   const grossDeductions = [];
   const netDeductions = [];
@@ -5624,11 +5632,15 @@ function createFinalPayLines({ companyId, employment, finalPayAdjustments, state
     }
     if (adjustment.remainingVacationSettlementAmount != null) {
       const payItem = requirePayItemByCode(state, companyId, "VACATION_PAY");
+      const resolvedVacationDays = resolveFinalPayVacationDays({
+        adjustment,
+        employmentTimeBase
+      });
       grossAdditions.push(
         createPayLine({
           payItem,
           employment,
-          quantity: adjustment.remainingVacationDays || 1,
+          quantity: resolvedVacationDays,
           amount: adjustment.remainingVacationSettlementAmount,
           sourceType: "final_pay",
           sourceId: adjustment.terminationDate,
@@ -5657,6 +5669,18 @@ function createFinalPayLines({ companyId, employment, finalPayAdjustments, state
     }
   }
   return { grossAdditions, grossDeductions, netDeductions };
+}
+
+function resolveFinalPayVacationDays({ adjustment, employmentTimeBase = null } = {}) {
+  const explicitDays = adjustment?.remainingVacationDays;
+  if (explicitDays != null) {
+    return explicitDays;
+  }
+  const balanceDays = employmentTimeBase?.vacationBalance?.totalDays;
+  if (balanceDays != null && Number(balanceDays) > 0) {
+    return roundQuantity(balanceDays);
+  }
+  return 1;
 }
 
 function createStepLinesFromManualInputs({ processingStep, employment, inputs, state }) {
