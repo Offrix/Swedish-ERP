@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAccountingMethodEngine } from "../../packages/domain-accounting-method/src/index.mjs";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
+import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 
 test("Step 7 accounting method eligibility blocks high turnover and excluded entities", () => {
   const engine = createAccountingMethodEngine({
@@ -189,6 +190,11 @@ test("Step 7 accounting method exposes executable directives for AR/AP recogniti
     accountingDate: "2027-02-10",
     eventCode: "AP_PAYMENT_SETTLEMENT"
   });
+  const cashYearEndDirective = engine.resolveExecutionDirective({
+    companyId: "company_policy_runtime",
+    accountingDate: "2027-12-31",
+    eventCode: "YEAR_END_CATCH_UP"
+  });
 
   assert.equal(invoiceMethodPolicy.methodCode, "FAKTURERINGSMETOD");
   assert.equal(invoiceMethodPolicy.arInvoiceRecognitionTrigger, "AR_INVOICE_ISSUE");
@@ -209,21 +215,35 @@ test("Step 7 accounting method exposes executable directives for AR/AP recogniti
   assert.equal(cashPaymentDirective.ledgerOperationalPostingRequired, true);
   assert.equal(cashApDirective.primaryRecognitionRequired, true);
   assert.equal(cashApDirective.vatDecisionRequired, true);
+  assert.equal(cashYearEndDirective.primaryRecognitionRequired, true);
+  assert.equal(cashYearEndDirective.vatDecisionRequired, true);
+  assert.equal(cashYearEndDirective.ledgerOperationalPostingRequired, true);
 });
 
 test("Step 7 year-end catch-up is idempotent and only allowed for cash method", () => {
   let ledger = null;
+  let vat = null;
   const engine = createAccountingMethodEngine({
     seedDemo: false,
     clock: () => new Date("2027-12-31T15:00:00Z"),
-    getLedgerPlatform: () => ledger
+    getLedgerPlatform: () => ledger,
+    getVatPlatform: () => vat
   });
   ledger = createLedgerPlatform({
     seedDemo: false,
     clock: () => new Date("2027-12-31T15:00:00Z"),
     accountingMethodPlatform: engine
   });
+  vat = createVatPlatform({
+    seedDemo: false,
+    clock: () => new Date("2027-12-31T15:00:00Z"),
+    ledgerPlatform: ledger
+  });
   ledger.installLedgerCatalog({
+    companyId: "company_catchup",
+    actorId: "tester"
+  });
+  vat.installVatCatalog({
     companyId: "company_catchup",
     actorId: "tester"
   });
@@ -263,6 +283,16 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
         openItemAccountNumber: "1210",
         unpaidAmount: 1250,
         recognitionDate: "2027-12-15",
+        vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+          supply_type: "sale",
+          goods_or_services: "goods",
+          invoice_date: "2027-12-15",
+          line_amount_ex_vat: 1000,
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          report_box_code: "05"
+        }),
         postingLines: [
           { accountNumber: "3010", creditAmount: 1000 },
           { accountNumber: "2610", creditAmount: 250 }
@@ -274,6 +304,16 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
         openItemAccountNumber: "2410",
         unpaidAmount: 400,
         recognitionDate: "2027-12-20",
+        vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+          supply_type: "purchase",
+          goods_or_services: "services",
+          invoice_date: "2027-12-20",
+          line_amount_ex_vat: 320,
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_PURCHASE_25",
+          report_box_code: "48"
+        }),
         postingLines: [
           { accountNumber: "5410", debitAmount: 320 },
           { accountNumber: "2640", debitAmount: 80 }
@@ -292,6 +332,16 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
         openItemAccountNumber: "1210",
         unpaidAmount: 1250,
         recognitionDate: "2027-12-15",
+        vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+          supply_type: "sale",
+          goods_or_services: "goods",
+          invoice_date: "2027-12-15",
+          line_amount_ex_vat: 1000,
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          report_box_code: "05"
+        }),
         postingLines: [
           { accountNumber: "3010", creditAmount: 1000 },
           { accountNumber: "2610", creditAmount: 250 }
@@ -303,6 +353,16 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
         openItemAccountNumber: "2410",
         unpaidAmount: 400,
         recognitionDate: "2027-12-20",
+        vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+          supply_type: "purchase",
+          goods_or_services: "services",
+          invoice_date: "2027-12-20",
+          line_amount_ex_vat: 320,
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_PURCHASE_25",
+          report_box_code: "48"
+        }),
         postingLines: [
           { accountNumber: "5410", debitAmount: 320 },
           { accountNumber: "2640", debitAmount: 80 }
@@ -310,6 +370,11 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
       }
     ],
     actorId: "tester"
+  });
+  const decemberBasisAfterCatchUp = vat.getVatDeclarationBasis({
+    companyId: "company_catchup",
+    fromDate: "2027-12-01",
+    toDate: "2027-12-31"
   });
   const catchUpJournal = ledger.getJournalEntry({
     companyId: "company_catchup",
@@ -323,9 +388,17 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
     approvedByActorId: "finance-approver",
     approvedByRoleCode: "finance_manager"
   });
+  const decemberBasisAfterReversal = vat.getVatDeclarationBasis({
+    companyId: "company_catchup",
+    fromDate: "2027-12-01",
+    toDate: "2027-12-31"
+  });
 
   assert.equal(firstRun.yearEndCatchUpRunId, replayRun.yearEndCatchUpRunId);
   assert.equal(typeof firstRun.journalEntryId, "string");
+  assert.equal(firstRun.vatDecisionIds.length, 2);
+  assert.equal(firstRun.items[0].vatDecisionIds.length, 1);
+  assert.equal(firstRun.items[1].vatDecisionIds.length, 1);
   assert.equal(catchUpJournal.sourceType, "YEAR_END_TRANSFER");
   assert.equal(catchUpJournal.lines.some((line) => line.accountNumber === "1210" && Number(line.debitAmount) === 1250), true);
   assert.equal(catchUpJournal.lines.some((line) => line.accountNumber === "2410" && Number(line.creditAmount) === 400), true);
@@ -333,8 +406,25 @@ test("Step 7 year-end catch-up is idempotent and only allowed for cash method", 
     receivablesAmount: 1250,
     payablesAmount: 400
   });
+  assert.equal(decemberBasisAfterCatchUp.decisionCount, 2);
+  assert.equal(decemberBasisAfterCatchUp.declarationEligibleDecisionCount, 2);
+  assert.deepEqual(decemberBasisAfterCatchUp.declarationBoxSummary, [
+    { boxCode: "05", amount: 1000, amountType: "taxable_base" },
+    { boxCode: "10", amount: 250, amountType: "output_vat" },
+    { boxCode: "48", amount: 80, amountType: "input_vat" }
+  ]);
   assert.equal(reversedRun.status, "reversed");
   assert.equal(typeof reversedRun.reversalJournalEntryId, "string");
+  assert.equal(reversedRun.reversalVatDecisionIds.length, 2);
+  assert.equal(reversedRun.items[0].reversalVatDecisionIds.length, 1);
+  assert.equal(reversedRun.items[1].reversalVatDecisionIds.length, 1);
+  assert.equal(decemberBasisAfterReversal.decisionCount, 4);
+  assert.equal(decemberBasisAfterReversal.declarationEligibleDecisionCount, 4);
+  assert.deepEqual(decemberBasisAfterReversal.declarationBoxSummary, [
+    { boxCode: "05", amount: 0, amountType: "taxable_base" },
+    { boxCode: "10", amount: 0, amountType: "output_vat" },
+    { boxCode: "48", amount: 0, amountType: "input_vat" }
+  ]);
 });
 
 test("Step 7 accounting method requires explicit fiscal-year boundary unless onboarding override is used", () => {
@@ -427,3 +517,43 @@ test("Step 7 accounting method supersedes older unresolved change requests for t
   assert.equal(superseded.supersededByMethodChangeRequestId, replacementRequest.methodChangeRequestId);
   assert.equal(latest.status, "submitted");
 });
+
+function buildYearEndCatchUpVatTransactionLine(overrides = {}) {
+  return {
+    seller_country: "SE",
+    seller_vat_registration_country: "SE",
+    buyer_country: "SE",
+    buyer_type: "business",
+    buyer_vat_no: "SE556677889901",
+    buyer_is_taxable_person: true,
+    buyer_vat_number: "SE556677889901",
+    buyer_vat_number_status: "valid",
+    supply_type: "sale",
+    goods_or_services: "goods",
+    supply_subtype: "standard",
+    property_related_flag: false,
+    construction_service_flag: false,
+    transport_end_country: "SE",
+    import_flag: false,
+    export_flag: false,
+    reverse_charge_flag: false,
+    oss_flag: false,
+    ioss_flag: false,
+    currency: "SEK",
+    tax_date: "2027-12-31",
+    invoice_date: "2027-12-31",
+    delivery_date: "2027-12-31",
+    prepayment_date: null,
+    line_amount_ex_vat: 1000,
+    line_discount: 0,
+    line_quantity: 1,
+    line_uom: "ea",
+    vat_rate: 25,
+    tax_rate_candidate: 25,
+    vat_code_candidate: "VAT_SE_DOMESTIC_25",
+    exemption_reason: "not_applicable",
+    invoice_text_code: "domestic_standard",
+    report_box_code: "05",
+    ...overrides
+  };
+}

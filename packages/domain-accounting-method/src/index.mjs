@@ -83,7 +83,8 @@ export function createAccountingMethodEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   ruleRegistry = null,
-  getLedgerPlatform = null
+  getLedgerPlatform = null,
+  getVatPlatform = null
 } = {}) {
   const rules = ruleRegistry || createRulePackRegistry({
     clock,
@@ -668,6 +669,11 @@ export function createAccountingMethodEngine({
       fiscalYearEndDate: resolvedFiscalYearEndDate,
       capturedItems
     });
+    const sourceId = buildYearEndCatchUpSourceId({
+      companyId: resolvedCompanyId,
+      fiscalYearEndDate: resolvedFiscalYearEndDate,
+      snapshotHash
+    });
     const dedupeKey = `${resolvedCompanyId}:${resolvedFiscalYearEndDate}:${snapshotHash}`;
     const existingRunId = state.yearEndCatchUpRunIdByDedupeKey.get(dedupeKey);
     if (existingRunId) {
@@ -685,6 +691,15 @@ export function createAccountingMethodEngine({
       },
       { receivablesAmount: 0, payablesAmount: 0 }
     );
+    const catchUpVatDecisions = materializeYearEndCatchUpVatDecisions({
+      getVatPlatform,
+      companyId: resolvedCompanyId,
+      fiscalYearEndDate: resolvedFiscalYearEndDate,
+      sourceType: "YEAR_END_TRANSFER",
+      sourceId,
+      items: capturedItems,
+      actorId: resolvedActorId
+    });
     const journalEntryId =
       capturedItems.length === 0
         ? null
@@ -693,11 +708,20 @@ export function createAccountingMethodEngine({
           companyId: resolvedCompanyId,
           fiscalYearEndDate: resolvedFiscalYearEndDate,
           snapshotHash,
+          sourceId,
           activeMethod,
           actorId: resolvedActorId,
           items: capturedItems,
           rulePack
         });
+    if (journalEntryId && catchUpVatDecisions.vatDecisionIds.length > 0) {
+      catchUpVatDecisions.vatPlatform.recordVatDecisionPosting({
+        companyId: resolvedCompanyId,
+        vatDecisionIds: catchUpVatDecisions.vatDecisionIds,
+        journalEntryId,
+        actorId: resolvedActorId
+      });
+    }
 
     const run = Object.freeze({
       yearEndCatchUpRunId: crypto.randomUUID(),
@@ -716,6 +740,8 @@ export function createAccountingMethodEngine({
       accountingCurrencyCode,
       journalEntryId,
       reversalJournalEntryId: null,
+      vatDecisionIds: Object.freeze([...catchUpVatDecisions.vatDecisionIds]),
+      reversalVatDecisionIds: Object.freeze([]),
       totals,
       items: Object.freeze(
         capturedItems.map((item) =>
@@ -723,7 +749,9 @@ export function createAccountingMethodEngine({
             ...item,
             postingIntentCode: isReceivableItemType(item.openItemType)
               ? "cash_method_year_end_receivable"
-              : "cash_method_year_end_payable"
+              : "cash_method_year_end_payable",
+            vatDecisionIds: Object.freeze(catchUpVatDecisions.vatDecisionIdsByItemSourceId.get(item.sourceId) || []),
+            reversalVatDecisionIds: Object.freeze([])
           })
         )
       ),
@@ -763,25 +791,52 @@ export function createAccountingMethodEngine({
       throw createError(409, "year_end_catch_up_not_posted", "Year-end catch-up run does not have a posted journal to reverse.");
     }
     const ledgerPlatform = requireYearEndLedgerPlatform(getLedgerPlatform);
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedReasonCode = requireText(reasonCode, "reason_code_required");
+    const resolvedReversedOn = reversedOn ? normalizeDate(reversedOn, "year_end_catch_up_reversed_on_invalid") : null;
     const reversed = ledgerPlatform.reverseJournalEntry({
       companyId: resolvedCompanyId,
       journalEntryId: run.journalEntryId,
-      actorId: requireText(actorId, "actor_id_required"),
+      actorId: resolvedActorId,
       approvedByActorId: requireText(approvedByActorId, "approved_by_actor_id_required"),
       approvedByRoleCode: requireText(approvedByRoleCode, "approved_by_role_code_required"),
-      reasonCode: requireText(reasonCode, "reason_code_required"),
+      reasonCode: resolvedReasonCode,
       correctionKey: `year_end_catch_up:${run.yearEndCatchUpRunId}`,
-      journalDate: reversedOn ? normalizeDate(reversedOn, "year_end_catch_up_reversed_on_invalid") : null
+      journalDate: resolvedReversedOn
     });
+    const reversalVatDecisions = materializeYearEndCatchUpVatReversalDecisions({
+      getVatPlatform,
+      companyId: resolvedCompanyId,
+      run,
+      reversalJournalEntry: reversed.reversalJournalEntry,
+      actorId: resolvedActorId
+    });
+    if (reversalVatDecisions.vatDecisionIds.length > 0) {
+      reversalVatDecisions.vatPlatform.recordVatDecisionPosting({
+        companyId: resolvedCompanyId,
+        vatDecisionIds: reversalVatDecisions.vatDecisionIds,
+        journalEntryId: reversed.reversalJournalEntry.journalEntryId,
+        actorId: resolvedActorId
+      });
+    }
     const reversedRun = replaceYearEndCatchUpRun(state, run.yearEndCatchUpRunId, {
       status: "reversed",
       reversalJournalEntryId: reversed.reversalJournalEntry.journalEntryId,
       reversedAt: nowIso(clock),
-      reversedByActorId: requireText(actorId, "actor_id_required")
+      reversedByActorId: resolvedActorId,
+      reversalVatDecisionIds: Object.freeze([...reversalVatDecisions.vatDecisionIds]),
+      items: Object.freeze(
+        (run.items || []).map((item) =>
+          Object.freeze({
+            ...item,
+            reversalVatDecisionIds: Object.freeze(reversalVatDecisions.vatDecisionIdsByItemSourceId.get(item.sourceId) || [])
+          })
+        )
+      )
     });
     pushAudit(state, clock, {
       companyId: resolvedCompanyId,
-      actorId: requireText(actorId, "actor_id_required"),
+      actorId: resolvedActorId,
       action: "accounting_method.year_end_catch_up_reversed",
       entityType: "accounting_method_year_end_catch_up_run",
       entityId: reversedRun.yearEndCatchUpRunId,
@@ -961,7 +1016,7 @@ function buildExecutionDirective(policy, eventCode) {
         ...policy,
         eventCode,
         primaryRecognitionRequired: requiresCashMethodRecognition,
-        vatDecisionRequired: false,
+        vatDecisionRequired: requiresCashMethodRecognition,
         ledgerOperationalPostingRequired: requiresCashMethodRecognition,
         operationalDocumentIssueAllowed: false
       };
@@ -1061,6 +1116,13 @@ function normalizeOpenItems(openItems, fiscalYearEndDate, accountingCurrencyCode
       accountingCurrencyCode,
       openItemFunctionalAmount: functionalUnpaidAmount
     });
+    const requiresVatDecision =
+      item.vatTransactionLine != null
+      || item.vatAmount != null
+      || postingLines.some((line) => isVatPostingAccount(line.accountNumber));
+    const vatTransactionLine = requiresVatDecision
+      ? normalizeYearEndCatchUpVatTransactionLine(item.vatTransactionLine)
+      : null;
     return Object.freeze({
       openItemType,
       sourceType: normalizeOptionalText(item.sourceType) || openItemType.toLowerCase(),
@@ -1082,6 +1144,7 @@ function normalizeOpenItems(openItems, fiscalYearEndDate, accountingCurrencyCode
         "year_end_open_item_account_number_required"
       ),
       accountingCurrencyCode,
+      vatTransactionLine,
       postingLines
     });
   });
@@ -1102,11 +1165,171 @@ function resolveAccountingCurrencyCode(ledgerPlatform, companyId) {
   return ledgerPlatform.getAccountingCurrencyProfile({ companyId }).accountingCurrencyCode || "SEK";
 }
 
+function requireYearEndVatPlatform(getVatPlatform) {
+  const vatPlatform = typeof getVatPlatform === "function" ? getVatPlatform() : null;
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function" || typeof vatPlatform.recordVatDecisionPosting !== "function") {
+    throw createError(500, "vat_platform_required_for_year_end_catch_up", "VAT platform is required for year-end catch-up VAT decisions.");
+  }
+  return vatPlatform;
+}
+
+function buildYearEndCatchUpSourceId({ companyId, fiscalYearEndDate, snapshotHash }) {
+  return `cash_method_year_end_catch_up:${companyId}:${fiscalYearEndDate}:${snapshotHash}`;
+}
+
+function materializeYearEndCatchUpVatDecisions({
+  getVatPlatform,
+  companyId,
+  fiscalYearEndDate,
+  sourceType,
+  sourceId,
+  items,
+  actorId
+}) {
+  const vatItems = (items || []).filter((item) => item?.vatTransactionLine);
+  if (vatItems.length === 0) {
+    return {
+      vatPlatform: null,
+      vatDecisionIds: [],
+      vatDecisionIdsByItemSourceId: new Map()
+    };
+  }
+  const vatPlatform = requireYearEndVatPlatform(getVatPlatform);
+  const vatDecisionIdsByItemSourceId = new Map();
+  const vatDecisionIds = [];
+  for (const item of vatItems) {
+    const evaluation = vatPlatform.evaluateVatDecision({
+      companyId,
+      transactionLine: buildYearEndCatchUpVatTransactionLine({
+        item,
+        sourceType,
+        sourceId,
+        effectiveDate: fiscalYearEndDate
+      }),
+      actorId
+    });
+    if (evaluation.reviewQueueItem) {
+      throw createError(
+        409,
+        "year_end_catch_up_vat_review_required",
+        `Year-end catch-up item ${item.sourceId} requires VAT review before posting can complete.`
+      );
+    }
+    vatDecisionIdsByItemSourceId.set(item.sourceId, [evaluation.vatDecision.vatDecisionId]);
+    vatDecisionIds.push(evaluation.vatDecision.vatDecisionId);
+  }
+  const uniqueVatDecisionIds = [...new Set(vatDecisionIds)];
+  if (uniqueVatDecisionIds.length > 0 && typeof vatPlatform.configureVatDecisionExecutionPolicy === "function") {
+    vatPlatform.configureVatDecisionExecutionPolicy({
+      companyId,
+      vatDecisionIds: uniqueVatDecisionIds,
+      declarationTimingMode: "posting_date",
+      actorId
+    });
+  }
+  return {
+    vatPlatform,
+    vatDecisionIds: uniqueVatDecisionIds,
+    vatDecisionIdsByItemSourceId
+  };
+}
+
+function materializeYearEndCatchUpVatReversalDecisions({
+  getVatPlatform,
+  companyId,
+  run,
+  reversalJournalEntry,
+  actorId
+}) {
+  const vatItems = (run.items || []).filter((item) => item?.vatTransactionLine);
+  if (vatItems.length === 0) {
+    return {
+      vatPlatform: null,
+      vatDecisionIds: [],
+      vatDecisionIdsByItemSourceId: new Map()
+    };
+  }
+  const vatPlatform = requireYearEndVatPlatform(getVatPlatform);
+  const reversalDate = normalizeDate(reversalJournalEntry.journalDate, "year_end_catch_up_reversal_journal_date_invalid");
+  const reversalSourceType = requireText(reversalJournalEntry.sourceType, "year_end_catch_up_reversal_source_type_required");
+  const reversalSourceId = requireText(reversalJournalEntry.sourceId, "year_end_catch_up_reversal_source_id_required");
+  const vatDecisionIdsByItemSourceId = new Map();
+  const vatDecisionIds = [];
+  for (const item of vatItems) {
+    const evaluation = vatPlatform.evaluateVatDecision({
+      companyId,
+      transactionLine: buildYearEndCatchUpVatTransactionLine({
+        item,
+        sourceType: reversalSourceType,
+        sourceId: reversalSourceId,
+        effectiveDate: reversalDate,
+        originalVatDecisionId: (item.vatDecisionIds || [])[0] || null
+      }),
+      actorId
+    });
+    if (evaluation.reviewQueueItem) {
+      throw createError(
+        409,
+        "year_end_catch_up_reversal_vat_review_required",
+        `Year-end catch-up reversal item ${item.sourceId} requires VAT review before reversal can complete.`
+      );
+    }
+    vatDecisionIdsByItemSourceId.set(item.sourceId, [evaluation.vatDecision.vatDecisionId]);
+    vatDecisionIds.push(evaluation.vatDecision.vatDecisionId);
+  }
+  const uniqueVatDecisionIds = [...new Set(vatDecisionIds)];
+  if (uniqueVatDecisionIds.length > 0 && typeof vatPlatform.configureVatDecisionExecutionPolicy === "function") {
+    vatPlatform.configureVatDecisionExecutionPolicy({
+      companyId,
+      vatDecisionIds: uniqueVatDecisionIds,
+      declarationTimingMode: "posting_date",
+      actorId
+    });
+  }
+  return {
+    vatPlatform,
+    vatDecisionIds: uniqueVatDecisionIds,
+    vatDecisionIdsByItemSourceId
+  };
+}
+
+function buildYearEndCatchUpVatTransactionLine({
+  item,
+  sourceType,
+  sourceId,
+  effectiveDate,
+  invertAmounts = false,
+  originalVatDecisionId = null
+}) {
+  const baseLine = copy(item.vatTransactionLine || {});
+  const amountMultiplier = invertAmounts && !originalVatDecisionId ? -1 : 1;
+  return {
+    ...baseLine,
+    source_type: sourceType,
+    source_id: sourceId,
+    tax_date: effectiveDate,
+    invoice_date: baseLine.invoice_date || item.recognitionDate || effectiveDate,
+    delivery_date: baseLine.delivery_date || baseLine.invoice_date || item.recognitionDate || effectiveDate,
+    prepayment_date: baseLine.prepayment_date || null,
+    line_amount_ex_vat:
+      baseLine.line_amount_ex_vat == null
+        ? baseLine.line_amount_ex_vat
+        : roundMoney(Number(baseLine.line_amount_ex_vat) * amountMultiplier),
+    line_discount:
+      baseLine.line_discount == null
+        ? baseLine.line_discount
+        : roundMoney(Number(baseLine.line_discount) * amountMultiplier),
+    credit_note_flag: originalVatDecisionId ? true : baseLine.credit_note_flag || false,
+    original_vat_decision_id: originalVatDecisionId || baseLine.original_vat_decision_id || null
+  };
+}
+
 function postYearEndCatchUpJournal({
   ledgerPlatform,
   companyId,
   fiscalYearEndDate,
   snapshotHash,
+  sourceId,
   activeMethod,
   actorId,
   items,
@@ -1126,7 +1349,7 @@ function postYearEndCatchUpJournal({
     recipeCode: "YEAR_END_ADJUSTMENT",
     postingSignalCode: "accounting_method.year_end_catch_up.completed",
     sourceType: "YEAR_END_TRANSFER",
-    sourceId: `cash_method_year_end_catch_up:${companyId}:${fiscalYearEndDate}:${snapshotHash}`,
+    sourceId,
     sourceObjectVersion: snapshotHash,
     actorId,
     idempotencyKey: `cash_method_year_end_catch_up:${companyId}:${fiscalYearEndDate}:${snapshotHash}`,
@@ -1252,6 +1475,21 @@ function normalizeCatchUpPostingLines({
     throw createError(409, "year_end_open_item_balance_mismatch", "Payable catch-up lines must debit the full functional unpaid amount.");
   }
   return Object.freeze(normalizedLines);
+}
+
+function normalizeYearEndCatchUpVatTransactionLine(vatTransactionLine) {
+  if (!vatTransactionLine || typeof vatTransactionLine !== "object" || Array.isArray(vatTransactionLine)) {
+    throw createError(
+      409,
+      "year_end_open_item_vat_transaction_line_required",
+      "Year-end catch-up items with VAT-bearing posting lines must include vatTransactionLine."
+    );
+  }
+  return Object.freeze(copy(vatTransactionLine));
+}
+
+function isVatPostingAccount(accountNumber) {
+  return /^26[1-4]/.test(String(accountNumber || ""));
 }
 
 function resolveFunctionalAmount({

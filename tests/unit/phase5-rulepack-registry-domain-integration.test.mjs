@@ -18,6 +18,7 @@ import {
   createHusPlatform,
   HUS_RULEPACK_CODE
 } from "../../packages/domain-hus/src/index.mjs";
+import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 import { createTaxAccountEngine } from "../../packages/domain-tax-account/src/index.mjs";
 import {
   TAX_ACCOUNT_RULEPACK_CODE,
@@ -57,6 +58,7 @@ function buildRulePack({
 
 test("phase 5.1 accounting-method pins registry rulepacks by assessment and effective date", () => {
   let ledger = null;
+  let vat = null;
   const registry = createRulePackRegistry({
     seedRulePacks: [
       buildRulePack({
@@ -80,14 +82,24 @@ test("phase 5.1 accounting-method pins registry rulepacks by assessment and effe
     seedDemo: false,
     ruleRegistry: registry,
     clock: () => new Date("2027-01-05T09:00:00Z"),
-    getLedgerPlatform: () => ledger
+    getLedgerPlatform: () => ledger,
+    getVatPlatform: () => vat
   });
   ledger = createLedgerPlatform({
     seedDemo: false,
     accountingMethodPlatform: engine,
     clock: () => new Date("2027-12-31T09:00:00Z")
   });
+  vat = createVatPlatform({
+    seedDemo: false,
+    clock: () => new Date("2027-12-31T09:00:00Z"),
+    ledgerPlatform: ledger
+  });
   ledger.installLedgerCatalog({
+    companyId: "company_accounting_method",
+    actorId: "tester"
+  });
+  vat.installVatCatalog({
     companyId: "company_accounting_method",
     actorId: "tester"
   });
@@ -134,6 +146,16 @@ test("phase 5.1 accounting-method pins registry rulepacks by assessment and effe
         openItemAccountNumber: "1210",
         unpaidAmount: 500,
         recognitionDate: "2027-12-20",
+        vatTransactionLine: buildAccountingMethodVatTransactionLine({
+          supply_type: "sale",
+          goods_or_services: "goods",
+          invoice_date: "2027-12-20",
+          line_amount_ex_vat: 400,
+          vat_rate: 25,
+          tax_rate_candidate: 25,
+          vat_code_candidate: "VAT_SE_DOMESTIC_25",
+          report_box_code: "05"
+        }),
         postingLines: [
           { accountNumber: "3010", creditAmount: 400 },
           { accountNumber: "2610", creditAmount: 100 }
@@ -149,7 +171,48 @@ test("phase 5.1 accounting-method pins registry rulepacks by assessment and effe
   assert.equal(profile2027.eligibilitySnapshot.rulepackId, "accounting-method-se-2027.1");
   assert.equal(catchUp.rulepackId, "accounting-method-se-2027.1");
   assert.equal(typeof catchUp.journalEntryId, "string");
+  assert.equal(catchUp.vatDecisionIds.length, 1);
 });
+
+function buildAccountingMethodVatTransactionLine(overrides = {}) {
+  return {
+    seller_country: "SE",
+    seller_vat_registration_country: "SE",
+    buyer_country: "SE",
+    buyer_type: "business",
+    buyer_vat_no: "SE556677889901",
+    buyer_is_taxable_person: true,
+    buyer_vat_number: "SE556677889901",
+    buyer_vat_number_status: "valid",
+    supply_type: "sale",
+    goods_or_services: "goods",
+    supply_subtype: "standard",
+    property_related_flag: false,
+    construction_service_flag: false,
+    transport_end_country: "SE",
+    import_flag: false,
+    export_flag: false,
+    reverse_charge_flag: false,
+    oss_flag: false,
+    ioss_flag: false,
+    currency: "SEK",
+    tax_date: "2027-12-31",
+    invoice_date: "2027-12-31",
+    delivery_date: "2027-12-31",
+    prepayment_date: null,
+    line_amount_ex_vat: 400,
+    line_discount: 0,
+    line_quantity: 1,
+    line_uom: "ea",
+    vat_rate: 25,
+    tax_rate_candidate: 25,
+    vat_code_candidate: "VAT_SE_DOMESTIC_25",
+    exemption_reason: "not_applicable",
+    invoice_text_code: "domestic_standard",
+    report_box_code: "05",
+    ...overrides
+  };
+}
 
 test("phase 5.1 fiscal-year pins registry rulepacks on profile, request and fiscal year", () => {
   const registry = createRulePackRegistry({

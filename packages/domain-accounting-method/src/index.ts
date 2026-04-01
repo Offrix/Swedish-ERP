@@ -145,6 +145,9 @@ export interface YearEndCatchUpItem {
   readonly openItemAccountNumber: string;
   readonly accountingCurrencyCode: string;
   readonly postingIntentCode: string;
+  readonly vatTransactionLine?: Record<string, unknown> | null;
+  readonly vatDecisionIds?: readonly string[];
+  readonly reversalVatDecisionIds?: readonly string[];
   readonly postingLines: readonly YearEndCatchUpPostingLine[];
 }
 
@@ -162,6 +165,8 @@ export interface YearEndCatchUpRun {
   readonly accountingCurrencyCode: string;
   readonly journalEntryId: string | null;
   readonly reversalJournalEntryId: string | null;
+  readonly vatDecisionIds?: readonly string[];
+  readonly reversalVatDecisionIds?: readonly string[];
   readonly totals: {
     readonly receivablesAmount: number;
     readonly payablesAmount: number;

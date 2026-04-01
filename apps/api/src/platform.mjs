@@ -261,7 +261,8 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
     create: ({ options, getDomain }) =>
       createAccountingMethodPlatform({
         ...options,
-        getLedgerPlatform: () => getDomain("ledger")
+        getLedgerPlatform: () => getDomain("ledger"),
+        getVatPlatform: () => getDomain("vat")
       })
   }),
   createDomainDefinition({

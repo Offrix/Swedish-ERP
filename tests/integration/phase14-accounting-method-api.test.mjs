@@ -22,6 +22,10 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
       companyId: DEMO_IDS.companyId,
       email: DEMO_ADMIN_EMAIL
     });
+    platform.installVatCatalog({
+      companyId: DEMO_IDS.companyId,
+      actorId: "tester"
+    });
     platform.createCompanyUser({
       sessionToken: adminToken,
       companyId: DEMO_IDS.companyId,
@@ -177,6 +181,16 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
             unpaidAmount: 1000,
             recognitionDate: "2027-12-20",
             openItemAccountNumber: "1210",
+            vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+              supply_type: "sale",
+              goods_or_services: "goods",
+              invoice_date: "2027-12-20",
+              line_amount_ex_vat: 800,
+              vat_rate: 25,
+              tax_rate_candidate: 25,
+              vat_code_candidate: "VAT_SE_DOMESTIC_25",
+              report_box_code: "05"
+            }),
             postingLines: [
               {
                 accountNumber: "3010",
@@ -194,6 +208,16 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
             unpaidAmount: 400,
             recognitionDate: "2027-12-21",
             openItemAccountNumber: "2410",
+            vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+              supply_type: "purchase",
+              goods_or_services: "services",
+              invoice_date: "2027-12-21",
+              line_amount_ex_vat: 320,
+              vat_rate: 25,
+              tax_rate_candidate: 25,
+              vat_code_candidate: "VAT_SE_DOMESTIC_PURCHASE_25",
+              report_box_code: "48"
+            }),
             postingLines: [
               {
                 accountNumber: "5410",
@@ -222,6 +246,16 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
             unpaidAmount: 1000,
             recognitionDate: "2027-12-20",
             openItemAccountNumber: "1210",
+            vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+              supply_type: "sale",
+              goods_or_services: "goods",
+              invoice_date: "2027-12-20",
+              line_amount_ex_vat: 800,
+              vat_rate: 25,
+              tax_rate_candidate: 25,
+              vat_code_candidate: "VAT_SE_DOMESTIC_25",
+              report_box_code: "05"
+            }),
             postingLines: [
               {
                 accountNumber: "3010",
@@ -239,6 +273,16 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
             unpaidAmount: 400,
             recognitionDate: "2027-12-21",
             openItemAccountNumber: "2410",
+            vatTransactionLine: buildYearEndCatchUpVatTransactionLine({
+              supply_type: "purchase",
+              goods_or_services: "services",
+              invoice_date: "2027-12-21",
+              line_amount_ex_vat: 320,
+              vat_rate: 25,
+              tax_rate_candidate: 25,
+              vat_code_candidate: "VAT_SE_DOMESTIC_PURCHASE_25",
+              report_box_code: "48"
+            }),
             postingLines: [
               {
                 accountNumber: "5410",
@@ -255,6 +299,14 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
     });
     assert.equal(catchUpRun.yearEndCatchUpRunId, replayCatchUpRun.yearEndCatchUpRunId);
     assert.equal(typeof catchUpRun.journalEntryId, "string");
+    assert.equal(catchUpRun.vatDecisionIds.length, 2);
+    assert.equal(catchUpRun.items[0].vatDecisionIds.length, 1);
+    assert.equal(catchUpRun.items[1].vatDecisionIds.length, 1);
+    const decemberBasisAfterCatchUp = platform.getVatDeclarationBasis({
+      companyId: DEMO_IDS.companyId,
+      fromDate: "2027-12-01",
+      toDate: "2027-12-31"
+    });
 
     const reversedCatchUpRun = await requestJson(
       baseUrl,
@@ -272,6 +324,26 @@ test("Step 7 API manages accounting methods, change requests and cash-method yea
     );
     assert.equal(reversedCatchUpRun.status, "reversed");
     assert.equal(typeof reversedCatchUpRun.reversalJournalEntryId, "string");
+    assert.equal(reversedCatchUpRun.reversalVatDecisionIds.length, 2);
+    const decemberBasisAfterReversal = platform.getVatDeclarationBasis({
+      companyId: DEMO_IDS.companyId,
+      fromDate: "2027-12-01",
+      toDate: "2027-12-31"
+    });
+    assert.equal(decemberBasisAfterCatchUp.decisionCount, 2);
+    assert.equal(decemberBasisAfterCatchUp.declarationEligibleDecisionCount, 2);
+    assert.deepEqual(decemberBasisAfterCatchUp.declarationBoxSummary, [
+      { boxCode: "05", amount: 800, amountType: "taxable_base" },
+      { boxCode: "10", amount: 200, amountType: "output_vat" },
+      { boxCode: "48", amount: 80, amountType: "input_vat" }
+    ]);
+    assert.equal(decemberBasisAfterReversal.decisionCount, 4);
+    assert.equal(decemberBasisAfterReversal.declarationEligibleDecisionCount, 4);
+    assert.deepEqual(decemberBasisAfterReversal.declarationBoxSummary, [
+      { boxCode: "05", amount: 0, amountType: "taxable_base" },
+      { boxCode: "10", amount: 0, amountType: "output_vat" },
+      { boxCode: "48", amount: 0, amountType: "input_vat" }
+    ]);
 
     const history = await requestJson(baseUrl, `/v1/accounting-method/history?companyId=${DEMO_IDS.companyId}`, {
       token: adminToken
@@ -361,3 +433,43 @@ test("Step 7 API requires fiscal-year boundary metadata and supersedes earlier m
     await stopServer(server);
   }
 });
+
+function buildYearEndCatchUpVatTransactionLine(overrides = {}) {
+  return {
+    seller_country: "SE",
+    seller_vat_registration_country: "SE",
+    buyer_country: "SE",
+    buyer_type: "business",
+    buyer_vat_no: "SE556677889901",
+    buyer_is_taxable_person: true,
+    buyer_vat_number: "SE556677889901",
+    buyer_vat_number_status: "valid",
+    supply_type: "sale",
+    goods_or_services: "goods",
+    supply_subtype: "standard",
+    property_related_flag: false,
+    construction_service_flag: false,
+    transport_end_country: "SE",
+    import_flag: false,
+    export_flag: false,
+    reverse_charge_flag: false,
+    oss_flag: false,
+    ioss_flag: false,
+    currency: "SEK",
+    tax_date: "2027-12-31",
+    invoice_date: "2027-12-31",
+    delivery_date: "2027-12-31",
+    prepayment_date: null,
+    line_amount_ex_vat: 800,
+    line_discount: 0,
+    line_quantity: 1,
+    line_uom: "ea",
+    vat_rate: 25,
+    tax_rate_candidate: 25,
+    vat_code_candidate: "VAT_SE_DOMESTIC_25",
+    exemption_reason: "not_applicable",
+    invoice_text_code: "domestic_standard",
+    report_box_code: "05",
+    ...overrides
+  };
+}
