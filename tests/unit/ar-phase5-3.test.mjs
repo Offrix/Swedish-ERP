@@ -457,6 +457,11 @@ test("Phase 8.6 cash-method AR allocation recognizes revenue and output VAT on p
     customerInvoiceId: invoice.customerInvoiceId,
     actorId: "user-1"
   });
+  const julyBasisBeforeAllocation = vat.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2026-07-01",
+    toDate: "2026-07-31"
+  });
   const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
   const allocation = ar.createOpenItemAllocation({
     companyId: COMPANY_ID,
@@ -468,6 +473,11 @@ test("Phase 8.6 cash-method AR allocation recognizes revenue and output VAT on p
     bankTransactionUid: "bank-txn-cash-method",
     reasonCode: "partial_payment",
     actorId: "user-1"
+  });
+  const augustBasisAfterAllocation = vat.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2026-08-01",
+    toDate: "2026-08-31"
   });
   const updatedInvoice = ar.getInvoice({
     companyId: COMPANY_ID,
@@ -486,9 +496,18 @@ test("Phase 8.6 cash-method AR allocation recognizes revenue and output VAT on p
     vatDecisionId: allocation.vatDecisionIds[0]
   });
 
+  assert.equal(julyBasisBeforeAllocation.decisionCount, 0);
+  assert.equal(julyBasisBeforeAllocation.declarationEligibleDecisionCount, 0);
+  assert.deepEqual(julyBasisBeforeAllocation.declarationBoxSummary, []);
   assert.equal(allocation.vatDecisionIds.length, 1);
   assert.equal(allocation.recognizedGrossAmount, 500);
   assert.equal(allocation.recognizedVatAmount, 100);
+  assert.equal(augustBasisAfterAllocation.decisionCount, 1);
+  assert.equal(augustBasisAfterAllocation.declarationEligibleDecisionCount, 1);
+  assert.deepEqual(augustBasisAfterAllocation.declarationBoxSummary, [
+    { boxCode: "05", amount: 400, amountType: "taxable_base" },
+    { boxCode: "10", amount: 100, amountType: "output_vat" }
+  ]);
   assert.equal(updatedInvoice.journalEntryId, null);
   assert.equal(updatedInvoice.recognizedGrossAmount, 500);
   assert.equal(updatedInvoice.recognizedVatAmount, 100);
@@ -557,11 +576,22 @@ test("Phase 8.6 cash-method AR reversal rolls back recognition and mirrors VAT c
     reasonCode: "partial_payment",
     actorId: "user-1"
   });
+  const augustBasisAfterAllocation = vat.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2026-08-01",
+    toDate: "2026-08-31"
+  });
   const reversed = ar.reverseOpenItemAllocation({
     companyId: COMPANY_ID,
     arAllocationId: allocation.arAllocationId,
+    reversedOn: "2026-08-02",
     reasonCode: "wrong_customer_match",
     actorId: "user-1"
+  });
+  const augustBasisAfterReversal = vat.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2026-08-01",
+    toDate: "2026-08-31"
   });
   const updatedInvoice = ar.getInvoice({
     companyId: COMPANY_ID,
@@ -580,8 +610,19 @@ test("Phase 8.6 cash-method AR reversal rolls back recognition and mirrors VAT c
     vatDecisionId: reversed.reversalVatDecisionIds[0]
   });
 
+  assert.equal(augustBasisAfterAllocation.declarationEligibleDecisionCount, 1);
+  assert.deepEqual(augustBasisAfterAllocation.declarationBoxSummary, [
+    { boxCode: "05", amount: 400, amountType: "taxable_base" },
+    { boxCode: "10", amount: 100, amountType: "output_vat" }
+  ]);
   assert.equal(reversed.status, "reversed");
   assert.equal(reversed.reversalVatDecisionIds.length, 1);
+  assert.equal(augustBasisAfterReversal.decisionCount, 2);
+  assert.equal(augustBasisAfterReversal.declarationEligibleDecisionCount, 2);
+  assert.deepEqual(augustBasisAfterReversal.declarationBoxSummary, [
+    { boxCode: "05", amount: 0, amountType: "taxable_base" },
+    { boxCode: "10", amount: 0, amountType: "output_vat" }
+  ]);
   assert.equal(updatedInvoice.recognizedGrossAmount, 0);
   assert.equal(updatedInvoice.recognizedVatAmount, 0);
   assert.equal(updatedInvoice.lines[0].recognizedLineAmount, 0);

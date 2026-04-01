@@ -371,6 +371,11 @@ test("Phase 8.6 API recognizes and reverses cash-method AR revenue on payment da
       expectedStatus: 200,
       body: { companyId: COMPANY_ID }
     });
+    const julyBasisBeforeAllocation = await requestJson(
+      baseUrl,
+      `/v1/vat/declaration-basis?companyId=${COMPANY_ID}&fromDate=2027-07-01&toDate=2027-07-31`,
+      { token: sessionToken }
+    );
     assert.equal(issued.journalEntryId, null);
     assert.equal(issued.primaryRecognitionTrigger, "AR_PAYMENT_ALLOCATION");
 
@@ -394,6 +399,11 @@ test("Phase 8.6 API recognizes and reverses cash-method AR revenue on payment da
         reasonCode: "partial_payment"
       }
     });
+    const augustBasisAfterAllocation = await requestJson(
+      baseUrl,
+      `/v1/vat/declaration-basis?companyId=${COMPANY_ID}&fromDate=2027-08-01&toDate=2027-08-31`,
+      { token: sessionToken }
+    );
     const recognizedInvoice = await requestJson(
       baseUrl,
       `/v1/ar/invoices/${invoice.customerInvoiceId}?companyId=${COMPANY_ID}`,
@@ -415,9 +425,18 @@ test("Phase 8.6 API recognizes and reverses cash-method AR revenue on payment da
       { token: sessionToken }
     );
 
+    assert.equal(julyBasisBeforeAllocation.decisionCount, 0);
+    assert.equal(julyBasisBeforeAllocation.declarationEligibleDecisionCount, 0);
+    assert.deepEqual(julyBasisBeforeAllocation.declarationBoxSummary, []);
     assert.equal(allocation.vatDecisionIds.length, 1);
     assert.equal(allocation.recognizedGrossAmount, 500);
     assert.equal(allocation.recognizedVatAmount, 100);
+    assert.equal(augustBasisAfterAllocation.decisionCount, 1);
+    assert.equal(augustBasisAfterAllocation.declarationEligibleDecisionCount, 1);
+    assert.deepEqual(augustBasisAfterAllocation.declarationBoxSummary, [
+      { boxCode: "05", amount: 400, amountType: "taxable_base" },
+      { boxCode: "10", amount: 100, amountType: "output_vat" }
+    ]);
     assert.equal(recognizedInvoice.journalEntryId, null);
     assert.equal(recognizedInvoice.recognizedGrossAmount, 500);
     assert.equal(recognizedInvoice.recognizedVatAmount, 100);
@@ -436,9 +455,15 @@ test("Phase 8.6 API recognizes and reverses cash-method AR revenue on payment da
       expectedStatus: 200,
       body: {
         companyId: COMPANY_ID,
+        reversedOn: "2027-08-13",
         reasonCode: "wrong_customer_match"
       }
     });
+    const augustBasisAfterReversal = await requestJson(
+      baseUrl,
+      `/v1/vat/declaration-basis?companyId=${COMPANY_ID}&fromDate=2027-08-01&toDate=2027-08-31`,
+      { token: sessionToken }
+    );
     const reopenedInvoice = await requestJson(
       baseUrl,
       `/v1/ar/invoices/${invoice.customerInvoiceId}?companyId=${COMPANY_ID}`,
@@ -462,6 +487,12 @@ test("Phase 8.6 API recognizes and reverses cash-method AR revenue on payment da
 
     assert.equal(reversed.status, "reversed");
     assert.equal(reversed.reversalVatDecisionIds.length, 1);
+    assert.equal(augustBasisAfterReversal.decisionCount, 2);
+    assert.equal(augustBasisAfterReversal.declarationEligibleDecisionCount, 2);
+    assert.deepEqual(augustBasisAfterReversal.declarationBoxSummary, [
+      { boxCode: "05", amount: 0, amountType: "taxable_base" },
+      { boxCode: "10", amount: 0, amountType: "output_vat" }
+    ]);
     assert.equal(reopenedInvoice.recognizedGrossAmount, 0);
     assert.equal(reopenedInvoice.recognizedVatAmount, 0);
     assert.equal(reopenedInvoice.lines[0].recognizedLineAmount, 0);
