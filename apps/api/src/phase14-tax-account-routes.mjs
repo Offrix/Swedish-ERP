@@ -102,6 +102,7 @@ export async function tryHandlePhase14TaxAccountRoutes({ req, res, url, path, pl
       sourceObjectType: body.sourceObjectType,
       sourceObjectId: body.sourceObjectId,
       periodKey: body.periodKey,
+      ledgerCounterAccountNumber: body.ledgerCounterAccountNumber,
       differenceCaseId: body.differenceCaseId,
       classificationCode: body.classificationCode,
       resolutionNote: body.resolutionNote,

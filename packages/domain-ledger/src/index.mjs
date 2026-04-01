@@ -32,7 +32,7 @@ export const DEFAULT_VOUCHER_SERIES_PURPOSE_MAP = Object.freeze({
   D: Object.freeze(["AR_PAYMENT"]),
   E: Object.freeze(["AP_INVOICE", "AP_CREDIT_NOTE", "AP_PAYMENT"]),
   H: Object.freeze(["PAYROLL_RUN", "PAYROLL_CORRECTION", "PAYROLL_PAYOUT_MATCH"]),
-  I: Object.freeze(["VAT_SETTLEMENT"]),
+  I: Object.freeze(["VAT_SETTLEMENT", "TAX_ACCOUNT_SETTLEMENT"]),
   V: Object.freeze(["LEDGER_REVERSAL", "AR_WRITEOFF"]),
   W: Object.freeze(["HISTORICAL_IMPORT"])
 });
@@ -48,6 +48,7 @@ export const POSTING_SOURCE_TYPES = Object.freeze([
   "BENEFIT_EVENT",
   "TRAVEL_CLAIM",
   "VAT_SETTLEMENT",
+  "TAX_ACCOUNT_EVENT",
   "VAT_CLEARING",
   "BANK_IMPORT",
   "HISTORICAL_IMPORT",
@@ -270,8 +271,8 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     version: "2026.1",
     sourceDomain: "tax_account",
     journalType: "tax_account_posting",
-    allowedSourceTypes: Object.freeze(["VAT_SETTLEMENT"]),
-    defaultVoucherSeriesPurposeCode: "VAT_SETTLEMENT",
+    allowedSourceTypes: Object.freeze(["TAX_ACCOUNT_EVENT"]),
+    defaultVoucherSeriesPurposeCode: "TAX_ACCOUNT_SETTLEMENT",
     fallbackVoucherSeriesCode: "I",
     defaultSignalCode: "tax_account.event.classified_and_approved"
   }),

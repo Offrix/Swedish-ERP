@@ -577,7 +577,7 @@ Ingen live fakturering, leverantörsbetalning, VAT filing eller bankautomation f
 - [x] 8.2 [REWRITE] AP state machine härdas: domestic VAT går genom riktig `VatDecision`, F-skatt/A-skatt-konsekvenser modelleras, credits och payment blocks/release blir explicita.
 - [x] 8.3 [REWRITE][HARDEN] VAT truth model gör `VatDecision` obligatoriskt för alla VAT-affecting events; `GR`/`EL`, VIES, reverse charge-undantag, OSS, import VAT, pro rata och blocked deductions implementeras i scenariomotorn.
 - [x] 8.4 [NEW BUILD] Banking får statement/event core för avgifter, räntor, settlements och matchning, inte bara AP-disbursement rail.
-- [ ] 8.5 [REWRITE] Tax account får komplett eventklassificering, offset-regler, ledger-spegel och discrepancy workbench.
+- [x] 8.5 [REWRITE] Tax account får komplett eventklassificering, offset-regler, ledger-spegel och discrepancy workbench.
 - [ ] 8.6 [HARDEN] Accounting method blir verkställande policy över AR/AP/VAT/ledger i stället för separat annotering.
 
 **Exit gate**  

@@ -51,6 +51,7 @@ Beskriva hur skattekontohändelser importeras, matchas, avstäms och stängs inf
 - imported tax account events
 - expected liabilities
 - bank payment references
+- ledger mirror journals for authority-side events and approved offsets
 
 # Step-by-step procedure
 
@@ -61,11 +62,26 @@ Beskriva hur skattekontohändelser importeras, matchas, avstäms och stängs inf
 5. Kontrollera att återstående öppna poster motsvarar verkliga framtida förpliktelser.
 6. Markera perioden reconciled först när inga blockerande differenser återstår.
 
+# Ledger mirror rules
+
+- debit-side authority events must mirror into ledger with `journalEntryId`
+- standard target account is `1630` for the authority account mirror
+- liability-side counter account is normally:
+  - VAT -> `2650`
+  - AGI -> `2710` unless a more specific liability account is explicitly pinned
+  - F-tax -> `2510`
+  - HUS -> `2560`
+- bank-bridged payment events (`sourceObjectType = bank_statement_event`) must not create duplicate tax-account settlement journals
+- standalone payment/refund/manual-credit offsets may create settlement journals when no bank mirror already exists
+- manual adjustments that cannot resolve to a deterministic liability account must stay in discrepancy flow until an explicit ledger counter account is chosen
+
 # Verification
 
 - importerat saldo stämmer mot arbetssaldo
 - samtliga större händelser är matchade eller har öppet differensfall
 - close blocker view är grön eller formellt undantagen
+- every mirrored authority event that should hit ledger carries `journalEntryId`
+- discrepancy summary includes open case types and pending ledger mirror count
 
 # Retry/replay behavior where relevant
 

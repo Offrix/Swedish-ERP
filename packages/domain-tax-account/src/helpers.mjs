@@ -9,6 +9,8 @@ import {
   LIABILITY_TYPE_PRIORITY
 } from "./constants.mjs";
 
+const LEDGER_ACCOUNT_NUMBER_PATTERN = /^\d{4}$/;
+
 export function buildHash(value) {
   return crypto.createHash("sha256").update(stableStringify(value)).digest("hex");
 }
@@ -157,7 +159,10 @@ export function createError(status, code, message) {
 }
 
 export function isAssessmentEvent(event) {
-  return ASSESSMENT_EVENT_TYPES.has(event.eventTypeCode);
+  return (
+    (ASSESSMENT_EVENT_TYPES.has(event.eventTypeCode) && event.effectDirection === "debit") ||
+    (event.eventTypeCode === "MANUAL_ADJUSTMENT" && event.effectDirection === "debit")
+  );
 }
 
 export function isCreditEvent(event) {
@@ -166,6 +171,17 @@ export function isCreditEvent(event) {
 
 export function deriveEffectDirection(eventTypeCode) {
   return CREDIT_EVENT_TYPES.has(eventTypeCode) ? "credit" : "debit";
+}
+
+export function normalizeOptionalLedgerAccountNumber(value, code = "ledger_account_number_invalid") {
+  if (value == null || value === "") {
+    return null;
+  }
+  const resolved = requireText(String(value), code);
+  if (!LEDGER_ACCOUNT_NUMBER_PATTERN.test(resolved)) {
+    throw createError(400, code, "Ledger account number must use 4 digits.");
+  }
+  return resolved;
 }
 
 export function resolveLiabilityPriority(liabilityTypeCode) {
@@ -272,6 +288,18 @@ export function normalizeImportedEvent(rawEvent, { companyId, importBatchId, imp
     allowedDirections,
     "tax_account_event_effect_direction_invalid"
   );
+  if (eventTypeCode === "MANUAL_ADJUSTMENT" && (rawEvent.effectDirection == null || rawEvent.effectDirection === "")) {
+    throw createError(
+      400,
+      "tax_account_event_effect_direction_required",
+      "Manual tax-account adjustments must specify effectDirection explicitly."
+    );
+  }
+  const liabilityTypeCode = normalizeOptionalAllowedCode(
+    rawEvent.liabilityTypeCode || EVENT_TYPE_TO_LIABILITY_TYPE[eventTypeCode] || null,
+    allowedLiabilityTypes,
+    "tax_account_event_liability_type_invalid"
+  );
   return {
     taxAccountEventId: crypto.randomUUID(),
     companyId,
@@ -287,12 +315,9 @@ export function normalizeImportedEvent(rawEvent, { companyId, importBatchId, imp
     sourceReference: requireText(rawEvent.sourceReference || rawEvent.externalReference, "tax_account_source_reference_required"),
     sourceObjectType: normalizeOptionalText(rawEvent.sourceObjectType),
     sourceObjectId: normalizeOptionalText(rawEvent.sourceObjectId),
-    liabilityTypeCode: normalizeOptionalAllowedCode(
-      rawEvent.liabilityTypeCode || EVENT_TYPE_TO_LIABILITY_TYPE[eventTypeCode] || null,
-      allowedLiabilityTypes,
-      "tax_account_event_liability_type_invalid"
-    ),
+    liabilityTypeCode,
     periodKey: normalizeOptionalText(rawEvent.periodKey),
+    offsetPriority: liabilityTypeCode ? resolveLiabilityPriority(liabilityTypeCode) : null,
     mappingStatus: "imported",
     reconciliationStatus: "imported",
     mappedTargetObjectType: null,
@@ -303,6 +328,8 @@ export function normalizeImportedEvent(rawEvent, { companyId, importBatchId, imp
     classificationApprovedByActorId: null,
     classificationApprovedAt: null,
     classificationResolutionNote: null,
+    ledgerCounterAccountNumber: normalizeOptionalLedgerAccountNumber(rawEvent.ledgerCounterAccountNumber),
+    journalEntryId: null,
     ledgerPostingStatus: "pending",
     createdByActorId: actorId,
     createdAt: nowIso(clock),

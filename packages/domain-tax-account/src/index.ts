@@ -34,6 +34,7 @@ export interface TaxAccountEvent {
   readonly sourceObjectId: string | null;
   readonly liabilityTypeCode: string | null;
   readonly periodKey: string | null;
+  readonly offsetPriority: number | null;
   readonly mappingStatus: TaxAccountEventMappingStatus;
   readonly reconciliationStatus: TaxAccountEventReconciliationStatus;
   readonly mappedTargetObjectType: string | null;
@@ -44,6 +45,8 @@ export interface TaxAccountEvent {
   readonly classificationApprovedByActorId?: string | null;
   readonly classificationApprovedAt?: string | null;
   readonly classificationResolutionNote?: string | null;
+  readonly ledgerCounterAccountNumber: string | null;
+  readonly journalEntryId: string | null;
   readonly ledgerPostingStatus: "pending" | "posted";
   readonly createdByActorId: string;
   readonly createdAt: string;
@@ -59,6 +62,7 @@ export interface TaxAccountReconciliationItem {
   readonly sourceObjectId: string;
   readonly sourceReference: string | null;
   readonly periodKey: string | null;
+  readonly ledgerCounterAccountNumber: string | null;
   readonly dueDate: string;
   readonly currencyCode: string;
   readonly expectedAmount: number;
@@ -83,6 +87,7 @@ export interface TaxAccountOffset {
   readonly offsetReasonCode: string;
   readonly status: "approved";
   readonly approvalNote: string | null;
+  readonly journalEntryId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
 }
@@ -94,6 +99,9 @@ export interface TaxAccountBalance {
   readonly openCreditAmount: number;
   readonly openSettlementAmount: number;
   readonly openDifferenceCaseCount: number;
+  readonly openDifferenceTypeCounts: Readonly<Record<string, number>>;
+  readonly unreconciledEventCount: number;
+  readonly pendingLedgerMirrorCount: number;
   readonly blockerCodes: readonly string[];
   readonly readyForClose: boolean;
   readonly readyForFiling: boolean;

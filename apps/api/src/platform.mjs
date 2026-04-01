@@ -386,17 +386,18 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         getTaxAccountPlatform: () => getDomain("taxAccount")
       })
   }),
-  createDomainDefinition({
-    key: "taxAccount",
-    label: "Tax account",
-    packageName: "@swedish-erp/domain-tax-account",
-    dependsOn: ["banking"],
-    create: ({ options, dependencies }) =>
-      createTaxAccountPlatform({
-        ...options,
-        bankingPlatform: dependencies.banking
-      })
-  }),
+    createDomainDefinition({
+      key: "taxAccount",
+      label: "Tax account",
+      packageName: "@swedish-erp/domain-tax-account",
+      dependsOn: ["banking", "ledger"],
+      create: ({ options, dependencies }) =>
+        createTaxAccountPlatform({
+          ...options,
+          bankingPlatform: dependencies.banking,
+          ledgerPlatform: dependencies.ledger
+        })
+    }),
   createDomainDefinition({
     key: "reviewCenter",
     label: "Review center",
