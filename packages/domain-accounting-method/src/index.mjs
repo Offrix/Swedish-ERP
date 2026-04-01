@@ -7,6 +7,17 @@ const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
 export const ACCOUNTING_METHOD_CODES = Object.freeze(["KONTANTMETOD", "FAKTURERINGSMETOD"]);
 export const ACCOUNTING_METHOD_PROFILE_STATUSES = Object.freeze(["planned", "active", "historical"]);
+export const ACCOUNTING_METHOD_TIMING_MODES = Object.freeze([
+  "payment_date_with_year_end_catch_up",
+  "invoice_date_accrual"
+]);
+export const ACCOUNTING_METHOD_EXECUTION_EVENT_CODES = Object.freeze([
+  "AR_INVOICE_ISSUE",
+  "AR_PAYMENT_ALLOCATION",
+  "AP_INVOICE_POST",
+  "AP_PAYMENT_SETTLEMENT",
+  "YEAR_END_CATCH_UP"
+]);
 export const METHOD_CHANGE_REQUEST_STATUSES = Object.freeze([
   "draft",
   "submitted",
@@ -113,6 +124,8 @@ export function createAccountingMethodEngine({
     listMethodChangeRequests,
     approveMethodChangeRequest,
     rejectMethodChangeRequest,
+    getActiveMethodPolicy,
+    resolveExecutionDirective,
     runYearEndCatchUp,
     reverseYearEndCatchUpRun,
     listYearEndCatchUpRuns,
@@ -429,12 +442,43 @@ export function createAccountingMethodEngine({
       throw createError(409, "active_method_ambiguous", "More than one accounting method profile covers the requested date.");
     }
 
-    const profile = matchingProfiles[0];
+      const profile = matchingProfiles[0];
+      return copy({
+        ...profile,
+        accountingDate: resolvedAccountingDate,
+        timingMode: resolveTimingMode(profile.methodCode)
+      });
+    }
+
+  function getActiveMethodPolicy({ companyId, accountingDate } = {}) {
+    const activeMethod = getActiveMethodForDate({ companyId, accountingDate });
+    const cashMethod = activeMethod.timingMode === "payment_date_with_year_end_catch_up";
     return copy({
-      ...profile,
-      accountingDate: resolvedAccountingDate,
-      timingMode: profile.methodCode === "KONTANTMETOD" ? "payment_date_with_year_end_catch_up" : "invoice_date_accrual"
+      companyId: activeMethod.companyId,
+      accountingDate: activeMethod.accountingDate,
+      methodProfileId: activeMethod.methodProfileId,
+      methodCode: activeMethod.methodCode,
+      timingMode: activeMethod.timingMode,
+      arInvoiceRecognitionTrigger: cashMethod ? "AR_PAYMENT_ALLOCATION" : "AR_INVOICE_ISSUE",
+      apInvoiceRecognitionTrigger: cashMethod ? "AP_PAYMENT_SETTLEMENT" : "AP_INVOICE_POST",
+      arVatRecognitionTrigger: cashMethod ? "AR_PAYMENT_ALLOCATION" : "AR_INVOICE_ISSUE",
+      apVatRecognitionTrigger: cashMethod ? "AP_PAYMENT_SETTLEMENT" : "AP_INVOICE_POST",
+      receivableRecognitionDateBasis: cashMethod ? "payment_date" : "invoice_date",
+      payableRecognitionDateBasis: cashMethod ? "payment_date" : "invoice_date",
+      vatRecognitionDateBasis: cashMethod ? "payment_date" : "invoice_date",
+      settlementPostingRequired: true,
+      yearEndCatchUpRequired: cashMethod
     });
+  }
+
+  function resolveExecutionDirective({ companyId, accountingDate, eventCode } = {}) {
+    const resolvedEventCode = assertAllowed(
+      normalizeCode(eventCode, "accounting_method_event_code_required"),
+      ACCOUNTING_METHOD_EXECUTION_EVENT_CODES,
+      "accounting_method_event_code_invalid"
+    );
+    const policy = getActiveMethodPolicy({ companyId, accountingDate });
+    return copy(buildExecutionDirective(policy, resolvedEventCode));
   }
 
   function getMethodHistory({ companyId } = {}) {
@@ -867,6 +911,63 @@ function requireMethodChangeRequest(state, companyId, methodChangeRequestId) {
     throw createError(404, "method_change_request_not_found", "Accounting method change request was not found.");
   }
   return request;
+}
+
+function resolveTimingMode(methodCode) {
+  return methodCode === "KONTANTMETOD" ? "payment_date_with_year_end_catch_up" : "invoice_date_accrual";
+}
+
+function buildExecutionDirective(policy, eventCode) {
+  const requiresCashMethodRecognition = policy.timingMode === "payment_date_with_year_end_catch_up";
+  switch (eventCode) {
+    case "AR_INVOICE_ISSUE":
+      return {
+        ...policy,
+        eventCode,
+        primaryRecognitionRequired: !requiresCashMethodRecognition,
+        vatDecisionRequired: !requiresCashMethodRecognition,
+        ledgerOperationalPostingRequired: !requiresCashMethodRecognition,
+        operationalDocumentIssueAllowed: true
+      };
+    case "AR_PAYMENT_ALLOCATION":
+      return {
+        ...policy,
+        eventCode,
+        primaryRecognitionRequired: requiresCashMethodRecognition,
+        vatDecisionRequired: requiresCashMethodRecognition,
+        ledgerOperationalPostingRequired: true,
+        operationalDocumentIssueAllowed: true
+      };
+    case "AP_INVOICE_POST":
+      return {
+        ...policy,
+        eventCode,
+        primaryRecognitionRequired: !requiresCashMethodRecognition,
+        vatDecisionRequired: !requiresCashMethodRecognition,
+        ledgerOperationalPostingRequired: !requiresCashMethodRecognition,
+        operationalDocumentIssueAllowed: true
+      };
+    case "AP_PAYMENT_SETTLEMENT":
+      return {
+        ...policy,
+        eventCode,
+        primaryRecognitionRequired: requiresCashMethodRecognition,
+        vatDecisionRequired: requiresCashMethodRecognition,
+        ledgerOperationalPostingRequired: true,
+        operationalDocumentIssueAllowed: true
+      };
+    case "YEAR_END_CATCH_UP":
+      return {
+        ...policy,
+        eventCode,
+        primaryRecognitionRequired: requiresCashMethodRecognition,
+        vatDecisionRequired: false,
+        ledgerOperationalPostingRequired: requiresCashMethodRecognition,
+        operationalDocumentIssueAllowed: false
+      };
+    default:
+      throw createError(400, "accounting_method_event_code_invalid", "Unsupported accounting-method event code.");
+  }
 }
 
 function requireYearEndCatchUpRun(state, companyId, yearEndCatchUpRunId) {

@@ -146,12 +146,14 @@ export function createArEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  accountingMethodPlatform = null,
   vatPlatform = createVatPlatform({ clock, seedDemo: true }),
   ledgerPlatform = null,
   integrationPlatform = null,
   orgAuthPlatform = null,
   companyProfilesById = null
 } = {}) {
+  void accountingMethodPlatform;
   const state = {
     customers: new Map(),
     customerIdsByCompany: new Map(),

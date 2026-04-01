@@ -1,5 +1,12 @@
 export type AccountingMethodCode = "KONTANTMETOD" | "FAKTURERINGSMETOD";
 export type AccountingMethodProfileStatus = "planned" | "active" | "historical";
+export type AccountingMethodTimingMode = "payment_date_with_year_end_catch_up" | "invoice_date_accrual";
+export type AccountingMethodExecutionEventCode =
+  | "AR_INVOICE_ISSUE"
+  | "AR_PAYMENT_ALLOCATION"
+  | "AP_INVOICE_POST"
+  | "AP_PAYMENT_SETTLEMENT"
+  | "YEAR_END_CATCH_UP";
 export type MethodChangeRequestStatus =
   | "draft"
   | "submitted"
@@ -91,6 +98,36 @@ export interface YearEndCatchUpPostingLine {
   readonly functionalCreditAmount: number;
   readonly dimensionJson: Record<string, unknown>;
   readonly sourceId: string;
+}
+
+export interface ActiveAccountingMethodProfile extends AccountingMethodProfile {
+  readonly accountingDate: string;
+  readonly timingMode: AccountingMethodTimingMode;
+}
+
+export interface AccountingMethodPolicy {
+  readonly companyId: string;
+  readonly accountingDate: string;
+  readonly methodProfileId: string;
+  readonly methodCode: AccountingMethodCode;
+  readonly timingMode: AccountingMethodTimingMode;
+  readonly arInvoiceRecognitionTrigger: "AR_INVOICE_ISSUE" | "AR_PAYMENT_ALLOCATION";
+  readonly apInvoiceRecognitionTrigger: "AP_INVOICE_POST" | "AP_PAYMENT_SETTLEMENT";
+  readonly arVatRecognitionTrigger: "AR_INVOICE_ISSUE" | "AR_PAYMENT_ALLOCATION";
+  readonly apVatRecognitionTrigger: "AP_INVOICE_POST" | "AP_PAYMENT_SETTLEMENT";
+  readonly receivableRecognitionDateBasis: "invoice_date" | "payment_date";
+  readonly payableRecognitionDateBasis: "invoice_date" | "payment_date";
+  readonly vatRecognitionDateBasis: "invoice_date" | "payment_date";
+  readonly settlementPostingRequired: true;
+  readonly yearEndCatchUpRequired: boolean;
+}
+
+export interface AccountingMethodExecutionDirective extends AccountingMethodPolicy {
+  readonly eventCode: AccountingMethodExecutionEventCode;
+  readonly primaryRecognitionRequired: boolean;
+  readonly vatDecisionRequired: boolean;
+  readonly ledgerOperationalPostingRequired: boolean;
+  readonly operationalDocumentIssueAllowed: boolean;
 }
 
 export interface YearEndCatchUpItem {

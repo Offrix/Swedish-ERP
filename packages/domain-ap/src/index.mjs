@@ -117,6 +117,7 @@ export function createApEngine({
   bootstrapMode = "none",
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
+  accountingMethodPlatform = null,
   vatPlatform = createVatPlatform({ clock, seedDemo: true }),
   ledgerPlatform = null,
   documentPlatform = null,
@@ -126,6 +127,7 @@ export function createApEngine({
   getDocumentClassificationPlatform = null,
   getImportCasesPlatform = null
 } = {}) {
+  void accountingMethodPlatform;
   const state = {
     suppliers: new Map(),
     supplierIdsByCompany: new Map(),

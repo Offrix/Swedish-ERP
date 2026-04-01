@@ -42,6 +42,7 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.equal(typeof platform.getDomain("ledger")?.upsertVoucherSeries, "function");
   assert.equal(typeof platform.getDomain("ledger")?.resolveVoucherSeriesForPurpose, "function");
   assert.equal(typeof platform.getDomain("ar")?.upsertInvoiceSeries, "function");
+  assert.equal(typeof platform.getDomain("accountingMethod")?.resolveExecutionDirective, "function");
   assert.equal(typeof platform.createJournalEntry, "function");
   assert.deepEqual(platform.getDomainRegistration("ledger")?.dependsOn, ["accountingMethod", "fiscalYear"]);
   assert.equal(platform.getDomainRegistration("ledger")?.buildOrder > platform.getDomainRegistration("fiscalYear")?.buildOrder, true);
@@ -68,6 +69,8 @@ test("Step 3 platform composition registers bounded contexts without breaking th
   assert.deepEqual(platform.getDomainRegistration("collectiveAgreements")?.dependsOn, ["hr", "balances"]);
   assert.equal(platform.getDomainRegistration("collectiveAgreements")?.buildOrder > platform.getDomainRegistration("balances")?.buildOrder, true);
   assert.deepEqual(platform.getDomainRegistration("integrations")?.dependsOn, ["evidence"]);
+  assert.deepEqual(platform.getDomainRegistration("ar")?.dependsOn, ["accountingMethod", "vat", "ledger", "integrations", "orgAuth"]);
+  assert.deepEqual(platform.getDomainRegistration("ap")?.dependsOn, ["accountingMethod", "vat", "ledger", "documents", "orgAuth"]);
   assert.deepEqual(platform.getDomainRegistration("projects")?.dependsOn, ["ar", "ap", "hr", "time", "payroll", "vat", "evidence"]);
   assert.deepEqual(platform.getDomainRegistration("orgAuth")?.dependsOn, ["securityRuntime"]);
   assert.deepEqual(platform.getDomainRegistration("reporting")?.dependsOn, ["ledger", "documents", "ar", "ap", "taxAccount", "integrations", "payroll", "projects", "securityRuntime"]);

@@ -101,6 +101,116 @@ test("Step 7 accounting method profiles switch deterministically across a fiscal
   assert.equal(engine.listMethodChangeRequests({ companyId: "company_profile" })[0].status, "implemented");
 });
 
+test("Step 7 accounting method exposes executable directives for AR/AP recognition timing", () => {
+  const engine = createAccountingMethodEngine({
+    seedDemo: false,
+    clock: () => new Date("2027-01-05T09:00:00Z")
+  });
+
+  const baselineAssessment = engine.assessCashMethodEligibility({
+    companyId: "company_policy_runtime",
+    annualNetTurnoverSek: 1_200_000,
+    legalFormCode: "AB"
+  });
+  const baselineProfile = engine.createMethodProfile({
+    companyId: "company_policy_runtime",
+    methodCode: "FAKTURERINGSMETOD",
+    effectiveFrom: "2026-01-01",
+    fiscalYearStartDate: "2026-01-01",
+    eligibilityAssessmentId: baselineAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "tester"
+  });
+  engine.activateMethodProfile({
+    companyId: "company_policy_runtime",
+    methodProfileId: baselineProfile.methodProfileId,
+    actorId: "tester"
+  });
+
+  const invoiceMethodPolicy = engine.getActiveMethodPolicy({
+    companyId: "company_policy_runtime",
+    accountingDate: "2026-06-15"
+  });
+  const invoiceIssueDirective = engine.resolveExecutionDirective({
+    companyId: "company_policy_runtime",
+    accountingDate: "2026-06-15",
+    eventCode: "AR_INVOICE_ISSUE"
+  });
+
+  const cashAssessment = engine.assessCashMethodEligibility({
+    companyId: "company_policy_runtime",
+    annualNetTurnoverSek: 950_000,
+    legalFormCode: "AB"
+  });
+  const cashChangeRequest = engine.submitMethodChangeRequest({
+    companyId: "company_policy_runtime",
+    requestedMethodCode: "KONTANTMETOD",
+    requestedEffectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    reasonCode: "METHOD_CHANGE",
+    actorId: "tester"
+  });
+  engine.approveMethodChangeRequest({
+    companyId: "company_policy_runtime",
+    methodChangeRequestId: cashChangeRequest.methodChangeRequestId,
+    actorId: "approver"
+  });
+  const cashProfile = engine.createMethodProfile({
+    companyId: "company_policy_runtime",
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    eligibilityAssessmentId: cashAssessment.assessmentId,
+    methodChangeRequestId: cashChangeRequest.methodChangeRequestId,
+    actorId: "tester"
+  });
+  engine.activateMethodProfile({
+    companyId: "company_policy_runtime",
+    methodProfileId: cashProfile.methodProfileId,
+    actorId: "approver"
+  });
+
+  const cashMethodPolicy = engine.getActiveMethodPolicy({
+    companyId: "company_policy_runtime",
+    accountingDate: "2027-02-10"
+  });
+  const cashIssueDirective = engine.resolveExecutionDirective({
+    companyId: "company_policy_runtime",
+    accountingDate: "2027-02-10",
+    eventCode: "AR_INVOICE_ISSUE"
+  });
+  const cashPaymentDirective = engine.resolveExecutionDirective({
+    companyId: "company_policy_runtime",
+    accountingDate: "2027-02-10",
+    eventCode: "AR_PAYMENT_ALLOCATION"
+  });
+  const cashApDirective = engine.resolveExecutionDirective({
+    companyId: "company_policy_runtime",
+    accountingDate: "2027-02-10",
+    eventCode: "AP_PAYMENT_SETTLEMENT"
+  });
+
+  assert.equal(invoiceMethodPolicy.methodCode, "FAKTURERINGSMETOD");
+  assert.equal(invoiceMethodPolicy.arInvoiceRecognitionTrigger, "AR_INVOICE_ISSUE");
+  assert.equal(invoiceMethodPolicy.yearEndCatchUpRequired, false);
+  assert.equal(invoiceIssueDirective.primaryRecognitionRequired, true);
+  assert.equal(invoiceIssueDirective.vatDecisionRequired, true);
+  assert.equal(invoiceIssueDirective.ledgerOperationalPostingRequired, true);
+
+  assert.equal(cashMethodPolicy.methodCode, "KONTANTMETOD");
+  assert.equal(cashMethodPolicy.arInvoiceRecognitionTrigger, "AR_PAYMENT_ALLOCATION");
+  assert.equal(cashMethodPolicy.apInvoiceRecognitionTrigger, "AP_PAYMENT_SETTLEMENT");
+  assert.equal(cashMethodPolicy.yearEndCatchUpRequired, true);
+  assert.equal(cashIssueDirective.primaryRecognitionRequired, false);
+  assert.equal(cashIssueDirective.vatDecisionRequired, false);
+  assert.equal(cashIssueDirective.ledgerOperationalPostingRequired, false);
+  assert.equal(cashPaymentDirective.primaryRecognitionRequired, true);
+  assert.equal(cashPaymentDirective.vatDecisionRequired, true);
+  assert.equal(cashPaymentDirective.ledgerOperationalPostingRequired, true);
+  assert.equal(cashApDirective.primaryRecognitionRequired, true);
+  assert.equal(cashApDirective.vatDecisionRequired, true);
+});
+
 test("Step 7 year-end catch-up is idempotent and only allowed for cash method", () => {
   let ledger = null;
   const engine = createAccountingMethodEngine({
