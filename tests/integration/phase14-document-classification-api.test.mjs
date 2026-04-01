@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
+import { createDefaultJobHandlers, runWorkerBatch } from "../../apps/worker/src/worker.mjs";
 import { DEMO_ADMIN_EMAIL, DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { readText, stopServer } from "../../scripts/lib/repo.mjs";
 import { loginWithStrongAuth, requestJson } from "../helpers/api-helpers.mjs";
@@ -321,6 +322,120 @@ test("Step 14 API dispatches private spend into payroll net deduction flow", asy
     assert.equal(Boolean(deductionLine), true);
     assert.equal(deductionLine.payItemCode, "NET_DEDUCTION");
     assert.equal(deductionLine.sourceType, "document_classification_private_receivable");
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Phase 9.3 API reindexes masked document classification search documents without sensitive plaintext", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-04-01T09:00:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const employee = platform.createEmployee({
+      companyId: DEMO_IDS.companyId,
+      givenName: "ApiLeakSentinel",
+      familyName: "NineThree",
+      workEmail: "api-leak-9-3@example.test",
+      actorId: DEMO_IDS.userId
+    });
+    const employment = platform.createEmployment({
+      companyId: DEMO_IDS.companyId,
+      employeeId: employee.employeeId,
+      employmentTypeCode: "permanent",
+      jobTitle: "Tester",
+      payModelCode: "monthly_salary",
+      startDate: "2026-01-01",
+      actorId: DEMO_IDS.userId
+    });
+    const document = platform.createDocumentRecord({
+      companyId: DEMO_IDS.companyId,
+      documentType: "expense_receipt",
+      sourceReference: "api-phase9-3-sensitive",
+      actorId: DEMO_IDS.userId
+    });
+
+    const created = await requestJson(baseUrl, `/v1/documents/${document.documentId}/classification-cases`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        lineInputs: [
+          {
+            description: "Sensitive vendor ApiLeakVendor AB",
+            amount: 950,
+            treatmentCode: "REIMBURSABLE_OUTLAY",
+            person: {
+              employeeId: employee.employeeId,
+              employmentId: employment.employmentId,
+              personRelationCode: "employee"
+            },
+            reviewReasonCodes: ["PERSON_IMPACT_REQUIRES_REVIEW"],
+            factsJson: {
+              vendorName: "ApiLeakVendor AB",
+              reimbursementAmount: 950
+            }
+          }
+        ]
+      }
+    });
+    assert.equal(created.reviewQueueCode, "PAYROLL_REVIEW");
+
+    const reindex = await requestJson(baseUrl, `/v1/search/reindex`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId
+      }
+    });
+    assert.equal(reindex.reindexRequest.status, "requested");
+
+    const processed = await runWorkerBatch({
+      platform,
+      handlers: createDefaultJobHandlers({ logger: () => {} }),
+      logger: () => {},
+      workerId: "worker-phase9-3-search"
+    });
+    assert.equal(processed, 1);
+
+    const contracts = await requestJson(baseUrl, `/v1/search/contracts?companyId=${DEMO_IDS.companyId}`, {
+      token: adminToken
+    });
+    assert.equal(
+      contracts.items.some((item) => item.projectionCode === "document_classification.classification_case"),
+      true
+    );
+
+    const classificationSearch = await requestJson(
+      baseUrl,
+      `/v1/search/documents?companyId=${DEMO_IDS.companyId}&query=classification`,
+      { token: adminToken }
+    );
+    const classificationDocument = classificationSearch.items.find((item) => item.objectId === created.classificationCaseId);
+    assert.equal(Boolean(classificationDocument), true);
+    assert.equal(classificationDocument.objectType, "classification_case");
+    assert.equal(classificationDocument.displayTitle.includes("ApiLeakSentinel"), false);
+    assert.equal(classificationDocument.snippet.includes("maskat"), true);
+
+    const leakSearch = await requestJson(
+      baseUrl,
+      `/v1/search/documents?companyId=${DEMO_IDS.companyId}&query=ApiLeakSentinel`,
+      { token: adminToken }
+    );
+    assert.equal(leakSearch.items.some((item) => item.objectId === created.classificationCaseId), false);
   } finally {
     await stopServer(server);
   }

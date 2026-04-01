@@ -36,6 +36,8 @@ import {
 } from "./helpers.mjs";
 
 const ACTIVE_CASE_STATUSES = new Set(["ingested", "suggested", "under_review", "approved", "dispatched"]);
+const SEARCH_MASKED_TARGET_DOMAINS = new Set(["PAYROLL", "BENEFITS", "TRAVEL"]);
+const SEARCH_MASKED_SNIPPET = "Payroll- eller personkansligt innehall ar maskat i sokindexet.";
 const EXTRACTION_FIELD_LINEAGE_ALIASES = Object.freeze({
   amount: Object.freeze(["totalAmount"]),
   vatAmount: Object.freeze(["vatAmount"]),
@@ -116,7 +118,9 @@ export function createDocumentClassificationEngine({
     correctClassificationCase,
     listPendingReviewClassificationCases,
     getClassificationDispatchStatus,
-    snapshotDocumentClassification
+    snapshotDocumentClassification,
+    listDocumentClassificationSearchProjectionContracts,
+    listDocumentClassificationSearchProjectionDocuments
   };
 
   Object.defineProperty(engine, "__durableState", {
@@ -398,7 +402,334 @@ export function createDocumentClassificationEngine({
     };
   }
 
+  function listDocumentClassificationSearchProjectionContracts({ companyId } = {}) {
+    requireText(companyId, "company_id_required");
+    return copy([
+      {
+        projectionCode: "document_classification.classification_case",
+        objectType: "classification_case",
+        sourceDomainCode: "documentClassification",
+        displayName: "Document classification cases",
+        projectionVersionNo: 1,
+        visibilityScope: "company",
+        supportsGlobalSearch: true,
+        supportsSavedViews: true,
+        surfaceCodes: ["desktop.search", "desktop.review_center"],
+        filterFieldCodes: [
+          "status",
+          "reviewQueueCode",
+          "reviewBoundaryCode",
+          "requiresReview",
+          "targetDomainCode",
+          "candidateObjectType",
+          "sensitivityClass"
+        ]
+      }
+    ]);
+  }
+
+  function listDocumentClassificationSearchProjectionDocuments({ companyId } = {}) {
+    return listClassificationCases({ companyId }).map((classificationCase) => buildSearchProjectionDocument(classificationCase));
+  }
+
   function seedDemoState() {}
+}
+
+function buildSearchProjectionDocument(classificationCase) {
+  const targetDomainCodes = compactStringList([
+    ...classificationCase.treatmentLines.map((line) => line.targetDomainCode),
+    ...classificationCase.treatmentIntents.map((intent) => intent.targetDomainCode),
+    ...classificationCase.extractionProjections.map((projection) => projection.targetDomainCode)
+  ]);
+  const candidateObjectTypes = compactStringList(
+    classificationCase.extractionProjections.map((projection) => projection.candidateObjectType)
+  );
+  const reviewBoundaryCode = deriveSearchReviewBoundaryCode(classificationCase, targetDomainCodes);
+  const sensitivityClass = isMaskedSearchClassificationCase(classificationCase, targetDomainCodes)
+    ? "masked_sensitive"
+    : "standard";
+  const blockerCodes = buildSearchBlockerCodes(classificationCase);
+  const displayTitle = buildSearchDisplayTitle({
+    classificationCase,
+    targetDomainCodes,
+    sensitivityClass
+  });
+  const displaySubtitle = `${classificationCase.status} - ${classificationCase.documentId}`;
+  const searchText = compactStringList([
+    "classification",
+    "document",
+    "case",
+    classificationCase.classificationCaseId,
+    classificationCase.documentId,
+    classificationCase.status,
+    classificationCase.sourceDocumentType,
+    classificationCase.scenarioCode,
+    classificationCase.reviewQueueCode,
+    reviewBoundaryCode,
+    sensitivityClass,
+    ...targetDomainCodes,
+    ...candidateObjectTypes,
+    ...blockerCodes
+  ]).join(" ");
+  const attachmentRefs = compactStringList(
+    classificationCase.extractionProjections.flatMap((projection) => projection.attachmentRefs || [])
+  );
+  const detailPayload = {
+    snapshot: {
+      identityFields: [
+        { fieldCode: "classificationCaseId", value: classificationCase.classificationCaseId },
+        { fieldCode: "documentId", value: classificationCase.documentId }
+      ],
+      financialFields: [
+        { fieldCode: "totalAmount", value: classificationCase.totalAmount },
+        { fieldCode: "currencyCode", value: classificationCase.currencyCode }
+      ],
+      complianceFields: [
+        { fieldCode: "status", value: classificationCase.status },
+        { fieldCode: "reviewBoundaryCode", value: reviewBoundaryCode },
+        { fieldCode: "sensitivityClass", value: sensitivityClass }
+      ],
+      responsibilityFields: [
+        { fieldCode: "reviewQueueCode", value: classificationCase.reviewQueueCode || "none" },
+        { fieldCode: "reviewItemId", value: classificationCase.reviewItemId || "none" }
+      ],
+      periodFields: [
+        { fieldCode: "createdAt", value: classificationCase.createdAt },
+        { fieldCode: "updatedAt", value: classificationCase.updatedAt }
+      ]
+    },
+    sections: [
+      {
+        sectionCode: "classificationSummary",
+        title: "Classification summary",
+        fields: [
+          { fieldCode: "status", value: classificationCase.status },
+          { fieldCode: "scenarioCode", value: classificationCase.scenarioCode },
+          { fieldCode: "sourceDocumentType", value: classificationCase.sourceDocumentType || "unknown" },
+          { fieldCode: "lineCount", value: classificationCase.treatmentLines.length },
+          { fieldCode: "sensitivityClass", value: sensitivityClass }
+        ],
+        warnings: sensitivityClass === "masked_sensitive" ? [SEARCH_MASKED_SNIPPET] : []
+      },
+      {
+        sectionCode: "downstreamRouting",
+        title: "Downstream routing",
+        fields: [
+          { fieldCode: "targetDomainCodes", value: targetDomainCodes.join(", ") || "REVIEW_CENTER" },
+          { fieldCode: "candidateObjectTypes", value: candidateObjectTypes.join(", ") || "document_attachment" },
+          { fieldCode: "intentCount", value: classificationCase.treatmentIntents.length }
+        ]
+      },
+      {
+        sectionCode: "reviewBoundary",
+        title: "Review boundary",
+        fields: [
+          { fieldCode: "requiresReview", value: classificationCase.requiresReview },
+          { fieldCode: "reviewQueueCode", value: classificationCase.reviewQueueCode || "none" },
+          { fieldCode: "reviewBoundaryCode", value: reviewBoundaryCode },
+          { fieldCode: "reviewRiskClass", value: classificationCase.reviewRiskClass },
+          { fieldCode: "reviewItemId", value: classificationCase.reviewItemId || "none" }
+        ]
+      },
+      {
+        sectionCode: "evidence",
+        title: "Evidence",
+        fields: [
+          { fieldCode: "documentId", value: classificationCase.documentId },
+          { fieldCode: "sourceOcrRunId", value: classificationCase.sourceOcrRunId || "none" },
+          { fieldCode: "attachmentRefCount", value: attachmentRefs.length },
+          { fieldCode: "extractionProjectionCount", value: classificationCase.extractionProjections.length }
+        ]
+      },
+      {
+        sectionCode: "corrections",
+        title: "Corrections",
+        fields: [
+          { fieldCode: "parentClassificationCaseId", value: classificationCase.parentClassificationCaseId || "none" },
+          { fieldCode: "correctedToCaseId", value: classificationCase.correctedToCaseId || "none" },
+          { fieldCode: "correctionCount", value: classificationCase.corrections.length }
+        ]
+      },
+      {
+        sectionCode: "audit",
+        title: "Audit",
+        fields: [
+          { fieldCode: "createdByActorId", value: classificationCase.createdByActorId },
+          { fieldCode: "approvedByActorId", value: classificationCase.approvedByActorId || "none" },
+          { fieldCode: "dispatchedByActorId", value: classificationCase.dispatchedByActorId || "none" },
+          { fieldCode: "updatedAt", value: classificationCase.updatedAt }
+        ]
+      }
+    ],
+    blockers: blockerCodes.map((blockerCode) => ({
+      blockerCode,
+      severity: blockerCode === "superseded_by_correction" ? "warning" : "blocking",
+      sectionCode: blockerCode === "review_pending" ? "reviewBoundary" : "classificationSummary",
+      source: "projection"
+    })),
+    relatedObjects: [
+      { objectType: "document", objectId: classificationCase.documentId },
+      ...(classificationCase.reviewItemId ? [{ objectType: "reviewItem", objectId: classificationCase.reviewItemId }] : [])
+    ],
+    evidence: attachmentRefs.map((attachmentRef) => ({
+      referenceCode: attachmentRef,
+      label: attachmentRef
+    })),
+    correctionLineage:
+      classificationCase.parentClassificationCaseId || classificationCase.correctedToCaseId
+        ? {
+            parentClassificationCaseId: classificationCase.parentClassificationCaseId || null,
+            correctedToCaseId: classificationCase.correctedToCaseId || null
+          }
+        : null,
+    auditRefs: {
+      auditClass: "classification_case",
+      auditEventIds: [],
+      evidenceBundleIds: attachmentRefs,
+      receiptIds: [],
+      correlationIds: [
+        classificationCase.classificationCaseId,
+        classificationCase.documentId
+      ]
+    }
+  };
+  const workbenchPayload = {
+    blockerCodes,
+    blockerBadges: blockerCodes.map((blockerCode) => ({
+      blockerCode,
+      label: blockerCode
+    })),
+    counterTags: targetDomainCodes.map((code) => code.toLowerCase()),
+    pillars: [
+      { pillarCode: "review", statusCode: classificationCase.requiresReview ? "attention" : "ready" },
+      { pillarCode: "routing", statusCode: classificationCase.status === "corrected" ? "superseded" : "active" }
+    ]
+  };
+  return {
+    projectionCode: "document_classification.classification_case",
+    objectId: classificationCase.classificationCaseId,
+    displayTitle,
+    displaySubtitle,
+    documentStatus: classificationCase.status,
+    searchText,
+    snippet:
+      sensitivityClass === "masked_sensitive"
+        ? SEARCH_MASKED_SNIPPET
+        : `Classification routes to ${targetDomainCodes.join(", ") || "REVIEW_CENTER"}.`,
+    filterPayload: {
+      status: classificationCase.status,
+      reviewQueueCode: classificationCase.reviewQueueCode || null,
+      reviewBoundaryCode,
+      requiresReview: classificationCase.requiresReview,
+      targetDomainCode:
+        targetDomainCodes.length === 1 ? targetDomainCodes[0] : targetDomainCodes.length > 1 ? "MULTI_TARGET" : "REVIEW_CENTER",
+      candidateObjectType:
+        candidateObjectTypes.length === 1
+          ? candidateObjectTypes[0]
+          : candidateObjectTypes.length > 1
+            ? "multiple"
+            : "document_attachment",
+      sensitivityClass
+    },
+    detailPayload,
+    workbenchPayload,
+    sourceVersion: buildSearchProjectionVersion({
+      classificationCase,
+      targetDomainCodes,
+      candidateObjectTypes,
+      reviewBoundaryCode,
+      blockerCodes,
+      sensitivityClass
+    }),
+    sourceUpdatedAt: classificationCase.updatedAt
+  };
+}
+
+function buildSearchProjectionVersion({
+  classificationCase,
+  targetDomainCodes,
+  candidateObjectTypes,
+  reviewBoundaryCode,
+  blockerCodes,
+  sensitivityClass
+}) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        classificationCaseId: classificationCase.classificationCaseId,
+        status: classificationCase.status,
+        requiresReview: classificationCase.requiresReview,
+        reviewQueueCode: classificationCase.reviewQueueCode,
+        reviewBoundaryCode,
+        reviewItemId: classificationCase.reviewItemId,
+        targetDomainCodes,
+        candidateObjectTypes,
+        blockerCodes,
+        correctedToCaseId: classificationCase.correctedToCaseId,
+        updatedAt: classificationCase.updatedAt,
+        sensitivityClass
+      })
+    )
+    .digest("hex");
+}
+
+function buildSearchDisplayTitle({ classificationCase, targetDomainCodes, sensitivityClass }) {
+  const primaryTargetDomain = targetDomainCodes[0] || "REVIEW_CENTER";
+  if (sensitivityClass === "masked_sensitive") {
+    return `Masked ${primaryTargetDomain.toLowerCase()} classification`;
+  }
+  if (primaryTargetDomain === "AP" && classificationCase.sourceDocumentType === "supplier_invoice") {
+    return "Supplier invoice classification";
+  }
+  if (primaryTargetDomain === "AR") {
+    return "AR document classification";
+  }
+  if (primaryTargetDomain === "REVIEW_CENTER") {
+    return "Attachment classification review";
+  }
+  return `${primaryTargetDomain} classification`;
+}
+
+function buildSearchBlockerCodes(classificationCase) {
+  const blockerCodes = new Set(
+    (Array.isArray(classificationCase.reviewReasonCodes) ? classificationCase.reviewReasonCodes : [])
+      .filter((value) => typeof value === "string" && value.trim().length > 0)
+      .map((value) => normalizeCode(value, "classification_search_blocker_code_required").toLowerCase())
+  );
+  if (classificationCase.requiresReview && ["suggested", "under_review"].includes(classificationCase.status)) {
+    blockerCodes.add("review_pending");
+  }
+  if (classificationCase.status === "corrected") {
+    blockerCodes.add("superseded_by_correction");
+  }
+  return [...blockerCodes].sort();
+}
+
+function deriveSearchReviewBoundaryCode(classificationCase, targetDomainCodes) {
+  if (!classificationCase.requiresReview) {
+    return "classification.auto";
+  }
+  if (classificationCase.reviewQueueCode === "PAYROLL_REVIEW") {
+    return "review_center.payroll";
+  }
+  if (classificationCase.reviewQueueCode === "FINANCE_REVIEW") {
+    return "review_center.finance";
+  }
+  if (targetDomainCodes.includes("REVIEW_CENTER")) {
+    return "review_center.document";
+  }
+  return "review_center.document";
+}
+
+function isMaskedSearchClassificationCase(classificationCase, targetDomainCodes) {
+  if (classificationCase.reviewQueueCode === "PAYROLL_REVIEW") {
+    return true;
+  }
+  if ((classificationCase.personLinks || []).length > 0) {
+    return true;
+  }
+  return targetDomainCodes.some((targetDomainCode) => SEARCH_MASKED_TARGET_DOMAINS.has(targetDomainCode));
 }
 
 function buildCaseRecord({

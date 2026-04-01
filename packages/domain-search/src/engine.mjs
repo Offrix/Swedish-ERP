@@ -64,7 +64,8 @@ export function createSearchEngine({
   getBankingPlatform = null,
   getImportCasesPlatform = null,
   getLegalFormPlatform = null,
-  getIntegrationsPlatform = null
+  getIntegrationsPlatform = null,
+  getDocumentClassificationPlatform = null
 } = {}) {
   const reporting = reportingPlatform || createReportingPlatform({ clock });
   const state = {
@@ -102,7 +103,8 @@ export function createSearchEngine({
     banking: getBankingPlatform,
     importCases: getImportCasesPlatform,
     legalForm: getLegalFormPlatform,
-    integrations: getIntegrationsPlatform
+    integrations: getIntegrationsPlatform,
+    documentClassification: getDocumentClassificationPlatform
   };
 
   const engine = {
@@ -1120,15 +1122,27 @@ export function createSearchEngine({
         continue;
       }
       const candidate = resolver();
+      const listProjectionContracts =
+        typeof candidate?.listSearchProjectionContracts === "function"
+          ? (input) => candidate.listSearchProjectionContracts(input)
+          : typeof candidate?.listDocumentClassificationSearchProjectionContracts === "function"
+            ? (input) => candidate.listDocumentClassificationSearchProjectionContracts(input)
+            : null;
+      const listProjectionDocuments =
+        typeof candidate?.listSearchProjectionDocuments === "function"
+          ? (input) => candidate.listSearchProjectionDocuments(input)
+          : typeof candidate?.listDocumentClassificationSearchProjectionDocuments === "function"
+            ? (input) => candidate.listDocumentClassificationSearchProjectionDocuments(input)
+            : null;
       if (
         candidate &&
-        typeof candidate.listSearchProjectionContracts === "function" &&
-        typeof candidate.listSearchProjectionDocuments === "function"
+        typeof listProjectionContracts === "function" &&
+        typeof listProjectionDocuments === "function"
       ) {
         sources.push({
           sourceDomainCode,
-          listSearchProjectionContracts: (input) => candidate.listSearchProjectionContracts(input),
-          listSearchProjectionDocuments: (input) => candidate.listSearchProjectionDocuments(input)
+          listSearchProjectionContracts: listProjectionContracts,
+          listSearchProjectionDocuments: listProjectionDocuments
         });
       }
     }

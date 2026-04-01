@@ -842,6 +842,8 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "dispatchTreatmentIntents": "write",
     "getClassificationCase": "read",
     "getClassificationDispatchStatus": "read",
+    "listDocumentClassificationSearchProjectionContracts": "read",
+    "listDocumentClassificationSearchProjectionDocuments": "read",
     "listClassificationCases": "read",
     "listPendingReviewClassificationCases": "read",
     "snapshotDocumentClassification": "read",

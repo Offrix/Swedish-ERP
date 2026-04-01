@@ -648,7 +648,8 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         getBankingPlatform: () => getDomain("banking"),
         getImportCasesPlatform: () => getDomain("importCases"),
         getLegalFormPlatform: () => getDomain("legalForm"),
-        getIntegrationsPlatform: () => getDomain("integrations")
+        getIntegrationsPlatform: () => getDomain("integrations"),
+        getDocumentClassificationPlatform: () => getDomain("documentClassification")
       })
   }),
   createDomainDefinition({

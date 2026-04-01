@@ -103,6 +103,14 @@ export const OBJECT_PROFILE_CONTRACTS = Object.freeze([
     actionContracts: ["review.claim", "review.decide", "review.escalate", "review.release"].map(action)
   },
   {
+    profileType: "ClassificationCaseProfile",
+    objectType: "classificationCase",
+    surfaceCodes: ["desktop.review_center", "desktop.search"],
+    sectionCodes: ["classificationSummary", "downstreamRouting", "reviewBoundary", "evidence", "corrections", "audit"],
+    blockerCodes: [],
+    actionContracts: ["documentClassification.approve", "documentClassification.dispatch", "documentClassification.correct"].map(action)
+  },
+  {
     profileType: "WorkItemProfile",
     objectType: "workItem",
     surfaceCodes: ["desktop.review_center", "desktop.search"],

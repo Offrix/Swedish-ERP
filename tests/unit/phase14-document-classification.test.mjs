@@ -497,3 +497,88 @@ test("Step 14 document classification carries OCR-backed attachment refs and lin
   assert.equal(created.extractionProjections[0].fieldLineageJson["factsJson.invoiceNumber"].sourceOcrRunId, ocrRun.ocrRun.ocrRunId);
   assert.equal(created.extractionProjections[0].payloadHash.length, 64);
 });
+
+test("Phase 9.3 document classification exposes masked search projections with routing and blocker metadata", () => {
+  const clock = () => new Date("2026-04-01T07:15:00Z");
+  const documentPlatform = createDocumentArchivePlatform({ clock });
+  const reviewCenterPlatform = createReviewCenterPlatform({ clock, seedDemo: true });
+  const hrPlatform = createHrPlatform({ clock, seedDemo: false, documentPlatform });
+  const benefitsPlatform = createBenefitsPlatform({ clock, seedDemo: true, hrPlatform, documentPlatform });
+  const classification = createDocumentClassificationEngine({
+    clock,
+    seedDemo: false,
+    documentPlatform,
+    reviewCenterPlatform,
+    benefitsPlatform
+  });
+
+  const employee = hrPlatform.createEmployee({
+    companyId: DEMO_COMPANY_ID,
+    givenName: "PayrollLeakSentinel",
+    familyName: "NineThree",
+    workEmail: "payroll-9-3@example.test",
+    actorId: "user_9_3"
+  });
+  const employment = hrPlatform.createEmployment({
+    companyId: DEMO_COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Analyst",
+    payModelCode: "monthly_salary",
+    startDate: "2026-01-01",
+    actorId: "user_9_3"
+  });
+  const document = documentPlatform.createDocumentRecord({
+    companyId: DEMO_COMPANY_ID,
+    documentType: "expense_receipt",
+    sourceReference: "phase9-3-sensitive-001",
+    actorId: "user_9_3"
+  });
+
+  const created = classification.createClassificationCase({
+    companyId: DEMO_COMPANY_ID,
+    documentId: document.documentId,
+    actorId: "user_9_3",
+    lineInputs: [
+      {
+        description: "Sensitive vendor PayrollLeakVendor AB",
+        amount: 875,
+        treatmentCode: "REIMBURSABLE_OUTLAY",
+        person: {
+          employeeId: employee.employeeId,
+          employmentId: employment.employmentId,
+          personRelationCode: "employee"
+        },
+        reviewReasonCodes: ["PERSON_IMPACT_REQUIRES_REVIEW"],
+        factsJson: {
+          vendorName: "PayrollLeakVendor AB",
+          reimbursementAmount: 875,
+          expenseDate: "2026-04-01"
+        }
+      }
+    ]
+  });
+
+  const contracts = classification.listDocumentClassificationSearchProjectionContracts({
+    companyId: DEMO_COMPANY_ID
+  });
+  assert.equal(contracts.some((contract) => contract.projectionCode === "document_classification.classification_case"), true);
+
+  const documents = classification.listDocumentClassificationSearchProjectionDocuments({
+    companyId: DEMO_COMPANY_ID
+  });
+  const projection = documents.find((item) => item.objectId === created.classificationCaseId);
+  assert.equal(Boolean(projection), true);
+  assert.equal(projection.filterPayload.reviewBoundaryCode, "review_center.payroll");
+  assert.equal(projection.filterPayload.targetDomainCode, "PAYROLL");
+  assert.equal(projection.filterPayload.sensitivityClass, "masked_sensitive");
+  assert.equal(projection.searchText.includes("PayrollLeakSentinel"), false);
+  assert.equal(projection.searchText.includes("PayrollLeakVendor AB"), false);
+  assert.equal(projection.displayTitle.includes("PayrollLeakSentinel"), false);
+  assert.equal(projection.snippet.includes("maskat"), true);
+  assert.equal(projection.detailPayload.blockers.some((blocker) => blocker.blockerCode === "review_pending"), true);
+  assert.equal(
+    JSON.stringify(projection.detailPayload).includes("PayrollLeakVendor AB"),
+    false
+  );
+});
