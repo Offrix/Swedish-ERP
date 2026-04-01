@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createArEngine } from "../../packages/domain-ar/src/index.mjs";
+import { createAccountingMethodEngine } from "../../packages/domain-accounting-method/src/index.mjs";
 import { normalizeRequiredOcrReference } from "../../packages/domain-core/src/validation.mjs";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 import { createIntegrationEngine } from "../../packages/domain-integrations/src/index.mjs";
@@ -215,6 +216,77 @@ test("Phase 5.2 validates Peppol delivery and creates payment links from issued 
   assert.equal(paymentLink.providerCode, "stripe_payment_links");
   assert.equal(paymentLink.providerBaselineCode, "SE-PAYMENT-LINK-API");
   assert.equal(typeof paymentLink.providerBaselineChecksum, "string");
+});
+
+test("Phase 8.6 cash method issues invoices operationally without invoice-date ledger posting", () => {
+  const clock = () => new Date("2026-03-22T13:15:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const accountingMethod = createActiveAccountingMethodPlatform({
+    clock,
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2026-01-01"
+  });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    accountingMethodPlatform: accountingMethod,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+
+  const customer = createCustomer(ar, {
+    peppolScheme: "0088",
+    peppolIdentifier: "0007:5566778899"
+  });
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-03-22",
+    dueDate: "2026-04-21",
+    currencyCode: "SEK",
+    deliveryChannel: "peppol",
+    buyerReference: "BR-100",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+
+  const issued = ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const delivery = ar.deliverInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const paymentLink = ar.createInvoicePaymentLink({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    providerCode: "stripe_payment_links",
+    actorId: "user-1"
+  });
+  const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
+  const ledgerEntries = ledger.snapshotLedger().journalEntries.filter((entry) => entry.sourceId === invoice.customerInvoiceId);
+
+  assert.equal(issued.journalEntryId, null);
+  assert.equal(issued.accountingMethodTimingMode, "payment_date_with_year_end_catch_up");
+  assert.equal(issued.primaryRecognitionTrigger, "AR_PAYMENT_ALLOCATION");
+  assert.equal(issued.recognizedGrossAmount, 0);
+  assert.equal(issued.lines[0].vatDecisionId, null);
+  assert.deepEqual(issued.lines[0].vatDecisionIds, []);
+  assert.equal(openItem.openAmount, 1250);
+  assert.equal(openItem.status, "open");
+  assert.equal(ledgerEntries.length, 0);
+  assert.equal(delivery.channel, "peppol");
+  assert.equal(paymentLink.status, "active");
 });
 
 test("Phase 5.2 requires explicit payment link provider selection", () => {
@@ -813,4 +885,32 @@ function createItem(ar, overrides = {}) {
     recurringFlag: true,
     ...overrides
   });
+}
+
+function createActiveAccountingMethodPlatform({ clock, companyId, methodCode, effectiveFrom }) {
+  const accountingMethod = createAccountingMethodEngine({
+    seedDemo: false,
+    clock
+  });
+  const assessment = accountingMethod.assessCashMethodEligibility({
+    companyId,
+    annualNetTurnoverSek: 1_000_000,
+    legalFormCode: "AB",
+    actorId: "user-1"
+  });
+  const profile = accountingMethod.createMethodProfile({
+    companyId,
+    methodCode,
+    effectiveFrom,
+    fiscalYearStartDate: effectiveFrom,
+    eligibilityAssessmentId: assessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "user-1"
+  });
+  accountingMethod.activateMethodProfile({
+    companyId,
+    methodProfileId: profile.methodProfileId,
+    actorId: "user-1"
+  });
+  return accountingMethod;
 }

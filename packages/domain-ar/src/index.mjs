@@ -1235,6 +1235,12 @@ export function createArEngine({
       husServiceTypeCode: normalizeOptionalText(husServiceTypeCode),
       invoiceFieldEvaluation: null,
       recipientEmails: uniqueTexts(recipientEmails),
+      accountingMethodProfileId: null,
+      accountingMethodTimingMode: "invoice_date_accrual",
+      primaryRecognitionTrigger: "AR_INVOICE_ISSUE",
+      recognizedGrossAmount: 0,
+      recognizedVatAmount: 0,
+      recognitionJournalEntryIds: [],
       journalEntryId: null,
       issuedAt: null,
       validatedAt: null,
@@ -1276,8 +1282,14 @@ export function createArEngine({
 
   function issueInvoice({ companyId, customerInvoiceId, actorId = "system", correlationId = crypto.randomUUID() } = {}) {
     const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
+    const accountingDirective = resolveArExecutionDirective({
+      accountingMethodPlatform,
+      companyId: invoice.companyId,
+      accountingDate: invoice.issueDate,
+      eventCode: "AR_INVOICE_ISSUE"
+    });
     if (AR_INVOICE_ALREADY_ISSUED_STATUSES.has(invoice.status)) {
-      if (!invoice.journalEntryId) {
+      if (!invoice.journalEntryId && accountingDirective.ledgerOperationalPostingRequired) {
         throw createError(409, "invoice_issue_state_invalid", "Issued invoice is missing its ledger posting.");
       }
       if (invoice.invoiceType !== "credit_note") {
@@ -1354,49 +1366,65 @@ export function createArEngine({
         controlMode: "mod10"
       }
     );
-    evaluateInvoiceVatDecisions({
-      vatPlatform,
-      companyId: invoice.companyId,
-      invoice,
-      customer,
-      originalInvoice,
-      actorId,
-      correlationId
-    });
-    const journalLines = buildInvoiceJournalLines({
-      invoice,
-      customer,
-      ledgerPlatform
-    });
-    const posted = ledgerPlatform.applyPostingIntent({
-      companyId: invoice.companyId,
-      journalDate: invoice.issueDate,
-      recipeCode: invoice.invoiceType === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE",
-      voucherSeriesPurposeCode: series.voucherSeriesPurposeCode,
-      fallbackVoucherSeriesCode: series.seriesCode,
-      postingSignalCode: invoice.invoiceType === "credit_note" ? "ar.credit_note.issued" : "ar.invoice.issued",
-      sourceType: resolveInvoiceSourceType(invoice.invoiceType),
-      sourceId: invoice.customerInvoiceId,
-      sourceObjectVersion: invoice.invoiceGenerationKey || invoice.issueIdempotencyKey,
-      actorId,
-      idempotencyKey: invoice.issueIdempotencyKey,
-      description: `${invoice.invoiceType} ${invoice.invoiceNumber}`,
-      lines: journalLines
-    });
-    if (vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function") {
-      vatPlatform.recordVatDecisionPosting({
+    applyInvoiceAccountingMethodSnapshot(invoice, accountingDirective);
+
+    invoice.status = "issued";
+    invoice.issuedAt = nowIso(clock);
+    invoice.updatedAt = nowIso(clock);
+
+    if (accountingDirective.ledgerOperationalPostingRequired) {
+      evaluateInvoiceVatDecisions({
+        vatPlatform,
         companyId: invoice.companyId,
-        vatDecisionIds: [...new Set(invoice.lines.map((line) => line.vatDecisionId).filter(Boolean))],
-        journalEntryId: posted.journalEntry.journalEntryId,
+        invoice,
+        customer,
+        originalInvoice,
         actorId,
         correlationId
       });
+      const journalLines = buildInvoiceJournalLines({
+        invoice,
+        customer,
+        ledgerPlatform
+      });
+      const posted = ledgerPlatform.applyPostingIntent({
+        companyId: invoice.companyId,
+        journalDate: invoice.issueDate,
+        recipeCode: invoice.invoiceType === "credit_note" ? "AR_CREDIT_NOTE" : "AR_INVOICE",
+        voucherSeriesPurposeCode: series.voucherSeriesPurposeCode,
+        fallbackVoucherSeriesCode: series.seriesCode,
+        postingSignalCode: invoice.invoiceType === "credit_note" ? "ar.credit_note.issued" : "ar.invoice.issued",
+        sourceType: resolveInvoiceSourceType(invoice.invoiceType),
+        sourceId: invoice.customerInvoiceId,
+        sourceObjectVersion: invoice.invoiceGenerationKey || invoice.issueIdempotencyKey,
+        actorId,
+        idempotencyKey: invoice.issueIdempotencyKey,
+        description: `${invoice.invoiceType} ${invoice.invoiceNumber}`,
+        lines: journalLines
+      });
+      if (vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function") {
+        vatPlatform.recordVatDecisionPosting({
+          companyId: invoice.companyId,
+          vatDecisionIds: [...new Set(invoice.lines.flatMap((line) => [line.vatDecisionId, ...(line.vatDecisionIds || [])]).filter(Boolean))],
+          journalEntryId: posted.journalEntry.journalEntryId,
+          actorId,
+          correlationId
+        });
+      }
+      invoice.journalEntryId = posted.journalEntry.journalEntryId;
+      invoice.recognizedGrossAmount = invoice.totals.grossAmount;
+      invoice.recognizedVatAmount = roundMoney((invoice.lines || []).reduce((sum, line) => sum + calculateInvoiceLineOutputVatAmount(line), 0));
+      for (const line of invoice.lines || []) {
+        const lineVatAmount = calculateInvoiceLineOutputVatAmount(line);
+        line.recognizedLineAmount = roundMoney(line.lineAmount);
+        line.recognizedVatAmount = lineVatAmount;
+        line.recognizedGrossAmount = roundMoney(line.lineAmount + lineVatAmount);
+      }
+    } else {
+      invoice.journalEntryId = null;
+      invoice.recognizedGrossAmount = 0;
+      invoice.recognizedVatAmount = 0;
     }
-
-    invoice.status = "issued";
-    invoice.journalEntryId = posted.journalEntry.journalEntryId;
-    invoice.issuedAt = nowIso(clock);
-    invoice.updatedAt = nowIso(clock);
 
     if (invoice.invoiceType !== "credit_note") {
       ensureOpenItemForInvoice({
@@ -1434,7 +1462,10 @@ export function createArEngine({
       action: "ar.invoice.issued",
       entityType: "ar_invoice",
       entityId: invoice.customerInvoiceId,
-      explanation: `Issued invoice ${invoice.invoiceNumber} and posted journal ${invoice.journalEntryId}.`
+      explanation:
+        accountingDirective.ledgerOperationalPostingRequired
+          ? `Issued invoice ${invoice.invoiceNumber} and posted journal ${invoice.journalEntryId}.`
+          : `Issued invoice ${invoice.invoiceNumber} with accounting recognition deferred to ${accountingDirective.arInvoiceRecognitionTrigger}.`
     });
     return copy(invoice);
   }
@@ -1450,7 +1481,7 @@ export function createArEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const invoice = requireInvoiceRecord(state, companyId, customerInvoiceId);
-    if (!invoice.journalEntryId) {
+    if (!AR_INVOICE_ALREADY_ISSUED_STATUSES.has(invoice.status)) {
       throw createError(409, "invoice_not_issued", "Invoices must be issued before delivery.");
     }
     if (!integrationPlatform || typeof integrationPlatform.prepareInvoiceDelivery !== "function") {
@@ -1521,7 +1552,7 @@ export function createArEngine({
     if (!integrationPlatform || typeof integrationPlatform.createPaymentLink !== "function") {
       throw createError(500, "integration_platform_missing", "Integration platform is required for payment links.");
     }
-    if (!invoice.journalEntryId) {
+    if (!AR_INVOICE_ALREADY_ISSUED_STATUSES.has(invoice.status)) {
       throw createError(409, "invoice_not_issued", "Payment links require an issued invoice.");
     }
     if (invoice.invoiceType === "credit_note") {
@@ -1633,6 +1664,18 @@ export function createArEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const openItem = requireOpenItemRecord(state, companyId, arOpenItemId);
+    const invoice = openItem.customerInvoiceId ? state.invoices.get(openItem.customerInvoiceId) || null : null;
+    if (
+      invoice &&
+      invoice.accountingMethodTimingMode === "payment_date_with_year_end_catch_up" &&
+      !invoice.journalEntryId
+    ) {
+      throw createError(
+        409,
+        "cash_method_payment_recognition_not_operationalized",
+        "Cash-method payment recognition is not yet operationalized for AR allocations."
+      );
+    }
     if (!ledgerPlatform || typeof ledgerPlatform.applyPostingIntent !== "function") {
       throw createError(500, "ledger_platform_missing", "Ledger platform is required for AR allocations.");
     }
@@ -1683,9 +1726,9 @@ export function createArEngine({
     });
     const resolvedFunctionalReceiptAmount = functionalReceiptAmounts.totalFunctionalReceiptAmount;
     const resolvedFunctionalSettledAmount = functionalReceiptAmounts.allocatedFunctionalReceiptAmount;
-    const matchingRun = arPaymentMatchingRunId
-      ? requirePaymentMatchingRunRecord(state, openItem.companyId, arPaymentMatchingRunId)
-      : null;
+      const matchingRun = arPaymentMatchingRunId
+        ? requirePaymentMatchingRunRecord(state, openItem.companyId, arPaymentMatchingRunId)
+        : null;
     const allocation = {
       arAllocationId: crypto.randomUUID(),
       companyId: openItem.companyId,
@@ -3805,14 +3848,18 @@ function normalizeCommercialLine({ state, vatPlatform, companyId, currencyCode, 
     vatCode,
     vatDecisionId: null,
     vatReviewQueueItemId: null,
-    vatDecisionCategory: null,
-    vatDeclarationBoxCodes: [],
-    vatEffectiveRate: null,
-    vatPostingEntries: [],
-    recurringFlag: line.recurringFlag === true || item?.recurringFlag === true,
-    projectBoundFlag: line.projectBoundFlag === true || item?.projectBoundFlag === true
-  };
-}
+      vatDecisionCategory: null,
+      vatDeclarationBoxCodes: [],
+      vatEffectiveRate: null,
+      vatPostingEntries: [],
+      vatDecisionIds: [],
+      recognizedLineAmount: 0,
+      recognizedVatAmount: 0,
+      recognizedGrossAmount: 0,
+      recurringFlag: line.recurringFlag === true || item?.recurringFlag === true,
+      projectBoundFlag: line.projectBoundFlag === true || item?.projectBoundFlag === true
+    };
+  }
 
 function resolveItemPrice(state, companyId, item, priceListId, currencyCode, referenceDate) {
   if (!item) {
@@ -4027,9 +4074,10 @@ function evaluateInvoiceVatDecisions({
         "invoice_issue_blocked",
         `Invoice cannot be issued before VAT decision blockers are resolved for line ${line.lineNumber}.`
       );
-    }
-    line.vatDecisionId = vatDecision.vatDecisionId;
-    line.vatReviewQueueItemId = vatEvaluation.reviewQueueItem?.vatReviewQueueItemId || null;
+      }
+      line.vatDecisionId = vatDecision.vatDecisionId;
+      line.vatDecisionIds = uniqueTexts([...(line.vatDecisionIds || []), vatDecision.vatDecisionId]);
+      line.vatReviewQueueItemId = vatEvaluation.reviewQueueItem?.vatReviewQueueItemId || null;
     line.vatDecisionCategory = vatDecision.outputs?.decisionCategory || vatDecision.decisionCategory || null;
     line.vatDeclarationBoxCodes = copy(vatDecision.outputs?.declarationBoxCodes || vatDecision.declarationBoxCodes || []);
     line.vatEffectiveRate = Number(vatDecision.outputs?.vatRate ?? vatDecision.vatRate ?? 0);
@@ -4393,6 +4441,43 @@ function createJournalLine(
     record.functionalCreditAmount = roundMoney(functionalCreditAmount);
   }
   return record;
+}
+
+function applyInvoiceAccountingMethodSnapshot(invoice, accountingDirective) {
+  invoice.accountingMethodProfileId = accountingDirective.methodProfileId || null;
+  invoice.accountingMethodTimingMode = accountingDirective.timingMode || "invoice_date_accrual";
+  invoice.primaryRecognitionTrigger = accountingDirective.arInvoiceRecognitionTrigger || "AR_INVOICE_ISSUE";
+}
+
+function resolveArExecutionDirective({ accountingMethodPlatform, companyId, accountingDate, eventCode }) {
+  if (accountingMethodPlatform && typeof accountingMethodPlatform.resolveExecutionDirective === "function") {
+    return accountingMethodPlatform.resolveExecutionDirective({
+      companyId,
+      accountingDate,
+      eventCode
+    });
+  }
+  return {
+    companyId,
+    accountingDate,
+    methodProfileId: null,
+    methodCode: "FAKTURERINGSMETOD",
+    timingMode: "invoice_date_accrual",
+    arInvoiceRecognitionTrigger: "AR_INVOICE_ISSUE",
+    apInvoiceRecognitionTrigger: "AP_INVOICE_POST",
+    arVatRecognitionTrigger: "AR_INVOICE_ISSUE",
+    apVatRecognitionTrigger: "AP_INVOICE_POST",
+    receivableRecognitionDateBasis: "invoice_date",
+    payableRecognitionDateBasis: "invoice_date",
+    vatRecognitionDateBasis: "invoice_date",
+    settlementPostingRequired: true,
+    yearEndCatchUpRequired: false,
+    eventCode,
+    primaryRecognitionRequired: true,
+    vatDecisionRequired: true,
+    ledgerOperationalPostingRequired: true,
+    operationalDocumentIssueAllowed: true
+  };
 }
 
 function allocateFunctionalVatAmounts({ invoice, accountingCurrencyCode, exchangeRate }) {

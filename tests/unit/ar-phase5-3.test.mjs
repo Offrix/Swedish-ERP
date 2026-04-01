@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createArEngine } from "../../packages/domain-ar/src/index.mjs";
+import { createAccountingMethodEngine } from "../../packages/domain-accounting-method/src/index.mjs";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 import { createIntegrationEngine } from "../../packages/domain-integrations/src/index.mjs";
 import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
@@ -415,6 +416,63 @@ test("Phase 8.1 blocks automatic bad debt VAT relief after partial settlement", 
   );
 });
 
+test("Phase 8.6 blocks cash-method AR allocation until payment-time recognition runtime is implemented", () => {
+  const clock = () => new Date("2026-09-03T08:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const integrations = createIntegrationEngine({ clock });
+  const accountingMethod = createActiveAccountingMethodPlatform({
+    clock,
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2026-01-01"
+  });
+  const ar = createArEngine({
+    clock,
+    seedDemo: false,
+    accountingMethodPlatform: accountingMethod,
+    ledgerPlatform: ledger,
+    integrationPlatform: integrations,
+    ...AR_TEST_ENGINE_OPTIONS
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({ companyId: COMPANY_ID, fiscalYear: 2026, actorId: "user-1" });
+
+  const customer = createCustomer(ar);
+  const item = createItem(ar);
+  const invoice = ar.createInvoice({
+    companyId: COMPANY_ID,
+    customerId: customer.customerId,
+    invoiceType: "standard",
+    issueDate: "2026-07-01",
+    dueDate: "2026-07-31",
+    currencyCode: "SEK",
+    lines: [{ itemId: item.arItemId, quantity: 1, unitPrice: 1000 }],
+    actorId: "user-1"
+  });
+  ar.issueInvoice({
+    companyId: COMPANY_ID,
+    customerInvoiceId: invoice.customerInvoiceId,
+    actorId: "user-1"
+  });
+  const openItem = ar.listOpenItems({ companyId: COMPANY_ID })[0];
+
+  assert.throws(
+    () =>
+      ar.createOpenItemAllocation({
+        companyId: COMPANY_ID,
+        arOpenItemId: openItem.arOpenItemId,
+        allocationAmount: 500,
+        receiptAmount: 500,
+        allocatedOn: "2026-08-01",
+        sourceChannel: "manual",
+        bankTransactionUid: "bank-txn-cash-method",
+        reasonCode: "partial_payment",
+        actorId: "user-1"
+      }),
+    (error) => error?.code === "cash_method_payment_recognition_not_operationalized"
+  );
+});
+
 function createCustomer(ar, overrides = {}) {
   return ar.createCustomer({
     companyId: COMPANY_ID,
@@ -453,6 +511,34 @@ function createItem(ar) {
     vatCode: "VAT_SE_DOMESTIC_25",
     recurringFlag: true
   });
+}
+
+function createActiveAccountingMethodPlatform({ clock, companyId, methodCode, effectiveFrom }) {
+  const accountingMethod = createAccountingMethodEngine({
+    seedDemo: false,
+    clock
+  });
+  const assessment = accountingMethod.assessCashMethodEligibility({
+    companyId,
+    annualNetTurnoverSek: 1_000_000,
+    legalFormCode: "AB",
+    actorId: "user-1"
+  });
+  const profile = accountingMethod.createMethodProfile({
+    companyId,
+    methodCode,
+    effectiveFrom,
+    fiscalYearStartDate: effectiveFrom,
+    eligibilityAssessmentId: assessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "user-1"
+  });
+  accountingMethod.activateMethodProfile({
+    companyId,
+    methodProfileId: profile.methodProfileId,
+    actorId: "user-1"
+  });
+  return accountingMethod;
 }
 
 function sumJournalAmount(journal, accountNumber, side) {
