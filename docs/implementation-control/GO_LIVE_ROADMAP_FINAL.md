@@ -683,7 +683,7 @@ Ingen live payroll eller project cost allocation före approved employment/time/
 - [x] 10.1 [REWRITE] HR blockerar överlappande anställningar, kontrakt, placeringar och samtidiga aktiva scopes där de inte uttryckligen stöds.
 - [x] 10.2 [HARDEN] Time/absence/flex/overtime levererar `ApprovedTimeSet` och `AbsenceDecision` med låst payroll input per period.
 - [x] 10.3 [REWRITE] Balances engine blir källa för semesterdagar, carry-forward, expiry och semesterårsgränser.
-- [ ] 10.4 [REWRITE] Collective agreements levererar körbara rates, OB-, jour-, beredskaps- och pension/semesterpåslag som payroll faktiskt konsumerar.
+- [x] 10.4 [REWRITE] Collective agreements levererar körbara rates, OB-, jour-, beredskaps- och pension/semesterpåslag som payroll faktiskt konsumerar.
 - [ ] 10.5 [NEW BUILD][MIGRATE] Migration intake definierar canonical employee master, employment history, YTD, absence, benefits, travel, pension and agreement snapshots.
 
 **Exit gate**  

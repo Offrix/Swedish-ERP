@@ -5022,6 +5022,8 @@ function calculateEmploymentRun({
     companyId: employment.companyId,
     employment,
     contract,
+    hrSnapshot,
+    agreementOverlay,
     timeEntries,
     leaveEntries,
     leavePayItemMappings,
@@ -5117,6 +5119,7 @@ function calculateEmploymentRun({
         contractMonthlySalary: contract?.monthlySalary ?? null,
         grossCompensationBeforeDeductions,
         pensionableBaseBeforeExchange,
+        agreementOverlay,
         actorId: "payroll-engine"
       })
     : { enrollments: [], activeAgreements: [], basisSnapshots: [], events: [], payLinePayloads: [], warnings: [] };
@@ -5476,7 +5479,19 @@ function createBaseSalaryLines({ companyId, employment, contract, runType, state
   return [];
 }
 
-function createVariableLines({ companyId, employment, contract, timeEntries, leaveEntries, leavePayItemMappings, manualInputs, state, warnings }) {
+function createVariableLines({
+  companyId,
+  employment,
+  contract,
+  hrSnapshot = null,
+  agreementOverlay = null,
+  timeEntries,
+  leaveEntries,
+  leavePayItemMappings,
+  manualInputs,
+  state,
+  warnings
+}) {
   const lines = [];
   const hourlyRate = contract?.hourlyRate ?? null;
   const groupedTimeEntries = aggregateTimeEntriesByDimensions(timeEntries);
@@ -5520,7 +5535,10 @@ function createVariableLines({ companyId, employment, contract, timeEntries, lea
         payItem,
         employment,
         contract,
+        hrSnapshot,
         quantity: definition.quantity,
+        agreementRateComponent: resolveAgreementPayItemRateComponent(agreementOverlay, definition.code),
+        requireAgreementRate: Boolean(agreementOverlay),
         sourceType: "time_entry",
         sourceId: buildSourceSummaryId(group.timeEntryIds),
         dimensionJson: group.dimensionJson,
@@ -5553,9 +5571,12 @@ function createVariableLines({ companyId, employment, contract, timeEntries, lea
       payItem,
       employment,
       contract,
+      hrSnapshot,
       quantity: group.quantityDays,
       unitRate: mapping.unitRate,
       rateFactor: mapping.rateFactor,
+      agreementRateComponent: resolveAgreementPayItemRateComponent(agreementOverlay, payItem.payItemCode),
+      requireAgreementRate: Boolean(agreementOverlay && payItem.payItemCode === "VACATION_SUPPLEMENT"),
       sourceType: "leave_entry",
       sourceId: buildSourceSummaryId(group.leaveEntryIds),
       warnings
@@ -5567,6 +5588,35 @@ function createVariableLines({ companyId, employment, contract, timeEntries, lea
 
   for (const manualInput of manualInputs) {
     const payItem = requirePayItemByCode(state, companyId, manualInput.payItemCode);
+    const agreementRateComponent = resolveAgreementPayItemRateComponent(agreementOverlay, payItem.payItemCode);
+    if (manualInput.amount == null && manualInput.quantity != null && agreementRateComponent) {
+      const configured = buildConfiguredQuantityLine({
+        payItem,
+        employment,
+        contract,
+        hrSnapshot,
+        quantity: manualInput.quantity,
+        unitRate: manualInput.unitRate,
+        agreementRateComponent,
+        requireAgreementRate: Boolean(agreementOverlay && isAgreementDrivenPayItemCode(payItem.payItemCode)),
+        sourceType: manualInput.sourceType,
+        sourceId: manualInput.sourceId,
+        dimensionJson: manualInput.dimensionJson,
+        warnings
+      });
+      if (configured) {
+        lines.push(
+          configured.sourcePeriod || configured.note
+            ? {
+                ...configured,
+                sourcePeriod: manualInput.sourcePeriod,
+                note: manualInput.note || configured.note
+              }
+            : configured
+        );
+      }
+      continue;
+    }
     lines.push(
       createPayLine({
         payItem,
@@ -8438,9 +8488,12 @@ function buildConfiguredQuantityLine({
   payItem,
   employment,
   contract,
+  hrSnapshot = null,
   quantity,
   unitRate = null,
   rateFactor = null,
+  agreementRateComponent = null,
+  requireAgreementRate = false,
   sourceType,
   sourceId,
   dimensionJson = null,
@@ -8449,6 +8502,37 @@ function buildConfiguredQuantityLine({
   const resolvedQuantity = roundQuantity(quantity || 0);
   if (!resolvedQuantity) {
     return null;
+  }
+
+  const resolvedAgreementRate = normalizeAgreementRateComponent(agreementRateComponent, payItem.payItemCode);
+  if (resolvedAgreementRate) {
+    const lineFromAgreement = buildAgreementConfiguredQuantityLine({
+      payItem,
+      employment,
+      contract,
+      hrSnapshot,
+      quantity: resolvedQuantity,
+      agreementRateComponent: resolvedAgreementRate,
+      sourceType,
+      sourceId,
+      dimensionJson,
+      warnings
+    });
+    if (lineFromAgreement) {
+      return lineFromAgreement;
+    }
+  }
+  if (requireAgreementRate) {
+    return buildAgreementRateMissingLine({
+      payItem,
+      employment,
+      quantity: resolvedQuantity,
+      sourceType,
+      sourceId,
+      dimensionJson,
+      warnings,
+      message: `Agreement overlay for ${payItem.payItemCode} is missing or non-executable for ${employment.employmentNo}.`
+    });
   }
 
   const resolvedRateFactor = rateFactor ?? payItem.defaultRateFactor ?? 1;
@@ -8511,6 +8595,221 @@ function buildConfiguredQuantityLine({
     sourceId,
     dimensionJson
   });
+}
+
+function resolveAgreementPayItemRateComponent(agreementOverlay, payItemCode) {
+  if (!agreementOverlay || typeof agreementOverlay !== "object") {
+    return null;
+  }
+  const payItemRates = agreementOverlay.rateComponents?.payItemRates;
+  if (!payItemRates || typeof payItemRates !== "object" || Array.isArray(payItemRates)) {
+    return null;
+  }
+  return payItemRates[normalizeCode(payItemCode, "agreement_overlay_pay_item_code_required")] || null;
+}
+
+function isAgreementDrivenPayItemCode(payItemCode) {
+  return ["OVERTIME", "OB", "JOUR", "STANDBY", "VACATION_SUPPLEMENT"].includes(
+    normalizeCode(payItemCode, "agreement_overlay_pay_item_code_required")
+  );
+}
+
+function normalizeAgreementRateComponent(component, payItemCode) {
+  if (!component || typeof component !== "object" || Array.isArray(component)) {
+    return null;
+  }
+  const resolvedPayItemCode = normalizeCode(component.payItemCode || payItemCode, "agreement_overlay_pay_item_code_required");
+  if (resolvedPayItemCode !== normalizeCode(payItemCode, "agreement_overlay_pay_item_code_required")) {
+    return null;
+  }
+  const calculationMode = normalizeOptionalText(component.calculationMode);
+  if (!calculationMode) {
+    return null;
+  }
+  return {
+    payItemCode: resolvedPayItemCode,
+    calculationMode,
+    basisCode: normalizeOptionalText(component.basisCode) || null,
+    multiplier: normalizeOptionalNumber(component.multiplier, "agreement_overlay_multiplier_invalid"),
+    unitRate: normalizeOptionalMoney(component.unitRate, "agreement_overlay_unit_rate_invalid"),
+    percent: normalizeOptionalNumber(component.percent, "agreement_overlay_percent_invalid"),
+    autoGenerate: component.autoGenerate === true,
+    note: normalizeOptionalText(component.note)
+  };
+}
+
+function buildAgreementConfiguredQuantityLine({
+  payItem,
+  employment,
+  contract,
+  hrSnapshot,
+  quantity,
+  agreementRateComponent,
+  sourceType,
+  sourceId,
+  dimensionJson,
+  warnings
+}) {
+  if (agreementRateComponent.calculationMode === "unit_rate") {
+    if (agreementRateComponent.unitRate == null) {
+      return buildAgreementRateMissingLine({
+        payItem,
+        employment,
+        quantity,
+        sourceType,
+        sourceId,
+        dimensionJson,
+        warnings,
+        message: `Agreement overlay for ${payItem.payItemCode} requires a unit rate for ${employment.employmentNo}.`
+      });
+    }
+    return createPayLine({
+      payItem,
+      employment,
+      quantity,
+      unitRate: agreementRateComponent.unitRate,
+      amount: payItem.calculationBasis === "reporting_only" ? 0 : roundMoney(quantity * agreementRateComponent.unitRate),
+      sourceType,
+      sourceId,
+      note: agreementRateComponent.note,
+      dimensionJson
+    });
+  }
+
+  if (agreementRateComponent.calculationMode === "multiplier") {
+    const basisAmount = resolveAgreementBasisAmount({
+      basisCode: agreementRateComponent.basisCode || "contract_hourly_rate",
+      contract,
+      hrSnapshot,
+      employment,
+      warnings,
+      payItemCode: payItem.payItemCode
+    });
+    if (basisAmount == null || agreementRateComponent.multiplier == null) {
+      return buildAgreementRateMissingLine({
+        payItem,
+        employment,
+        quantity,
+        sourceType,
+        sourceId,
+        dimensionJson,
+        warnings,
+        message: `Agreement overlay for ${payItem.payItemCode} requires a base rate and multiplier for ${employment.employmentNo}.`
+      });
+    }
+    const effectiveRate = roundMoney(basisAmount * agreementRateComponent.multiplier);
+    return createPayLine({
+      payItem,
+      employment,
+      quantity,
+      unitRate: effectiveRate,
+      amount: payItem.calculationBasis === "reporting_only" ? 0 : roundMoney(quantity * effectiveRate),
+      sourceType,
+      sourceId,
+      note: agreementRateComponent.note,
+      dimensionJson
+    });
+  }
+
+  if (agreementRateComponent.calculationMode === "percent_of_basis") {
+    const basisAmount = resolveAgreementBasisAmount({
+      basisCode: agreementRateComponent.basisCode || "contract_monthly_salary",
+      contract,
+      hrSnapshot,
+      employment,
+      warnings,
+      payItemCode: payItem.payItemCode
+    });
+    if (basisAmount == null || agreementRateComponent.percent == null) {
+      return buildAgreementRateMissingLine({
+        payItem,
+        employment,
+        quantity,
+        sourceType,
+        sourceId,
+        dimensionJson,
+        warnings,
+        message: `Agreement overlay for ${payItem.payItemCode} requires a basis amount and percent for ${employment.employmentNo}.`
+      });
+    }
+    const percentUnitRate = roundMoney(basisAmount * (agreementRateComponent.percent / 100));
+    return createPayLine({
+      payItem,
+      employment,
+      quantity,
+      unitRate: percentUnitRate,
+      amount: payItem.calculationBasis === "reporting_only" ? 0 : roundMoney(quantity * percentUnitRate),
+      sourceType,
+      sourceId,
+      note: agreementRateComponent.note,
+      dimensionJson
+    });
+  }
+
+  return null;
+}
+
+function buildAgreementRateMissingLine({
+  payItem,
+  employment,
+  quantity,
+  sourceType,
+  sourceId,
+  dimensionJson,
+  warnings,
+  message
+}) {
+  warnings.push(createWarning("agreement_overlay_rate_missing", message));
+  return createPayLine({
+    payItem,
+    employment,
+    quantity,
+    amount: 0,
+    unitRate: null,
+    sourceType,
+    sourceId,
+    calculationStatus: "rate_required",
+    dimensionJson
+  });
+}
+
+function resolveAgreementBasisAmount({ basisCode, contract, hrSnapshot = null, employment, warnings, payItemCode }) {
+  const resolvedBasisCode = normalizeOptionalText(basisCode) || "contract_hourly_rate";
+  if (resolvedBasisCode === "contract_hourly_rate" || resolvedBasisCode === "hourly_rate" || resolvedBasisCode === "derived_hourly_rate") {
+    if (contract?.hourlyRate != null) {
+      return roundMoney(contract.hourlyRate);
+    }
+    const ordinaryHoursPerMonth = Number(hrSnapshot?.activeSalaryBasis?.ordinaryHoursPerMonth || 0);
+    if (contract?.monthlySalary != null && ordinaryHoursPerMonth > 0) {
+      return roundMoney(contract.monthlySalary / ordinaryHoursPerMonth);
+    }
+    warnings.push(
+      createWarning(
+        "agreement_overlay_basis_missing",
+        `Agreement overlay for ${payItemCode} could not derive hourly basis for ${employment.employmentNo}.`
+      )
+    );
+    return null;
+  }
+  if (resolvedBasisCode === "contract_monthly_salary" || resolvedBasisCode === "monthly_salary") {
+    if (contract?.monthlySalary != null) {
+      return roundMoney(contract.monthlySalary);
+    }
+    warnings.push(
+      createWarning(
+        "agreement_overlay_basis_missing",
+        `Agreement overlay for ${payItemCode} requires a monthly salary basis for ${employment.employmentNo}.`
+      )
+    );
+    return null;
+  }
+  warnings.push(
+    createWarning(
+      "agreement_overlay_basis_unsupported",
+      `Agreement overlay basis ${resolvedBasisCode} is unsupported for ${payItemCode} on ${employment.employmentNo}.`
+    )
+  );
+  return null;
 }
 
 function createPayLine({

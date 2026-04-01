@@ -366,6 +366,9 @@ test("Step 20 API exposes employment snapshots, manual time approvals and unifie
     assert.equal(timeBase.pendingApprovalCount, 0);
     assert.equal(timeBase.approvedTimeEntries.length, 1);
     assert.equal(timeBase.agreementOverlay.agreementVersionCode, "ALMEGA_SERVICE_2026_01");
+    assert.ok(timeBase.agreementOverlay.agreementOverlayId);
+    assert.equal(timeBase.agreementOverlay.agreementCode, "ALMEGA_SERVICE");
+    assert.equal(timeBase.agreementOverlay.rateComponents.payItemRates.OVERTIME.multiplier, 1.8);
     assert.equal(timeBase.timeBalances.balances.overtime_minutes, 30);
     assert.equal(timeBase.vacationBalance.paidDays, 24);
     assert.equal(timeBase.vacationBalance.savedDays, 0);

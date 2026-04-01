@@ -295,6 +295,9 @@ test("Step 20 builds a unified people and time base with approvals, balance sync
   assert.equal(timeBase.pendingApprovalCount, 0);
   assert.equal(timeBase.agreementOverlay.agreementVersionCode, "ALMEGA_FIELD_2026_01");
   assert.equal(timeBase.agreementOverlay.ruleSet.overtimeMultiplier, 1.75);
+  assert.ok(timeBase.agreementOverlay.agreementOverlayId);
+  assert.equal(timeBase.agreementOverlay.agreementCode, "ALMEGA_FIELD");
+  assert.equal(timeBase.agreementOverlay.rateComponents.payItemRates.OVERTIME.multiplier, 1.75);
   assert.equal(timeBase.timeBalances.balances.overtime_minutes, 30);
 
   const overtimeSnapshot = timeBase.balanceSnapshots.find((candidate) => candidate.account.balanceTypeCode === "OVERTIME_MINUTES");

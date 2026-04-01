@@ -837,11 +837,12 @@ export function createCollectiveAgreementsEngine({
   }
 
   function evaluateAgreementOverlay({ companyId, employeeId, employmentId, eventDate, baseRuleSet = {} } = {}) {
+    const resolvedEventDate = normalizeRequiredDate(eventDate, "agreement_event_date_required");
     const activeAgreement = getActiveAgreementForEmployment({
       companyId,
       employeeId,
       employmentId,
-      eventDate
+      eventDate: resolvedEventDate
     });
     if (!activeAgreement) {
       return null;
@@ -856,7 +857,11 @@ export function createCollectiveAgreementsEngine({
     for (const override of activeAgreement.agreementOverrides) {
       Object.assign(mergedRuleSet, sanitizeJson(override.overridePayloadJson));
     }
+    const rateComponents = buildAgreementRateComponents(mergedRuleSet);
+    const validityWindow = resolveAgreementOverlayValidityWindow(activeAgreement);
     return {
+      agreementOverlayId: buildAgreementOverlayId(activeAgreement, resolvedEventDate),
+      agreementCode: activeAgreement.agreementFamily.code,
       agreementFamilyCode: activeAgreement.agreementFamily.code,
       agreementCatalogEntryId: activeAgreement.agreementCatalogEntry?.agreementCatalogEntryId || null,
       agreementVersionId: activeAgreement.agreementVersion.agreementVersionId,
@@ -864,9 +869,179 @@ export function createCollectiveAgreementsEngine({
       assignmentId: activeAgreement.agreementAssignment.agreementAssignmentId,
       localAgreementSupplementId: activeAgreement.localAgreementSupplement?.localAgreementSupplementId || null,
       overrides: activeAgreement.agreementOverrides.map((override) => override.agreementOverrideId),
+      validFrom: validityWindow.validFrom,
+      validTo: validityWindow.validTo,
+      rateComponents,
       ruleSet: mergedRuleSet
     };
   }
+}
+
+function buildAgreementOverlayId(activeAgreement, eventDate) {
+  return crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify({
+        agreementVersionId: activeAgreement.agreementVersion.agreementVersionId,
+        assignmentId: activeAgreement.agreementAssignment.agreementAssignmentId,
+        localAgreementSupplementId: activeAgreement.localAgreementSupplement?.localAgreementSupplementId || null,
+        overrides: activeAgreement.agreementOverrides.map((override) => override.agreementOverrideId).sort(),
+        eventDate
+      })
+    )
+    .digest("hex")
+    .slice(0, 24);
+}
+
+function resolveAgreementOverlayValidityWindow(activeAgreement) {
+  const candidates = [
+    activeAgreement.agreementVersion.effectiveFrom,
+    activeAgreement.agreementAssignment.effectiveFrom,
+    activeAgreement.localAgreementSupplement?.effectiveFrom || null
+  ].filter(Boolean);
+  const validFrom = [...candidates].sort().at(-1) || activeAgreement.agreementVersion.effectiveFrom;
+  const validTo = [activeAgreement.agreementVersion.effectiveTo, activeAgreement.agreementAssignment.effectiveTo, activeAgreement.localAgreementSupplement?.effectiveTo || null]
+    .filter(Boolean)
+    .sort()[0] || null;
+  return {
+    validFrom,
+    validTo
+  };
+}
+
+function buildAgreementRateComponents(ruleSet = {}) {
+  const resolvedRuleSet = sanitizeJson(ruleSet);
+  const explicitRateComponents =
+    resolvedRuleSet.rateComponents && typeof resolvedRuleSet.rateComponents === "object" && !Array.isArray(resolvedRuleSet.rateComponents)
+      ? sanitizeJson(resolvedRuleSet.rateComponents)
+      : {};
+
+  const payItemRates = {};
+  for (const entry of [
+    buildAgreementPayItemRateComponent({
+      payItemCode: "OVERTIME",
+      explicit: explicitRateComponents.overtime || explicitRateComponents.OVERTIME || null,
+      legacyMultiplier: resolvedRuleSet.overtimeMultiplier,
+      legacyUnitRate: resolvedRuleSet.overtimeUnitRate,
+      defaultBasisCode: "contract_hourly_rate"
+    }),
+    buildAgreementPayItemRateComponent({
+      payItemCode: "OB",
+      explicit: explicitRateComponents.ob || explicitRateComponents.OB || null,
+      legacyUnitRate: resolvedRuleSet.obUnitRate ?? resolvedRuleSet.obCategoryA,
+      defaultBasisCode: "contract_hourly_rate"
+    }),
+    buildAgreementPayItemRateComponent({
+      payItemCode: "JOUR",
+      explicit: explicitRateComponents.jour || explicitRateComponents.JOUR || null,
+      legacyUnitRate: resolvedRuleSet.jourUnitRate,
+      defaultBasisCode: "contract_hourly_rate"
+    }),
+    buildAgreementPayItemRateComponent({
+      payItemCode: "STANDBY",
+      explicit: explicitRateComponents.standby || explicitRateComponents.STANDBY || explicitRateComponents.beredskap || null,
+      legacyUnitRate: resolvedRuleSet.standbyUnitRate ?? resolvedRuleSet.beredskapUnitRate,
+      defaultBasisCode: "contract_hourly_rate"
+    }),
+    buildAgreementPayItemRateComponent({
+      payItemCode: "VACATION_SUPPLEMENT",
+      explicit: explicitRateComponents.vacationSupplement || explicitRateComponents.VACATION_SUPPLEMENT || null,
+      legacyPercent: resolvedRuleSet.vacationSupplementRate,
+      defaultBasisCode: "contract_monthly_salary",
+      autoGenerate: true
+    })
+  ]) {
+    if (entry) {
+      payItemRates[entry.payItemCode] = entry;
+    }
+  }
+
+  const pensionAdditionsSource = Array.isArray(explicitRateComponents.pensionAdditions)
+    ? explicitRateComponents.pensionAdditions
+    : Array.isArray(resolvedRuleSet.pensionAdditions)
+    ? resolvedRuleSet.pensionAdditions
+    : [];
+
+  return {
+    payItemRates,
+    pensionAdditions: pensionAdditionsSource
+      .map((candidate, index) => buildAgreementPensionAdditionComponent(candidate, index))
+      .filter(Boolean)
+  };
+}
+
+function buildAgreementPayItemRateComponent({
+  payItemCode,
+  explicit = null,
+  legacyMultiplier = null,
+  legacyUnitRate = null,
+  legacyPercent = null,
+  defaultBasisCode = "contract_hourly_rate",
+  autoGenerate = false
+} = {}) {
+  const candidate =
+    explicit && typeof explicit === "object" && !Array.isArray(explicit)
+      ? sanitizeJson(explicit)
+      : {};
+  const normalizedPayItemCode = normalizeCode(payItemCode, "agreement_overlay_pay_item_code_required");
+  const component = {
+    payItemCode: normalizedPayItemCode,
+    calculationMode: normalizeOptionalText(candidate.calculationMode) || null,
+    basisCode: normalizeOptionalText(candidate.basisCode) || defaultBasisCode,
+    multiplier: normalizeFiniteNumber(candidate.multiplier ?? legacyMultiplier),
+    unitRate: normalizeFiniteNumber(candidate.unitRate ?? legacyUnitRate),
+    percent: normalizeFiniteNumber(candidate.percent ?? legacyPercent),
+    autoGenerate: candidate.autoGenerate == null ? autoGenerate === true : candidate.autoGenerate === true,
+    note: normalizeOptionalText(candidate.note)
+  };
+  if (!component.calculationMode) {
+    if (component.unitRate != null) {
+      component.calculationMode = "unit_rate";
+    } else if (component.multiplier != null) {
+      component.calculationMode = "multiplier";
+    } else if (component.percent != null) {
+      component.calculationMode = "percent_of_basis";
+    }
+  }
+  if (!component.calculationMode) {
+    return null;
+  }
+  return component;
+}
+
+function buildAgreementPensionAdditionComponent(candidate, index) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return null;
+  }
+  const resolved = sanitizeJson(candidate);
+  const contributionMode = normalizeOptionalText(resolved.contributionMode)
+    || (resolved.fixedContributionAmount != null ? "fixed_amount" : resolved.contributionRatePercent != null ? "rate_percent" : null);
+  if (!contributionMode) {
+    return null;
+  }
+  return {
+    componentCode: normalizeCode(resolved.componentCode || `PENSION_${index + 1}`, "agreement_pension_component_code_required"),
+    planCode: normalizeOptionalText(resolved.planCode),
+    providerCode: normalizeOptionalText(resolved.providerCode),
+    payItemCode: normalizeOptionalText(resolved.payItemCode),
+    contributionMode,
+    contributionRatePercent: normalizeFiniteNumber(resolved.contributionRatePercent),
+    fixedContributionAmount: normalizeFiniteNumber(resolved.fixedContributionAmount),
+    basisCode: normalizeOptionalText(resolved.basisCode) || "pensionable_base_after_exchange",
+    dimensionJson:
+      resolved.dimensionJson && typeof resolved.dimensionJson === "object" && !Array.isArray(resolved.dimensionJson)
+        ? sanitizeJson(resolved.dimensionJson)
+        : {},
+    note: normalizeOptionalText(resolved.note)
+  };
+}
+
+function normalizeFiniteNumber(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function presentAgreementFamily(record) {

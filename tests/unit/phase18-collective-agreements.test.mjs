@@ -117,6 +117,16 @@ test("Step 18 collective agreements version and pin assignments without overlap"
   });
   assert.equal(overlay.ruleSet.overtimeMultiplier, 2);
   assert.equal(overlay.ruleSet.vacationSupplementRate, 0.8);
+  assert.ok(overlay.agreementOverlayId);
+  assert.equal(overlay.agreementCode, "TEKNIKAVTALET");
+  assert.equal(overlay.validFrom, "2026-01-01");
+  assert.equal(overlay.validTo, null);
+  assert.equal(overlay.rateComponents.payItemRates.OVERTIME.calculationMode, "multiplier");
+  assert.equal(overlay.rateComponents.payItemRates.OVERTIME.multiplier, 2);
+  assert.equal(overlay.rateComponents.payItemRates.OB.calculationMode, "unit_rate");
+  assert.equal(overlay.rateComponents.payItemRates.OB.unitRate, 32.5);
+  assert.equal(overlay.rateComponents.payItemRates.VACATION_SUPPLEMENT.calculationMode, "percent_of_basis");
+  assert.equal(overlay.rateComponents.payItemRates.VACATION_SUPPLEMENT.percent, 0.8);
 });
 
 test("Step 18 collective agreements dedupe idempotent family, version, assignment and override mutations", () => {

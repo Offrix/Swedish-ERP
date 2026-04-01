@@ -641,6 +641,7 @@ export function createPensionEngine({
     contractMonthlySalary = null,
     grossCompensationBeforeDeductions = 0,
     pensionableBaseBeforeExchange = 0,
+    agreementOverlay = null,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
@@ -792,6 +793,73 @@ export function createPensionEngine({
             sourcePeriod: resolvedReportingPeriod,
             note: `Pension ${enrollment.planCode}`,
             dimensionJson: normalizeDimensions(enrollment.dimensionJson)
+          }
+        }
+      });
+      event.payrollLinePayloadJson.sourceId = event.pensionEventId;
+      state.events.set(event.pensionEventId, event);
+      events.push(copy(event));
+      payLinePayloads.push(copy(event.payrollLinePayloadJson));
+    }
+
+    const agreementPensionComponents = listAgreementPensionComponents(agreementOverlay);
+    for (const component of agreementPensionComponents) {
+      const contributionBasisAmount = resolveAgreementContributionBasisAmount({
+        component,
+        monthlyGrossSalaryBeforeExchange: baseGrossSalary,
+        pensionableBaseBeforeExchange: resolvedPensionableBaseBeforeExchange,
+        pensionableBaseAfterExchange: resolvedPensionableBaseAfterExchange
+      });
+      const reportBasisAmount = resolveAgreementReportBasisAmount({
+        component,
+        contributionBasisAmount,
+        monthlyGrossSalaryBeforeExchange: baseGrossSalary,
+        pensionableBaseAfterExchange: resolvedPensionableBaseAfterExchange
+      });
+      const contributionAmount =
+        component.contributionMode === "fixed_amount"
+          ? roundMoney(component.fixedContributionAmount || 0)
+          : roundMoney(contributionBasisAmount * ((component.contributionRatePercent || 0) / 100));
+      if (contributionAmount <= 0) {
+        continue;
+      }
+      const planCode = resolveAgreementPlanCode(component);
+      const providerCode = resolveAgreementOverlayProviderCode(component, planCode);
+      const collectiveAgreementCode =
+        normalizeOptionalText(component.collectiveAgreementCode)
+        || normalizeOptionalText(agreementOverlay?.agreementCode)
+        || normalizeOptionalText(agreementOverlay?.agreementFamilyCode);
+      const event = upsertPensionEvent({
+        state,
+        clock,
+        sourceKey: `${resolvedCompanyId}:${resolvedEmploymentId}:${resolvedReportingPeriod}:agreement_overlay:${component.componentCode}`,
+        eventDraft: {
+          companyId: resolvedCompanyId,
+          employeeId: resolvedEmployeeId,
+          employmentId: resolvedEmploymentId,
+          reportingPeriod: resolvedReportingPeriod,
+          planCode,
+          providerCode,
+          collectiveAgreementCode,
+          eventCode: "agreement_pension_premium",
+          pensionableSalary: resolvedPensionableBaseAfterExchange,
+          reportBasisAmount,
+          contributionRatePercent: component.contributionMode === "rate_percent" ? component.contributionRatePercent : null,
+          contributionAmount,
+          salaryExchangeFlag: false,
+          extraPensionFlag: planCode === "EXTRA_PENSION",
+          reportStatus: "draft",
+          invoiceReconciliationStatus: "pending",
+          warningCodes: [],
+          payrollLinePayloadJson: {
+            processingStep: 9,
+            payItemCode: component.payItemCode || resolvePayItemCodeForPlan(planCode),
+            amount: contributionAmount,
+            sourceType: "pension_event",
+            sourceId: "pending",
+            sourcePeriod: resolvedReportingPeriod,
+            note: component.note || `Collective agreement pension ${component.componentCode}`,
+            dimensionJson: normalizeDimensions(component.dimensionJson)
           }
         }
       });
@@ -1150,6 +1218,71 @@ function defaultContributionBasisCode(planCode) {
     default:
       return "monthly_pensionable_salary";
   }
+}
+
+function listAgreementPensionComponents(agreementOverlay) {
+  const components = agreementOverlay?.rateComponents?.pensionAdditions;
+  return Array.isArray(components)
+    ? components.filter((component) => component && typeof component === "object" && !Array.isArray(component)).map(copy)
+    : [];
+}
+
+function resolveAgreementContributionBasisAmount({
+  component,
+  monthlyGrossSalaryBeforeExchange,
+  pensionableBaseBeforeExchange,
+  pensionableBaseAfterExchange
+}) {
+  switch (normalizeOptionalText(component.basisCode) || "pensionable_base_after_exchange") {
+    case "annual_pensionable_salary":
+      return roundMoney(pensionableBaseAfterExchange * 12);
+    case "monthly_gross_salary":
+    case "gross_compensation_before_deductions":
+      return roundMoney(monthlyGrossSalaryBeforeExchange);
+    case "pensionable_base_before_exchange":
+      return roundMoney(pensionableBaseBeforeExchange);
+    default:
+      return roundMoney(pensionableBaseAfterExchange);
+  }
+}
+
+function resolveAgreementReportBasisAmount({
+  component,
+  contributionBasisAmount,
+  monthlyGrossSalaryBeforeExchange,
+  pensionableBaseAfterExchange
+}) {
+  const planCode = resolveAgreementPlanCode(component);
+  return resolveReportBasisAmount({
+    planCode,
+    contributionBasisAmount,
+    monthlyGrossSalaryBeforeExchange,
+    pensionableBaseAfterExchange
+  });
+}
+
+function resolveAgreementPlanCode(component) {
+  const explicitPlanCode = normalizeOptionalText(component.planCode);
+  if (explicitPlanCode && PENSION_PLAN_CODES.includes(explicitPlanCode)) {
+    return explicitPlanCode;
+  }
+  const explicitPayItemCode = normalizeOptionalText(component.payItemCode);
+  if (explicitPayItemCode === "FORA_PREMIUM") {
+    return "FORA";
+  }
+  if (explicitPayItemCode === "EXTRA_PENSION_PREMIUM") {
+    return "EXTRA_PENSION";
+  }
+  return "ITP1";
+}
+
+function resolveAgreementOverlayProviderCode(component, planCode) {
+  const explicitProviderCode = normalizeOptionalText(component.providerCode);
+  if (explicitProviderCode && PENSION_PROVIDER_CODES.includes(explicitProviderCode)) {
+    return explicitProviderCode;
+  }
+  const plan = PLAN_CATALOG_SEED.find((candidate) => candidate.planCode === planCode) || null;
+  return plan?.defaultProviderCode || "custom";
 }
 
 function resolveContributionBasisAmount({ enrollment, monthlyGrossSalaryBeforeExchange, pensionableBaseAfterExchange }) {
