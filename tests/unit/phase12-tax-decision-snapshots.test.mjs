@@ -236,6 +236,39 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.oneTimeLookupRatePercent, 34);
   assert.equal(extraRun.payslips[0].totals.taxDecision.outputs.annualIncomeBasisAmount, 480000);
 
+  const sinkEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Sune",
+    familyName: "Sinksnapshot",
+    monthlySalary: 40000,
+    identityValue: "19800112-0008"
+  });
+  const sinkDecision = payrollPlatform.createTaxDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employmentId: sinkEmployee.employment.employmentId,
+    decisionType: "sink",
+    incomeYear: 2026,
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    sinkRatePercent: 22.5,
+    sinkSeaIncome: false,
+    decisionSource: "skatteverket_sink_decision",
+    decisionReference: "sink-2026-001",
+    evidenceRef: "evidence-sink-2026",
+    actorId: "unit-test"
+  });
+  assert.equal(sinkDecision.decisionType, "sink");
+  const sinkRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [sinkEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(sinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "sink");
+  assert.equal(sinkRun.payslips[0].totals.taxDecision.outputs.taxFieldCode, "sink_tax");
+  assert.equal(sinkRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 9000);
+
   const aSinkEmployee = createMonthlyEmployee({
     hrPlatform,
     givenName: "Aron",

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
-import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -191,6 +191,69 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
     assert.equal(aSinkAgiEmployee.payloadJson.taxFields.sinkTax, null);
     assert.equal(aSinkAgiEmployee.payloadJson.taxFields.aSinkTax, 6000);
 
+    const sinkEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Siv",
+      familyName: "Sinkapi",
+      identityValue: "19800112-0206"
+    });
+    const sinkDecision = await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: sinkEmployee.employment.employmentId,
+        decisionType: "sink",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        sinkRatePercent: 22.5,
+        decisionSource: "skatteverket_sink_decision",
+        decisionReference: "sink-api-2026",
+        evidenceRef: "evidence-sink-api-2026"
+      }
+    });
+    assert.equal(sinkDecision.status, "approved");
+    assert.equal(sinkDecision.decisionType, "sink");
+    const sinkRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202604",
+        employmentIds: [sinkEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(sinkRun.payslips[0].totals.taxDecision.outputs.decisionType, "sink");
+    assert.equal(sinkRun.payslips[0].totals.taxDecision.outputs.taxFieldCode, "sink_tax");
+    assert.equal(sinkRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 9000);
+    await requestJson(baseUrl, `/v1/payroll/pay-runs/${sinkRun.payRunId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    const sinkAgiSubmission = await requestJson(baseUrl, "/v1/payroll/agi-submissions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        reportingPeriod: "202604"
+      }
+    });
+    const sinkAgiEmployee = sinkAgiSubmission.currentVersion.employees.find(
+      (candidate) => candidate.employeeId === sinkEmployee.employee.employeeId
+    );
+    assert.equal(sinkAgiEmployee.payloadJson.taxFields.preliminaryTax, null);
+    assert.equal(sinkAgiEmployee.payloadJson.taxFields.sinkTax, 9000);
+    assert.equal(sinkAgiEmployee.payloadJson.taxFields.aSinkTax, null);
+
     const oneTimeEmployee = await createMonthlyEmployee({
       baseUrl,
       token: sessionToken,
@@ -290,7 +353,8 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
       token: sessionToken,
       givenName: "Ellen",
       familyName: "Emergencyapi",
-      identityValue: "19800112-6666"
+      identityValue: "19800112-6666",
+      monthlySalary: 30000
     });
     const emergencyDraft = await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
       method: "POST",
@@ -316,22 +380,53 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
     assert.equal(emergencyDraft.overrideEndsOn, "2026-03-31");
     assert.equal(emergencyDraft.rollbackPlanRef, "rollback-plan-tax-api-emergency-202603");
 
-    const approveResponse = await fetch(
-      `${baseUrl}/v1/payroll/tax-decisions/${emergencyDraft.taxDecisionSnapshotId}/approve`,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${sessionToken}`,        "idempotency-key": crypto.randomUUID()
-        },
-        body: JSON.stringify({
-          companyId: COMPANY_ID
-        })
+    const approvePayload = await requestJson(baseUrl, `/v1/payroll/tax-decisions/${emergencyDraft.taxDecisionSnapshotId}/approve`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 409,
+      body: {
+        companyId: COMPANY_ID
       }
-    );
-    const approvePayload = await approveResponse.json();
-    assert.equal(approveResponse.status, 409);
+    });
     assert.equal(approvePayload.error, "tax_decision_snapshot_dual_review_required");
+
+    const emergencyApproved = await requestJson(baseUrl, `/v1/payroll/tax-decisions/${emergencyDraft.taxDecisionSnapshotId}/approve`, {
+      method: "POST",
+      token: approverSessionToken,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(emergencyApproved.status, "approved");
+    assert.ok(emergencyApproved.approvedByActorId);
+    assert.equal(emergencyApproved.overrideEndsOn, "2026-03-31");
+    assert.equal(emergencyApproved.rollbackPlanRef, "rollback-plan-tax-api-emergency-202603");
+
+    const approvedEmergencySnapshots = await requestJson(
+      baseUrl,
+      `/v1/payroll/tax-decisions?companyId=${COMPANY_ID}&employmentId=${emergencyEmployee.employment.employmentId}&effectiveDate=2026-03-25`,
+      { token: sessionToken }
+    );
+    assert.equal(approvedEmergencySnapshots.items.length, 1);
+    assert.equal(approvedEmergencySnapshots.items[0].status, "approved");
+    assert.equal(
+      approvedEmergencySnapshots.items[0].taxDecisionSnapshotId,
+      emergencyDraft.taxDecisionSnapshotId
+    );
+
+    const emergencyRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [emergencyEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(emergencyRun.payslips[0].totals.taxDecision.outputs.decisionType, "emergency_manual");
+    assert.equal(emergencyRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8700);
   } finally {
     await stopServer(server);
   }
