@@ -368,6 +368,19 @@ export function createHrEngine({
     if (resolvedEndDate && resolvedEndDate < resolvedStartDate) {
       throw createError(400, "employment_dates_invalid", "Employment end date cannot be earlier than the start date.");
     }
+    assertNoEffectiveDateOverlap({
+      intervals: (state.employmentIdsByEmployee.get(employee.employeeId) || [])
+        .map((employmentId) => state.employments.get(employmentId))
+        .filter(Boolean)
+        .map((employment) => ({
+          validFrom: employment.startDate,
+          validTo: employment.endDate
+        })),
+      validFrom: resolvedStartDate,
+      validTo: resolvedEndDate,
+      code: "employment_overlaps_existing_active_employment",
+      message: "Employment windows may not overlap for the same employee."
+    });
 
     const record = {
       employmentId: crypto.randomUUID(),

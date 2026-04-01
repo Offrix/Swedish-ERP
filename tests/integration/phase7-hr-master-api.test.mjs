@@ -8,7 +8,7 @@ import { stopServer } from "../../scripts/lib/repo.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Phase 7.1 API supports multiple employments, contract history, employee documents and sensitive-field audit", async () => {
+test("Phase 7.1 API blocks overlapping employments, contract history, employee documents and sensitive-field audit", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-12-02T08:00:00Z")
   });
@@ -115,10 +115,10 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
         startDate: "2025-01-01"
       }
     });
-    await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/employments`, {
+    const overlappingEmploymentAttempt = await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/employments`, {
       method: "POST",
       token: adminSessionToken,
-      expectedStatus: 201,
+      expectedStatus: 409,
       body: {
         companyId: COMPANY_ID,
         employmentTypeCode: "hourly_assignment",
@@ -127,6 +127,7 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
         startDate: "2025-06-01"
       }
     });
+    assert.equal(overlappingEmploymentAttempt.error, "employment_overlaps_existing_active_employment");
 
     await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/contracts`, {
       method: "POST",
@@ -258,7 +259,7 @@ test("Phase 7.1 API supports multiple employments, contract history, employee do
       token: adminSessionToken
     });
 
-    assert.equal(employeeState.employments.length, 2);
+    assert.equal(employeeState.employments.length, 1);
     assert.equal(employeeState.identityValueMasked.endsWith("9870"), true);
     assert.equal(contracts.items.length, 2);
     assert.equal(placements.items.length, 1);

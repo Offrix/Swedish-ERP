@@ -5,7 +5,7 @@ import { createDocumentArchivePlatform } from "../../packages/domain-documents/s
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Phase 7.1 direct platform supports multiple employments, preserves contract history and audits sensitive fields", () => {
+test("Phase 7.1 direct platform blocks overlapping employments, preserves contract history and audits sensitive fields", () => {
   const documentPlatform = createDocumentArchivePlatform({
     clock: () => new Date("2026-12-01T08:00:00Z"),
     seedDemo: false
@@ -80,7 +80,7 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     actorId: "unit-test",
     correlationId: "hr-unit-employment-1"
   });
-  const secondEmployment = hrPlatform.createEmployment({
+  assert.throws(() => hrPlatform.createEmployment({
     companyId: COMPANY_ID,
     employeeId: employee.employeeId,
     employmentTypeCode: "hourly_assignment",
@@ -89,7 +89,7 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     startDate: "2025-06-01",
     actorId: "unit-test",
     correlationId: "hr-unit-employment-2"
-  });
+  }), (error) => error?.code === "employment_overlaps_existing_active_employment");
 
   hrPlatform.addEmploymentContract({
     companyId: COMPANY_ID,
@@ -196,8 +196,7 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
     snapshotDate: "2026-01-15"
   });
 
-  assert.equal(employments.length, 2);
-  assert.equal(employments.some((candidate) => candidate.employmentId === secondEmployment.employmentId), true);
+  assert.equal(employments.length, 1);
   assert.equal(contracts.length, 2);
   assert.equal(contracts[0].contractVersion, 1);
   assert.equal(contracts[1].contractVersion, 2);
@@ -222,6 +221,55 @@ test("Phase 7.1 direct platform supports multiple employments, preserves contrac
       }),
     (error) => error?.code === "employment_placement_overlaps"
   );
+});
+
+test("Phase 10.1 direct platform allows sequential employment history once the earlier employment has ended", () => {
+  const hrPlatform = createHrPlatform({
+    clock: () => new Date("2026-12-01T08:00:00Z"),
+    seedDemo: false
+  });
+
+  const employee = hrPlatform.createEmployee({
+    companyId: COMPANY_ID,
+    givenName: "Tilda",
+    familyName: "History",
+    dateOfBirth: "1990-06-06",
+    identityType: "personnummer",
+    identityValue: "800101-4326",
+    actorId: "unit-test",
+    correlationId: "hr-unit-sequential-employee"
+  });
+
+  const firstEmployment = hrPlatform.createEmployment({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Coordinator",
+    payModelCode: "monthly_salary",
+    startDate: "2025-01-01",
+    endDate: "2025-06-30",
+    actorId: "unit-test",
+    correlationId: "hr-unit-sequential-1"
+  });
+  const secondEmployment = hrPlatform.createEmployment({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "hourly_assignment",
+    jobTitle: "Coordinator",
+    payModelCode: "hourly_salary",
+    startDate: "2025-07-01",
+    actorId: "unit-test",
+    correlationId: "hr-unit-sequential-2"
+  });
+
+  const employments = hrPlatform.listEmployments({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId
+  });
+
+  assert.equal(employments.length, 2);
+  assert.equal(employments[0].employmentId, firstEmployment.employmentId);
+  assert.equal(employments[1].employmentId, secondEmployment.employmentId);
 });
 
 test("Phase 3.3 HR durable export stores identity and payout secrets outside plain snapshot state", () => {

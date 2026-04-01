@@ -680,7 +680,7 @@ HR/time och balances/agreements kan gå parallellt efter source-of-truth-regler 
 Ingen live payroll eller project cost allocation före approved employment/time/agreement truth.
 
 **Delfaser**  
-- [ ] 10.1 [REWRITE] HR blockerar överlappande anställningar, kontrakt, placeringar och samtidiga aktiva scopes där de inte uttryckligen stöds.
+- [x] 10.1 [REWRITE] HR blockerar överlappande anställningar, kontrakt, placeringar och samtidiga aktiva scopes där de inte uttryckligen stöds.
 - [ ] 10.2 [HARDEN] Time/absence/flex/overtime levererar `ApprovedTimeSet` och `AbsenceDecision` med låst payroll input per period.
 - [ ] 10.3 [REWRITE] Balances engine blir källa för semesterdagar, carry-forward, expiry och semesterårsgränser.
 - [ ] 10.4 [REWRITE] Collective agreements levererar körbara rates, OB-, jour-, beredskaps- och pension/semesterpåslag som payroll faktiskt konsumerar.
