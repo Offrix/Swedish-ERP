@@ -22,6 +22,8 @@ export const VAT_POSTING_DIRECTIONS = Object.freeze(["debit", "credit"]);
 export const VAT_DECISION_DECLARATION_TIMING_MODES = Object.freeze(["effective_date", "posting_date"]);
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+const VAT_REVIEW_CENTER_QUEUE_CODE = "VAT_REVIEW";
+const VAT_REVIEW_CENTER_DECISION_TYPE = "vat_treatment";
 const EU_COUNTRY_CODES = new Set([
   "AT",
   "BE",
@@ -294,6 +296,7 @@ export function createVatEngine({
   bootstrapScenarioCode = null,
   seedDemo = bootstrapMode === "scenario_seed" || bootstrapScenarioCode !== null,
   ledgerPlatform = null,
+  reviewCenterPlatform = null,
   providerBaselineRegistry = null
 } = {}) {
   const ruleRegistry = createRulePackRegistry({
@@ -337,6 +340,7 @@ export function createVatEngine({
     getVatDecision,
     listVatReviewQueue,
     resolveVatReviewQueueItem,
+    resolveVatDecisionReview,
     getVatDeclarationBasis,
     listVatPeriodLocks,
     lockVatPeriod,
@@ -455,7 +459,13 @@ export function createVatEngine({
       return {
         vatDecision: copy(existingDecision),
         reviewQueueItem: existingDecision.reviewQueueItemId
-          ? copy(state.vatReviewQueueItems.get(existingDecision.reviewQueueItemId))
+          ? getVatReviewQueueItemSnapshot({
+              state,
+              reviewCenterPlatform,
+              companyId: resolvedCompanyId,
+              reviewQueueItemId: existingDecision.reviewQueueItemId,
+              vatDecision: existingDecision
+            })
           : null,
         idempotentReplay: true
       };
@@ -522,26 +532,35 @@ export function createVatEngine({
 
     let reviewQueueItem = null;
     if (classification.decision.needsManualReview) {
-      reviewQueueItem = {
-        vatReviewQueueItemId: crypto.randomUUID(),
-        companyId: resolvedCompanyId,
-        sourceType: normalizedLine.source_type,
-        sourceId: normalizedLine.source_id,
-        inputsHash: classification.decision.inputsHash,
-        rulePackId: rulePack.rulePackId,
-        effectiveDate,
+      reviewQueueItem = createOrReuseVatReviewCenterItem({
+        reviewCenterPlatform,
+        vatDecision: decisionRecord,
         reviewReasonCode: classification.reviewReasonCode,
-        reviewQueueCode: classification.reviewQueueCode,
-        vatCodeCandidate: normalizedLine.vat_code_candidate || null,
-        status: "open",
-        warnings: classification.decision.warnings,
-        explanation: classification.decision.explanation,
-        createdAt: nowIso(),
-        updatedAt: nowIso()
-      };
-      state.vatReviewQueueItems.set(reviewQueueItem.vatReviewQueueItemId, reviewQueueItem);
-      ensureCollection(state.vatReviewQueueIdsByCompany, resolvedCompanyId).push(reviewQueueItem.vatReviewQueueItemId);
+        actorId: resolvedActorId
+      });
+      if (!reviewQueueItem) {
+        reviewQueueItem = {
+          vatReviewQueueItemId: crypto.randomUUID(),
+          companyId: resolvedCompanyId,
+          sourceType: normalizedLine.source_type,
+          sourceId: normalizedLine.source_id,
+          inputsHash: classification.decision.inputsHash,
+          rulePackId: rulePack.rulePackId,
+          effectiveDate,
+          reviewReasonCode: classification.reviewReasonCode,
+          reviewQueueCode: classification.reviewQueueCode,
+          vatCodeCandidate: normalizedLine.vat_code_candidate || null,
+          status: "open",
+          warnings: classification.decision.warnings,
+          explanation: classification.decision.explanation,
+          createdAt: nowIso(),
+          updatedAt: nowIso()
+        };
+        state.vatReviewQueueItems.set(reviewQueueItem.vatReviewQueueItemId, reviewQueueItem);
+        ensureCollection(state.vatReviewQueueIdsByCompany, resolvedCompanyId).push(reviewQueueItem.vatReviewQueueItemId);
+      }
       decisionRecord.reviewQueueItemId = reviewQueueItem.vatReviewQueueItemId;
+      decisionRecord.reviewQueueCode = reviewQueueItem.reviewQueueCode;
     }
 
     state.vatDecisions.set(decisionRecord.vatDecisionId, decisionRecord);
@@ -615,6 +634,27 @@ export function createVatEngine({
 
   function listVatReviewQueue({ companyId, status = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
+    if (reviewCenterPlatform && typeof reviewCenterPlatform.listReviewCenterItems === "function") {
+      const items = reviewCenterPlatform.listReviewCenterItems({
+        companyId: resolvedCompanyId,
+        queueCode: VAT_REVIEW_CENTER_QUEUE_CODE
+      });
+      return items
+        .filter((item) => item.sourceDomainCode === "VAT" && item.sourceObjectType === "vat_decision")
+        .map((item) =>
+          buildVatReviewQueueItemFromReviewCenter({
+            reviewItem: item,
+            vatDecision: requireVatDecisionForCompany({
+              companyId: resolvedCompanyId,
+              vatDecisionId: item.sourceObjectId
+            })
+          })
+        )
+        .filter(Boolean)
+        .filter((item) => (status ? item.status === status : true))
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .map(copy);
+    }
     return (state.vatReviewQueueIdsByCompany.get(resolvedCompanyId) || [])
       .map((reviewItemId) => state.vatReviewQueueItems.get(reviewItemId))
       .filter(Boolean)
@@ -634,6 +674,47 @@ export function createVatEngine({
   } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (reviewCenterPlatform && typeof reviewCenterPlatform.getReviewCenterItem === "function") {
+      const vatDecision = requireVatDecisionByReviewQueueItem({
+        state,
+        vatReviewQueueItemId: requireText(vatReviewQueueItemId, "vat_review_queue_item_id_required")
+      });
+      const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+        companyId: resolvedCompanyId,
+        reviewItemId: vatDecision.reviewQueueItemId
+      });
+      if (["open", "waiting_input", "escalated"].includes(reviewItem.status)) {
+        reviewCenterPlatform.claimReviewCenterItem({
+          companyId: resolvedCompanyId,
+          reviewItemId: reviewItem.reviewItemId,
+          actorId: resolvedActorId
+        });
+      }
+      reviewCenterPlatform.decideReviewCenterItem({
+        companyId: resolvedCompanyId,
+        reviewItemId: reviewItem.reviewItemId,
+        decisionCode: "approve",
+        reasonCode: "vat_treatment_resolved",
+        note: resolutionNote || `Resolved VAT review to ${requireText(vatCode, "vat_code_required").toUpperCase()}.`,
+        decisionPayload: {
+          vatCode: requireText(vatCode, "vat_code_required").toUpperCase(),
+          resolutionCode: normalizeLowerString(resolutionCode) || "manual_vat_resolution",
+          resolutionNote: typeof resolutionNote === "string" && resolutionNote.trim().length > 0 ? resolutionNote.trim() : null
+        },
+        actorId: resolvedActorId
+      });
+      return resolveVatDecisionReview({
+        companyId: resolvedCompanyId,
+        vatDecisionId: vatDecision.vatDecisionId,
+        vatCode,
+        resolutionCode,
+        resolutionNote,
+        actorId: resolvedActorId,
+        reviewCenterManaged: true,
+        correlationId
+      });
+    }
+
     const reviewQueueItem = requireVatReviewQueueItemForCompany({
       companyId: resolvedCompanyId,
       vatReviewQueueItemId
@@ -642,7 +723,10 @@ export function createVatEngine({
       throw createError(409, "vat_review_queue_item_not_open", "Only open VAT review queue items can be resolved.");
     }
 
-    const vatDecision = requireVatDecisionByReviewQueueItem(reviewQueueItem.vatReviewQueueItemId);
+    const vatDecision = requireVatDecisionByReviewQueueItem({
+      state,
+      vatReviewQueueItemId: reviewQueueItem.vatReviewQueueItemId
+    });
     const blockingPeriodLock = findLockedVatPeriodForDate({
       state,
       companyId: resolvedCompanyId,
@@ -723,6 +807,113 @@ export function createVatEngine({
     };
   }
 
+  function resolveVatDecisionReview({
+    companyId,
+    vatDecisionId,
+    vatCode,
+    resolutionCode = "manual_vat_resolution",
+    resolutionNote = null,
+    actorId = "system",
+    reviewCenterManaged = false,
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const vatDecision = requireVatDecisionForCompany({
+      companyId: resolvedCompanyId,
+      vatDecisionId
+    });
+    if (!vatDecision.reviewQueueItemId) {
+      throw createError(409, "vat_review_queue_item_missing", "VAT decision does not require manual review.");
+    }
+    if (reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(409, "vat_review_center_required", "VAT review decisions must be resolved through review center.");
+    }
+    if (reviewCenterPlatform && reviewCenterManaged) {
+      assertApprovedVatReviewDecision({
+        reviewCenterPlatform,
+        companyId: resolvedCompanyId,
+        reviewItemId: vatDecision.reviewQueueItemId
+      });
+    }
+
+    const blockingPeriodLock = findLockedVatPeriodForDate({
+      state,
+      companyId: resolvedCompanyId,
+      effectiveDate: vatDecision.effectiveDate
+    });
+    if (blockingPeriodLock) {
+      throw createError(
+        409,
+        "vat_period_locked",
+        `VAT period ${blockingPeriodLock.fromDate}..${blockingPeriodLock.toDate} is locked and cannot accept review resolutions.`
+      );
+    }
+
+    const resolvedVatCode = requireText(vatCode, "vat_code_required").toUpperCase();
+    const resolvedOutputs = buildResolvedVatOutputs(vatDecision.transactionLine, resolvedVatCode);
+    const now = nowIso();
+
+    vatDecision.vatCode = resolvedVatCode;
+    vatDecision.decisionCode = resolvedVatCode;
+    vatDecision.status = "decided";
+    vatDecision.lifecycleStatus = "approved";
+    vatDecision.declarationBoxCodes = resolvedOutputs.declarationBoxCodes;
+    vatDecision.declarationBoxAmounts = resolvedOutputs.declarationBoxAmounts;
+    vatDecision.postingEntries = resolvedOutputs.postingEntries;
+    vatDecision.bookingTemplateCode = resolvedOutputs.bookingTemplateCode;
+    vatDecision.decisionCategory = resolvedOutputs.decisionCategory;
+    vatDecision.invoiceTextRequirements = resolvedOutputs.invoiceTextRequirements;
+    vatDecision.viesStatus = resolvedOutputs.viesStatus;
+    vatDecision.deductionRuleCode = resolvedOutputs.deductionRuleCode;
+    vatDecision.reverseChargeFlag = resolvedOutputs.reverseChargeFlag;
+    vatDecision.ossFlag = resolvedOutputs.ossFlag;
+    vatDecision.importFlag = resolvedOutputs.importFlag;
+    vatDecision.outputs = resolvedOutputs;
+    vatDecision.warnings = [
+      {
+        code: "manual_vat_resolution_applied",
+        message: `Manual VAT resolution ${resolutionCode} applied with VAT code ${resolvedVatCode}.`
+      }
+    ];
+    vatDecision.explanation = [
+      ...vatDecision.explanation.filter((entry) => !String(entry).includes("Decision routed to manual review")),
+      `manual_resolution_code=${normalizeLowerString(resolutionCode) || "manual_vat_resolution"}`,
+      `resolved_vat_code=${resolvedVatCode}`,
+      `resolved_by_actor_id=${resolvedActorId}`
+    ];
+    vatDecision.updatedAt = now;
+    vatDecision.approvedAt = vatDecision.approvedAt || now;
+    vatDecision.approvedByActorId = resolvedActorId;
+    vatDecision.lifecycleUpdatedAt = now;
+
+    state.vatDecisionIdsByReplayKey.set(
+      toReplayKey(resolvedCompanyId, vatDecision.transactionLine, vatDecision.rulePackId),
+      vatDecision.vatDecisionId
+    );
+
+    pushAudit({
+      companyId: resolvedCompanyId,
+      actorId: resolvedActorId,
+      correlationId,
+      action: "vat.review_queue.resolved",
+      entityType: "vat_review_queue_item",
+      entityId: vatDecision.reviewQueueItemId,
+      explanation: `Resolved VAT review queue item ${vatDecision.reviewQueueItemId} to ${resolvedVatCode}.`
+    });
+
+    return {
+      vatDecision: copy(vatDecision),
+      reviewQueueItem: getVatReviewQueueItemSnapshot({
+        state,
+        reviewCenterPlatform,
+        companyId: resolvedCompanyId,
+        reviewQueueItemId: vatDecision.reviewQueueItemId,
+        vatDecision
+      })
+    };
+  }
+
   function getVatDeclarationBasis({ companyId, fromDate, toDate } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedFromDate = normalizeDate(fromDate, "from_date_invalid");
@@ -731,6 +922,7 @@ export function createVatEngine({
     return materializeVatDeclarationBasis({
       state,
       ledger,
+      reviewCenterPlatform,
       providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
@@ -782,6 +974,7 @@ export function createVatEngine({
     const basis = buildVatDeclarationBasis({
       state,
       ledger,
+      reviewCenterPlatform,
       providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
@@ -881,6 +1074,7 @@ export function createVatEngine({
     const basis = buildVatDeclarationBasis({
       state,
       ledger,
+      reviewCenterPlatform,
       providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
@@ -978,6 +1172,7 @@ export function createVatEngine({
     const basis = buildVatDeclarationBasis({
       state,
       ledger,
+      reviewCenterPlatform,
       providerBaselineRegistry: providerBaselines,
       companyId: resolvedCompanyId,
       fromDate: resolvedFromDate,
@@ -1073,7 +1268,20 @@ export function createVatEngine({
     return copy({
       vatCodes: [...state.vatCodes.values()],
       vatDecisions: [...state.vatDecisions.values()],
-      vatReviewQueueItems: [...state.vatReviewQueueItems.values()],
+      vatReviewQueueItems: reviewCenterPlatform
+        ? [...state.vatDecisions.values()]
+            .filter((decision) => decision.reviewQueueItemId)
+            .map((decision) =>
+              getVatReviewQueueItemSnapshot({
+                state,
+                reviewCenterPlatform,
+                companyId: decision.companyId,
+                reviewQueueItemId: decision.reviewQueueItemId,
+                vatDecision: decision
+              })
+            )
+            .filter(Boolean)
+        : [...state.vatReviewQueueItems.values()],
       vatPeriodLocks: [...state.vatPeriodLocks.values()],
       vatDeclarationRuns: [...state.vatDeclarationRuns.values()],
       vatPeriodicStatementRuns: [...state.vatPeriodicStatementRuns.values()],
@@ -1089,6 +1297,124 @@ export function createVatEngine({
 
   function importDurableState(snapshot) {
     applyDurableStateSnapshot(state, snapshot);
+  }
+
+  function createOrReuseVatReviewCenterItem({ reviewCenterPlatform, vatDecision, reviewReasonCode, actorId }) {
+    if (!reviewCenterPlatform || typeof reviewCenterPlatform.createReviewItem !== "function") {
+      return null;
+    }
+    const reviewItem = reviewCenterPlatform.createReviewItem({
+      companyId: vatDecision.companyId,
+      queueCode: VAT_REVIEW_CENTER_QUEUE_CODE,
+      reviewTypeCode: "VAT_DECISION_REVIEW",
+      sourceDomainCode: "VAT",
+      sourceObjectType: "vat_decision",
+      sourceObjectId: vatDecision.vatDecisionId,
+      sourceReference: `${vatDecision.sourceType}:${vatDecision.sourceId}`,
+      sourceObjectLabel: `VAT decision ${vatDecision.sourceId}`,
+      requiredDecisionType: VAT_REVIEW_CENTER_DECISION_TYPE,
+      riskClass: "high",
+      title: `VAT decision ${vatDecision.sourceId} requires review`,
+      summary: vatDecision.explanation.join("; "),
+      requestedPayload: {
+        vatDecisionId: vatDecision.vatDecisionId,
+        sourceType: vatDecision.sourceType,
+        sourceId: vatDecision.sourceId,
+        inputsHash: vatDecision.inputsHash,
+        rulePackId: vatDecision.rulePackId,
+        effectiveDate: vatDecision.effectiveDate,
+        reviewReasonCode,
+        vatCodeCandidate: vatDecision.transactionLine.vat_code_candidate || null
+      },
+      actorContext: {
+        decisionCategory: vatDecision.decisionCategory,
+        transactionSourceType: vatDecision.sourceType
+      },
+      actorId
+    });
+    return buildVatReviewQueueItemFromReviewCenter({
+      reviewItem,
+      vatDecision
+    });
+  }
+
+  function getVatReviewQueueItemSnapshot({ state, reviewCenterPlatform, companyId, reviewQueueItemId, vatDecision = null }) {
+    if (!reviewQueueItemId) {
+      return null;
+    }
+    if (reviewCenterPlatform && typeof reviewCenterPlatform.getReviewCenterItem === "function") {
+      const resolvedDecision =
+        vatDecision ||
+        requireVatDecisionByReviewQueueItem({
+          state,
+          vatReviewQueueItemId: reviewQueueItemId
+        });
+      const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+        companyId,
+        reviewItemId: reviewQueueItemId
+      });
+      return buildVatReviewQueueItemFromReviewCenter({
+        reviewItem,
+        vatDecision: resolvedDecision
+      });
+    }
+    return copy(state.vatReviewQueueItems.get(reviewQueueItemId) || null);
+  }
+
+  function buildVatReviewQueueItemFromReviewCenter({ reviewItem, vatDecision }) {
+    if (!reviewItem || !vatDecision) {
+      return null;
+    }
+    const payload = reviewItem.requestedPayloadJson || {};
+    const latestDecisionPayload = reviewItem.latestDecision?.decisionPayloadJson || {};
+    return {
+      vatReviewQueueItemId: reviewItem.reviewItemId,
+      companyId: reviewItem.companyId,
+      sourceType: payload.sourceType || vatDecision.sourceType,
+      sourceId: payload.sourceId || vatDecision.sourceId,
+      inputsHash: payload.inputsHash || vatDecision.inputsHash,
+      rulePackId: payload.rulePackId || vatDecision.rulePackId,
+      effectiveDate: payload.effectiveDate || vatDecision.effectiveDate,
+      reviewReasonCode: payload.reviewReasonCode || "manual_vat_review",
+      reviewQueueCode: reviewItem.queueCode,
+      vatCodeCandidate: payload.vatCodeCandidate || vatDecision.transactionLine?.vat_code_candidate || null,
+      status: mapReviewCenterStatusToVatReviewQueueStatus(reviewItem.status),
+      warnings: copy(vatDecision.warnings || []),
+      explanation: copy(vatDecision.explanation || []),
+      createdAt: reviewItem.createdAt,
+      updatedAt: reviewItem.updatedAt,
+      resolutionCode: latestDecisionPayload.resolutionCode || null,
+      resolutionNote: latestDecisionPayload.resolutionNote || null,
+      resolvedVatCode: latestDecisionPayload.vatCode || null,
+      resolvedVatDecisionId:
+        reviewItem.status === "approved" || reviewItem.status === "closed" ? vatDecision.vatDecisionId : null,
+      resolvedByActorId: reviewItem.latestDecision?.decidedByActorId || null,
+      resolvedAt: reviewItem.latestDecision?.decidedAt || null
+    };
+  }
+
+  function mapReviewCenterStatusToVatReviewQueueStatus(status) {
+    if (status === "approved" || status === "closed") {
+      return "resolved";
+    }
+    if (status === "rejected") {
+      return "waived";
+    }
+    return "open";
+  }
+
+  function assertApprovedVatReviewDecision({ reviewCenterPlatform, companyId, reviewItemId }) {
+    const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+      companyId,
+      reviewItemId
+    });
+    if (!reviewItem || !["approved", "closed"].includes(reviewItem.status) || reviewItem.latestDecision?.decisionCode !== "approve") {
+      throw createError(
+        409,
+        "vat_review_decision_missing",
+        "Review center approval is required before the VAT decision can be resolved."
+      );
+    }
   }
 
   function pushAudit(event) {
@@ -1127,8 +1453,15 @@ export function createVatEngine({
     return item;
   }
 
-  function requireVatDecisionByReviewQueueItem(vatReviewQueueItemId) {
-    const decision = [...state.vatDecisions.values()].find((candidate) => candidate.reviewQueueItemId === vatReviewQueueItemId);
+  function requireVatDecisionByReviewQueueItem(input) {
+    const resolvedState = input && typeof input === "object" && input.state ? input.state : state;
+    const resolvedVatReviewQueueItemId =
+      typeof input === "string"
+        ? requireText(input, "vat_review_queue_item_id_required")
+        : requireText(input?.vatReviewQueueItemId, "vat_review_queue_item_id_required");
+    const decision = [...resolvedState.vatDecisions.values()].find(
+      (candidate) => candidate.reviewQueueItemId === resolvedVatReviewQueueItemId
+    );
     if (!decision) {
       throw createError(404, "vat_decision_not_found", "VAT decision for review queue item was not found.");
     }
@@ -2503,16 +2836,32 @@ function collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate }) {
     .map(copy);
 }
 
-function collectOpenVatReviewQueueItemsForPeriod({ state, companyId, decisions }) {
+function collectOpenVatReviewQueueItemsForPeriod({ state, reviewCenterPlatform = null, companyId, decisions }) {
   return decisions
     .filter((decision) => getVatDecisionLifecycleStatus(decision) === "pending_review" && decision.reviewQueueItemId)
-    .map((decision) => state.vatReviewQueueItems.get(decision.reviewQueueItemId))
+    .map((decision) =>
+      getVatReviewQueueItemSnapshot({
+        state,
+        reviewCenterPlatform,
+        companyId,
+        reviewQueueItemId: decision.reviewQueueItemId,
+        vatDecision: decision
+      })
+    )
     .filter(Boolean)
     .filter((reviewQueueItem) => reviewQueueItem.companyId === companyId && reviewQueueItem.status === "open")
     .map(copy);
 }
 
-function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = null, companyId, fromDate, toDate }) {
+function buildVatDeclarationBasis({
+  state,
+  ledger,
+  reviewCenterPlatform = null,
+  providerBaselineRegistry = null,
+  companyId,
+  fromDate,
+  toDate
+}) {
   const periodDecisions = collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate });
   const declarationEligibleDecisions = periodDecisions.filter((decision) => isVatDecisionDeclarationEligible(decision));
   const pendingReviewDecisions = periodDecisions.filter((decision) => getVatDecisionLifecycleStatus(decision) === "pending_review");
@@ -2521,6 +2870,7 @@ function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = nu
   const iossDecisions = declarationEligibleDecisions.filter((decision) => decision.outputs.reportingChannel === "ioss");
   const openReviewQueueItems = collectOpenVatReviewQueueItemsForPeriod({
     state,
+    reviewCenterPlatform,
     companyId,
     decisions: periodDecisions
   });
@@ -2601,9 +2951,88 @@ function buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry = nu
   };
 }
 
-function materializeVatDeclarationBasis({ state, ledger, providerBaselineRegistry = null, companyId, fromDate, toDate }) {
-  const basis = buildVatDeclarationBasis({ state, ledger, providerBaselineRegistry, companyId, fromDate, toDate });
+function materializeVatDeclarationBasis({
+  state,
+  ledger,
+  reviewCenterPlatform = null,
+  providerBaselineRegistry = null,
+  companyId,
+  fromDate,
+  toDate
+}) {
+  const basis = buildVatDeclarationBasis({
+    state,
+    ledger,
+    reviewCenterPlatform,
+    providerBaselineRegistry,
+    companyId,
+    fromDate,
+    toDate
+  });
   return copy(basis);
+}
+
+function getVatReviewQueueItemSnapshot({ state, reviewCenterPlatform = null, companyId, reviewQueueItemId, vatDecision = null }) {
+  if (!reviewQueueItemId) {
+    return null;
+  }
+  if (reviewCenterPlatform && typeof reviewCenterPlatform.getReviewCenterItem === "function") {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedDecision =
+      vatDecision ||
+      [...state.vatDecisions.values()].find((candidate) => candidate.reviewQueueItemId === reviewQueueItemId);
+    if (!resolvedDecision) {
+      throw createError(404, "vat_decision_not_found", "VAT decision for review queue item was not found.");
+    }
+    const reviewItem = reviewCenterPlatform.getReviewCenterItem({
+      companyId: resolvedCompanyId,
+      reviewItemId: reviewQueueItemId
+    });
+    return buildVatReviewQueueItemFromReviewCenter({ reviewItem, vatDecision: resolvedDecision });
+  }
+  return copy(state.vatReviewQueueItems.get(reviewQueueItemId) || null);
+}
+
+function buildVatReviewQueueItemFromReviewCenter({ reviewItem, vatDecision }) {
+  if (!reviewItem || !vatDecision) {
+    return null;
+  }
+  const payload = reviewItem.requestedPayloadJson || {};
+  const latestDecisionPayload = reviewItem.latestDecision?.decisionPayloadJson || {};
+  return {
+    vatReviewQueueItemId: reviewItem.reviewItemId,
+    companyId: reviewItem.companyId,
+    sourceType: payload.sourceType || vatDecision.sourceType,
+    sourceId: payload.sourceId || vatDecision.sourceId,
+    inputsHash: payload.inputsHash || vatDecision.inputsHash,
+    rulePackId: payload.rulePackId || vatDecision.rulePackId,
+    effectiveDate: payload.effectiveDate || vatDecision.effectiveDate,
+    reviewReasonCode: payload.reviewReasonCode || "manual_vat_review",
+    reviewQueueCode: reviewItem.queueCode,
+    vatCodeCandidate: payload.vatCodeCandidate || vatDecision.transactionLine?.vat_code_candidate || null,
+    status: mapReviewCenterStatusToVatReviewQueueStatus(reviewItem.status),
+    warnings: copy(vatDecision.warnings || []),
+    explanation: copy(vatDecision.explanation || []),
+    createdAt: reviewItem.createdAt,
+    updatedAt: reviewItem.updatedAt,
+    resolutionCode: latestDecisionPayload.resolutionCode || null,
+    resolutionNote: latestDecisionPayload.resolutionNote || null,
+    resolvedVatCode: latestDecisionPayload.vatCode || null,
+    resolvedVatDecisionId:
+      reviewItem.status === "approved" || reviewItem.status === "closed" ? vatDecision.vatDecisionId : null,
+    resolvedByActorId: reviewItem.latestDecision?.decidedByActorId || null,
+    resolvedAt: reviewItem.latestDecision?.decidedAt || null
+  };
+}
+
+function mapReviewCenterStatusToVatReviewQueueStatus(status) {
+  if (status === "approved" || status === "closed") {
+    return "resolved";
+  }
+  if (status === "rejected") {
+    return "waived";
+  }
+  return "open";
 }
 
 function getVatDecisionLifecycleStatus(decision) {

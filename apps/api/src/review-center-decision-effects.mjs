@@ -50,6 +50,9 @@ export function resolveReviewCenterDecisionReasonCode({
   if (reviewItem.sourceDomainCode === "DOCUMENTS" && reviewItem.sourceObjectType === "review_task") {
     return "document_review_complete";
   }
+  if (reviewItem.sourceDomainCode === "VAT" && reviewItem.sourceObjectType === "vat_decision") {
+    return "vat_treatment_resolved";
+  }
   return reasonCode;
 }
 
@@ -103,6 +106,28 @@ export function applyReviewCenterDecisionSideEffects({
     return platform.approveReviewTask({
       companyId,
       reviewTaskId: reviewItem.sourceObjectId,
+      actorId: resolvedActorId,
+      reviewCenterManaged: true
+    });
+  }
+
+  if (reviewItem.sourceDomainCode === "VAT" && reviewItem.sourceObjectType === "vat_decision") {
+    if (typeof platform.resolveVatDecisionReview !== "function") {
+      throw createHttpError(409, "review_center_source_action_unavailable", "VAT review resolution runtime is unavailable.");
+    }
+    const decisionPayload = reviewItem.latestDecision?.decisionPayloadJson || {};
+    const vatCode = typeof decisionPayload.vatCode === "string" && decisionPayload.vatCode.trim().length > 0
+      ? decisionPayload.vatCode.trim()
+      : null;
+    if (!vatCode) {
+      throw createHttpError(409, "review_center_vat_payload_missing", "VAT review decisions must include a vatCode decision payload.");
+    }
+    return platform.resolveVatDecisionReview({
+      companyId,
+      vatDecisionId: reviewItem.sourceObjectId,
+      vatCode,
+      resolutionCode: decisionPayload.resolutionCode || "manual_vat_resolution",
+      resolutionNote: decisionPayload.resolutionNote || note || null,
       actorId: resolvedActorId,
       reviewCenterManaged: true
     });

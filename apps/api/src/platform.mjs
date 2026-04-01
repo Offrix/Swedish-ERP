@@ -125,6 +125,7 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "legalForm",
   "ledger",
   "sie",
+  "reviewCenter",
   "vat",
   "integrations",
   "automation",
@@ -132,7 +133,6 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "ap",
   "banking",
   "taxAccount",
-  "reviewCenter",
   "notifications",
   "activity",
   "hr",
@@ -305,14 +305,21 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
       })
   }),
   createDomainDefinition({
+    key: "reviewCenter",
+    label: "Review center",
+    packageName: "@swedish-erp/domain-review-center",
+    create: ({ options }) => createReviewCenterPlatform(options)
+  }),
+  createDomainDefinition({
     key: "vat",
     label: "VAT",
     packageName: "@swedish-erp/domain-vat",
-    dependsOn: ["ledger"],
+    dependsOn: ["ledger", "reviewCenter"],
     create: ({ options, dependencies }) =>
       createVatPlatform({
         ...options,
-        ledgerPlatform: dependencies.ledger
+        ledgerPlatform: dependencies.ledger,
+        reviewCenterPlatform: dependencies.reviewCenter
       })
   }),
   createDomainDefinition({
@@ -402,12 +409,6 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
           ledgerPlatform: dependencies.ledger
         })
     }),
-  createDomainDefinition({
-    key: "reviewCenter",
-    label: "Review center",
-    packageName: "@swedish-erp/domain-review-center",
-    create: ({ options }) => createReviewCenterPlatform(options)
-  }),
   createDomainDefinition({
     key: "notifications",
     label: "Notifications",

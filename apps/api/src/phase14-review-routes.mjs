@@ -12,7 +12,8 @@
 } from "./route-helpers.mjs";
 import {
   applyReviewCenterClaimSideEffects,
-  applyReviewCenterDecisionSideEffects
+  applyReviewCenterDecisionSideEffects,
+  resolveReviewCenterDecisionReasonCode
 } from "./review-center-decision-effects.mjs";
 
 export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platform, helpers }) {
@@ -562,11 +563,20 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       reviewItemId: reviewCenterDecideMatch.reviewItemId,
       operation: "decide"
     });
+    const reviewItem = platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterDecideMatch.reviewItemId
+    });
+    const resolvedReasonCode = resolveReviewCenterDecisionReasonCode({
+      reviewItem,
+      decisionCode: body.decisionCode,
+      reasonCode: body.reasonCode || null
+    });
     const decided = platform.decideReviewCenterItem({
       companyId,
       reviewItemId: reviewCenterDecideMatch.reviewItemId,
       decisionCode: body.decisionCode,
-      reasonCode: body.reasonCode,
+      reasonCode: resolvedReasonCode,
       note: body.note || null,
       decisionPayload: body.decisionPayload || {},
       evidenceRefs: body.evidenceRefs || [],

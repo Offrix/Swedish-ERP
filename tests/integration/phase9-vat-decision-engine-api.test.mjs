@@ -275,6 +275,99 @@ test("Phase 9.3 API resolves VAT review blockers, materializes declaration basis
   }
 });
 
+test("Phase 9.5 API resolves VAT manual review directly through review center decisions", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-28T11:15:00Z")
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true
+    }
+  });
+
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const sessionToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: COMPANY_ID,
+      email: DEMO_ADMIN_EMAIL
+    });
+
+    const review = await requestJson(baseUrl, "/v1/vat/decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        transactionLine: buildTransactionLine({
+          source_id: "phase9-5-api-review-center",
+          line_quantity: null
+        })
+      }
+    });
+    assert.equal(review.vatDecision.lifecycleStatus, "pending_review");
+
+    const reviewCenterItems = await requestJson(
+      baseUrl,
+      `/v1/review-center/items?companyId=${COMPANY_ID}&queueCode=VAT_REVIEW&status=open`,
+      { token: sessionToken }
+    );
+    const vatReviewItem = reviewCenterItems.items.find(
+      (item) => item.reviewItemId === review.reviewQueueItem.vatReviewQueueItemId
+    );
+    assert.ok(vatReviewItem);
+
+    const claimed = await requestJson(baseUrl, `/v1/review-center/items/${vatReviewItem.reviewItemId}/claim`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: {
+        companyId: COMPANY_ID
+      }
+    });
+    assert.equal(claimed.status, "claimed");
+
+    const decided = await requestJson(baseUrl, `/v1/review-center/items/${vatReviewItem.reviewItemId}/decide`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 200,
+      body: {
+        companyId: COMPANY_ID,
+        decisionCode: "approve",
+        decisionPayload: {
+          vatCode: "VAT_SE_DOMESTIC_25",
+          resolutionCode: "manual_domestic_resolution",
+          resolutionNote: "Resolved directly in review center."
+        }
+      }
+    });
+    assert.equal(decided.status, "approved");
+    assert.equal(decided.latestDecision.decisionCode, "approve");
+    assert.equal(decided.sourceObjectSnapshot.vatDecision.lifecycleStatus, "approved");
+    assert.equal(decided.sourceObjectSnapshot.vatDecision.vatCode, "VAT_SE_DOMESTIC_25");
+    assert.equal(decided.sourceObjectSnapshot.reviewQueueItem.status, "resolved");
+
+    const vatDecision = await requestJson(
+      baseUrl,
+      `/v1/vat/decisions/${review.vatDecision.vatDecisionId}?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    assert.equal(vatDecision.lifecycleStatus, "approved");
+    assert.equal(vatDecision.vatCode, "VAT_SE_DOMESTIC_25");
+  } finally {
+    await stopServer(server);
+  }
+});
+
 async function loginWithStrongAuth({ baseUrl, platform, companyId, email }) {
   const started = await requestJson(baseUrl, "/v1/auth/login", {
     method: "POST",
