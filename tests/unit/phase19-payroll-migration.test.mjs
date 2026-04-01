@@ -134,6 +134,16 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
           reportedThroughPeriod: "2026-03",
           submissionReferences: ["AGI-2026-03"]
         },
+        absenceHistory: [
+          {
+            absenceTypeCode: "SICK",
+            reportedPeriod: "2026-03",
+            fromDate: "2026-03-10",
+            toDate: "2026-03-12",
+            payrollImpactCode: "salary_deduction",
+            sourceRecordRef: "absence-row-2026-03"
+          }
+        ],
         benefitHistory: [
           {
             benefitTypeCode: "CAR",
@@ -153,6 +163,24 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
             sourceRecordRef: "travel-row-2026-03"
           }
         ],
+        pensionHistory: [
+          {
+            reportedPeriod: "2026-03",
+            pensionPlanCode: "ITP1",
+            providerCode: "collectum",
+            pensionBasisSek: 120000,
+            premiumAmountSek: 5400,
+            specialPayrollTaxAmountSek: 1309.07,
+            sourceRecordRef: "pension-row-2026-03"
+          }
+        ],
+        agreementSnapshot: {
+          snapshotDate: "2026-03-31",
+          sourceRecordRef: "agreement-row-2026-03",
+          note: "Imported active agreement at cutover.",
+          agreementCode: "ALMEGA_TEST_2026_01",
+          validFrom: "2026-01-01"
+        },
         evidenceMappings: [
           {
             targetAreaCode: "employee_master",
@@ -179,6 +207,12 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
             artifactRef: "evidence://agi-1001-2026-03"
           },
           {
+            targetAreaCode: "absence_history",
+            sourceRecordRef: "absence-row-2026-03",
+            artifactType: "absence_export",
+            artifactRef: "evidence://absence-row-2026-03"
+          },
+          {
             targetAreaCode: "benefit_history",
             sourceRecordRef: "benefit-row-2026-03",
             artifactType: "benefit_register",
@@ -189,6 +223,18 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
             sourceRecordRef: "travel-row-2026-03",
             artifactType: "travel_claim",
             artifactRef: "evidence://travel-row-2026-03"
+          },
+          {
+            targetAreaCode: "pension_history",
+            sourceRecordRef: "pension-row-2026-03",
+            artifactType: "pension_report",
+            artifactRef: "evidence://pension-row-2026-03"
+          },
+          {
+            targetAreaCode: "agreement_snapshot",
+            sourceRecordRef: "agreement-row-2026-03",
+            artifactType: "agreement_export",
+            artifactRef: "evidence://agreement-row-2026-03"
           }
         ],
         agreementCatalogEntryId: catalogEntry.agreementCatalogEntryId
@@ -197,9 +243,12 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   });
   assert.equal(imported.employeeRecordCount, 1);
   assert.equal(imported.historyImportSummary.employeeCount, 1);
+  assert.equal(imported.historyImportSummary.absenceHistoryItemCount, 1);
   assert.equal(imported.historyImportSummary.benefitHistoryItemCount, 1);
   assert.equal(imported.historyImportSummary.travelHistoryItemCount, 1);
-  assert.equal(imported.historyEvidenceBundle.artifactCount, 6);
+  assert.equal(imported.historyImportSummary.pensionHistoryItemCount, 1);
+  assert.equal(imported.historyImportSummary.agreementSnapshotCount, 1);
+  assert.equal(imported.historyEvidenceBundle.artifactCount, 9);
 
   platform.registerBalanceBaselines({
     sessionToken: adminToken,
@@ -225,6 +274,17 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   assert.equal(validated.validationSummary.blockingIssueCount, 0);
   assert.equal(validated.historyImportSummary.employeesMissingEvidenceMappingCount, 0);
   assert.equal(validated.historyEvidenceBundle.status, "frozen");
+  assert.deepEqual(validated.historyEvidenceBundle.requiredEvidenceAreas, [
+    "ABSENCE_HISTORY",
+    "AGI_HISTORY",
+    "AGREEMENT_SNAPSHOT",
+    "BENEFIT_HISTORY",
+    "EMPLOYEE_MASTER",
+    "EMPLOYMENT_HISTORY",
+    "PENSION_HISTORY",
+    "TRAVEL_HISTORY",
+    "YTD_BASIS"
+  ]);
 
   const diffResult = platform.calculatePayrollMigrationDiff({
     sessionToken: adminToken,
@@ -273,7 +333,10 @@ test("Step 19 payroll migration validates YTD and balances, gates cutover and su
   });
   assert.equal(executed.status, "cutover_executed");
   assert.equal(executed.executionReceipt.realizedBalanceTransactions.length, 1);
+  assert.equal(executed.executionReceipt.historyImportSummary.absenceHistoryItemCount, 1);
   assert.equal(executed.executionReceipt.historyImportSummary.agiSubmissionReferenceCount, 1);
+  assert.equal(executed.executionReceipt.historyImportSummary.pensionHistoryItemCount, 1);
+  assert.equal(executed.executionReceipt.historyImportSummary.agreementSnapshotCount, 1);
   assert.ok(executed.executionReceipt.historyEvidenceBundleId);
 
   const account = platform

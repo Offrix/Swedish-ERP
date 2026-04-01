@@ -121,6 +121,16 @@ test("Step 19 end-to-end flow imports payroll history with evidence mapping and 
               reportedThroughPeriod: "2026-03",
               submissionReferences: ["AGI-HANNA-2026-03"]
             },
+            absenceHistory: [
+              {
+                absenceTypeCode: "SICK",
+                reportedPeriod: "2026-03",
+                fromDate: "2026-03-14",
+                toDate: "2026-03-16",
+                payrollImpactCode: "salary_deduction",
+                sourceRecordRef: "absence-hanna-2026-03"
+              }
+            ],
             benefitHistory: [
               {
                 benefitTypeCode: "MEAL",
@@ -140,6 +150,22 @@ test("Step 19 end-to-end flow imports payroll history with evidence mapping and 
                 sourceRecordRef: "travel-hanna-2026-03"
               }
             ],
+            pensionHistory: [
+              {
+                reportedPeriod: "2026-03",
+                pensionPlanCode: "ITP1",
+                providerCode: "collectum",
+                pensionBasisSek: 117000,
+                premiumAmountSek: 5100,
+                sourceRecordRef: "pension-hanna-2026-03"
+              }
+            ],
+            agreementSnapshot: {
+              snapshotDate: "2026-03-31",
+              sourceRecordRef: "agreement-hanna-2026-03",
+              agreementCode: "HANNA_MIGRATION_2026",
+              validFrom: "2026-01-01"
+            },
             evidenceMappings: [
               {
                 targetAreaCode: "employee_master",
@@ -166,6 +192,12 @@ test("Step 19 end-to-end flow imports payroll history with evidence mapping and 
                 artifactRef: "evidence://agi-hanna-2026-03"
               },
               {
+                targetAreaCode: "absence_history",
+                sourceRecordRef: "absence-hanna-2026-03",
+                artifactType: "absence_export",
+                artifactRef: "evidence://absence-hanna-2026-03"
+              },
+              {
                 targetAreaCode: "benefit_history",
                 sourceRecordRef: "benefit-hanna-2026-03",
                 artifactType: "benefit_register",
@@ -176,13 +208,25 @@ test("Step 19 end-to-end flow imports payroll history with evidence mapping and 
                 sourceRecordRef: "travel-hanna-2026-03",
                 artifactType: "travel_claim",
                 artifactRef: "evidence://travel-hanna-2026-03"
+              },
+              {
+                targetAreaCode: "pension_history",
+                sourceRecordRef: "pension-hanna-2026-03",
+                artifactType: "pension_report",
+                artifactRef: "evidence://pension-hanna-2026-03"
+              },
+              {
+                targetAreaCode: "agreement_snapshot",
+                sourceRecordRef: "agreement-hanna-2026-03",
+                artifactType: "agreement_export",
+                artifactRef: "evidence://agreement-hanna-2026-03"
               }
             ]
           }
         ]
       }
     });
-    assert.equal(imported.historyEvidenceBundle.artifactCount, 6);
+    assert.equal(imported.historyEvidenceBundle.artifactCount, 9);
 
     await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/balance-baselines`, {
       method: "POST",
@@ -256,8 +300,11 @@ test("Step 19 end-to-end flow imports payroll history with evidence mapping and 
     });
     assert.equal(summary.items.length, 1);
     assert.equal(summary.items[0].historyCoverage.missingRequiredEvidenceAreas.length, 0);
+    assert.equal(summary.items[0].historyCoverage.absenceHistoryItemCount, 1);
     assert.equal(summary.items[0].historyCoverage.benefitHistoryItemCount, 1);
     assert.equal(summary.items[0].historyCoverage.travelHistoryItemCount, 1);
+    assert.equal(summary.items[0].historyCoverage.pensionHistoryItemCount, 1);
+    assert.equal(summary.items[0].historyCoverage.agreementSnapshotPresent, true);
   } finally {
     await stopServer(server);
   }

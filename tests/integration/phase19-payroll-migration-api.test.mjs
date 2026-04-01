@@ -139,6 +139,16 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
               reportedThroughPeriod: "2026-03",
               submissionReferences: ["AGI-2026-03"]
             },
+            absenceHistory: [
+              {
+                absenceTypeCode: "SICK",
+                reportedPeriod: "2026-03",
+                fromDate: "2026-03-05",
+                toDate: "2026-03-06",
+                payrollImpactCode: "salary_deduction",
+                sourceRecordRef: "absence-api-2026-03"
+              }
+            ],
             benefitHistory: [
               {
                 benefitTypeCode: "MEAL",
@@ -158,6 +168,22 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
                 sourceRecordRef: "travel-api-2026-03"
               }
             ],
+            pensionHistory: [
+              {
+                reportedPeriod: "2026-03",
+                pensionPlanCode: "ITP1",
+                providerCode: "collectum",
+                pensionBasisSek: 100000,
+                premiumAmountSek: 4200,
+                sourceRecordRef: "pension-api-2026-03"
+              }
+            ],
+            agreementSnapshot: {
+              snapshotDate: "2026-03-31",
+              sourceRecordRef: "agreement-api-2026-03",
+              agreementCode: "PAYROLL_MIGRATION_API_2026",
+              validFrom: "2026-01-01"
+            },
             evidenceMappings: [
               {
                 targetAreaCode: "employee_master",
@@ -184,6 +210,12 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
                 artifactRef: "evidence://agi-2002-2026-03"
               },
               {
+                targetAreaCode: "absence_history",
+                sourceRecordRef: "absence-api-2026-03",
+                artifactType: "absence_export",
+                artifactRef: "evidence://absence-api-2026-03"
+              },
+              {
                 targetAreaCode: "benefit_history",
                 sourceRecordRef: "benefit-api-2026-03",
                 artifactType: "benefit_register",
@@ -194,6 +226,18 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
                 sourceRecordRef: "travel-api-2026-03",
                 artifactType: "travel_claim",
                 artifactRef: "evidence://travel-api-2026-03"
+              },
+              {
+                targetAreaCode: "pension_history",
+                sourceRecordRef: "pension-api-2026-03",
+                artifactType: "pension_report",
+                artifactRef: "evidence://pension-api-2026-03"
+              },
+              {
+                targetAreaCode: "agreement_snapshot",
+                sourceRecordRef: "agreement-api-2026-03",
+                artifactType: "agreement_export",
+                artifactRef: "evidence://agreement-api-2026-03"
               }
             ]
           }
@@ -201,8 +245,11 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
       }
     });
     assert.equal(imported.employeeRecordCount, 1);
-    assert.equal(imported.historyImportSummary.evidenceMappingCount, 6);
-    assert.equal(imported.historyEvidenceBundle.artifactCount, 6);
+    assert.equal(imported.historyImportSummary.absenceHistoryItemCount, 1);
+    assert.equal(imported.historyImportSummary.pensionHistoryItemCount, 1);
+    assert.equal(imported.historyImportSummary.agreementSnapshotCount, 1);
+    assert.equal(imported.historyImportSummary.evidenceMappingCount, 9);
+    assert.equal(imported.historyEvidenceBundle.artifactCount, 9);
 
     await requestJson(baseUrl, `/v1/payroll/migrations/${batch.payrollMigrationBatchId}/balance-baselines`, {
       method: "POST",
@@ -297,8 +344,13 @@ test("Step 19 API exposes payroll migration creation, validation, diff gating an
     assert.equal(stored.balanceBaselines.length, 1);
     assert.equal(stored.executionReceipt.realizedBalanceTransactions.length, 1);
     assert.equal(stored.employeeRecords[0].historyCoverage.missingRequiredEvidenceAreas.length, 0);
+    assert.equal(stored.employeeRecords[0].historyCoverage.absenceHistoryItemCount, 1);
+    assert.equal(stored.employeeRecords[0].historyCoverage.pensionHistoryItemCount, 1);
+    assert.equal(stored.employeeRecords[0].historyCoverage.agreementSnapshotPresent, true);
+    assert.equal(stored.employeeRecords[0].agreementSnapshot.agreementCode, "PAYROLL_MIGRATION_API_2026");
     assert.equal(stored.historyEvidenceBundle.status, "frozen");
     assert.equal(stored.executionReceipt.historyImportSummary.travelHistoryItemCount, 1);
+    assert.equal(stored.executionReceipt.historyImportSummary.agreementSnapshotCount, 1);
   } finally {
     await stopServer(server);
   }

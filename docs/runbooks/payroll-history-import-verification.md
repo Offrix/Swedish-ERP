@@ -18,9 +18,12 @@ Verifiera att payroll-adjacent historik ar komplett, reproducerbar och signerbar
 - employment history finns och ar kronologiskt sammanhangen utan overlap
 - YTD basis finns och ar signerad mot kallrapport
 - AGI history har reported-through period och receipt- eller submission-spor
+- absence history ar importerad dar historisk franvaro paverkar payrollkontinuitet
 - benefit history och travel history ar importerad dar sadan historik finns
+- pension history ar importerad dar tidigare pensionsbas eller premier maste folja med
+- agreement snapshot finns dar kollektivavtal styr forsta live-payrun
 - evidence mapping tacker employee_master, employment_history, ytd_basis och agi_history
-- evidence mapping tacker benefit_history och travel_history nar sadana objekt finns
+- evidence mapping tacker absence_history, benefit_history, travel_history, pension_history och agreement_snapshot nar sadana objekt finns
 
 ## Verifieringssteg
 
@@ -30,15 +33,17 @@ Verifiera att payroll-adjacent historik ar komplett, reproducerbar och signerbar
 4. Bekrafta att `historyEvidenceBundle` finns och ar frozen.
 5. Jamfor imported YTD mot signerad kallrapport.
 6. Jamfor AGI carry-forward refs mot senaste verkliga AGI-kedja.
-7. Bekrafta att benefit- och travelhistorik har evidence mapping och source refs.
-8. Kontrollera att balance baselines ar registrerade for alla kravda balance types.
-9. Kor validation och bekrafta `blockingIssueCount = 0`.
-10. Signera diffbeslut och cutover-approval for batchen.
+7. Bekrafta att absence-, benefit-, travel- och pensionhistorik har evidence mapping och source refs.
+8. Bekrafta att agreement snapshot finns och att agreement-driven employment inte saknar agreement_snapshot-evidence.
+9. Kontrollera att balance baselines ar registrerade for alla kravda balance types.
+10. Kor validation och bekrafta `blockingIssueCount = 0`.
+11. Signera diffbeslut och cutover-approval for batchen.
 
 ## Blockerande fel
 
 - saknad employee master snapshot
 - saknad employment history
+- saknad agreement snapshot for agreement-driven employment
 - saknad required evidence mapping for live-batch
 - saknad balance baseline for required balance type
 - YTD eller AGI mismatch utan signerad forklaring

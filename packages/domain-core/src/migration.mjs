@@ -2597,8 +2597,11 @@ export function createMigrationModule({
         const historyCoverage = summarizeEmployeeHistoryCoverage(record);
         summary.employeeCount += 1;
         summary.employmentHistorySegmentCount += historyCoverage.employmentHistorySegmentCount;
+        summary.absenceHistoryItemCount += historyCoverage.absenceHistoryItemCount;
         summary.benefitHistoryItemCount += historyCoverage.benefitHistoryItemCount;
         summary.travelHistoryItemCount += historyCoverage.travelHistoryItemCount;
+        summary.pensionHistoryItemCount += historyCoverage.pensionHistoryItemCount;
+        summary.agreementSnapshotCount += historyCoverage.agreementSnapshotPresent ? 1 : 0;
         summary.agiSubmissionReferenceCount += historyCoverage.agiSubmissionReferenceCount;
         summary.evidenceMappingCount += historyCoverage.evidenceMappingCount;
         summary.employeesMissingEmployeeMasterCount += historyCoverage.employeeMasterPresent ? 0 : 1;
@@ -2618,8 +2621,11 @@ export function createMigrationModule({
     return {
       employeeMasterPresent: record.employeeMasterSnapshot != null,
       employmentHistorySegmentCount: Array.isArray(record.employmentHistory) ? record.employmentHistory.length : 0,
+      absenceHistoryItemCount: Array.isArray(record.absenceHistory) ? record.absenceHistory.length : 0,
       benefitHistoryItemCount: Array.isArray(record.benefitHistory) ? record.benefitHistory.length : 0,
       travelHistoryItemCount: Array.isArray(record.travelHistory) ? record.travelHistory.length : 0,
+      pensionHistoryItemCount: Array.isArray(record.pensionHistory) ? record.pensionHistory.length : 0,
+      agreementSnapshotPresent: record.agreementSnapshot != null,
       agiSubmissionReferenceCount: Array.isArray(record.agiCarryForwardBasis?.submissionReferences)
         ? record.agiCarryForwardBasis.submissionReferences.length
         : 0,
@@ -2727,8 +2733,11 @@ function createEmptyPayrollHistoryImportSummary() {
   return {
     employeeCount: 0,
     employmentHistorySegmentCount: 0,
+    absenceHistoryItemCount: 0,
     benefitHistoryItemCount: 0,
     travelHistoryItemCount: 0,
+    pensionHistoryItemCount: 0,
+    agreementSnapshotCount: 0,
     agiSubmissionReferenceCount: 0,
     evidenceMappingCount: 0,
     employeesMissingEmployeeMasterCount: 0,
@@ -2744,8 +2753,11 @@ function resolveRequiredEvidenceAreas(record) {
     "EMPLOYMENT_HISTORY",
     "YTD_BASIS",
     "AGI_HISTORY",
+    ...(Array.isArray(record?.absenceHistory) && record.absenceHistory.length > 0 ? ["ABSENCE_HISTORY"] : []),
     ...(Array.isArray(record?.benefitHistory) && record.benefitHistory.length > 0 ? ["BENEFIT_HISTORY"] : []),
-    ...(Array.isArray(record?.travelHistory) && record.travelHistory.length > 0 ? ["TRAVEL_HISTORY"] : [])
+    ...(Array.isArray(record?.travelHistory) && record.travelHistory.length > 0 ? ["TRAVEL_HISTORY"] : []),
+    ...(Array.isArray(record?.pensionHistory) && record.pensionHistory.length > 0 ? ["PENSION_HISTORY"] : []),
+    ...(record?.agreementSnapshot ? ["AGREEMENT_SNAPSHOT"] : [])
   ];
 }
 
@@ -2894,6 +2906,34 @@ function normalizeBenefitHistory(values, validationErrors) {
   }));
 }
 
+function normalizeAbsenceHistory(values, validationErrors) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => {
+    const fromDate = dateOnly(value?.fromDate, "payroll_migration_absence_from_date_required");
+    const toDate = dateOnly(value?.toDate, "payroll_migration_absence_to_date_required");
+    if (toDate < fromDate) {
+      validationErrors.push({
+        code: "payroll_migration_absence_dates_invalid",
+        severity: "blocking",
+        message: "Absence history toDate cannot be earlier than fromDate."
+      });
+    }
+    return {
+      absenceTypeCode: normalizeCode(value?.absenceTypeCode, "payroll_migration_absence_type_required"),
+      reportedPeriod: reportingPeriod(value?.reportedPeriod, "payroll_migration_absence_reported_period_required"),
+      fromDate,
+      toDate,
+      payrollImpactCode: normalizeCode(value?.payrollImpactCode, "payroll_migration_absence_payroll_impact_required"),
+      leaveSignalType: optionalText(value?.leaveSignalType),
+      scopePercent: value?.scopePercent == null ? null : normalizeNumber(value.scopePercent, "payroll_migration_absence_scope_invalid"),
+      sourceRecordRef: text(value?.sourceRecordRef, "payroll_migration_absence_source_record_ref_required"),
+      note: optionalText(value?.note)
+    };
+  });
+}
+
 function normalizeTravelHistory(values, validationErrors) {
   if (!Array.isArray(values)) {
     return [];
@@ -2909,6 +2949,29 @@ function normalizeTravelHistory(values, validationErrors) {
   }));
 }
 
+function normalizePensionHistory(values, validationErrors) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.map((value) => ({
+    reportedPeriod: reportingPeriod(value?.reportedPeriod, "payroll_migration_pension_reported_period_required"),
+    pensionPlanCode: normalizeCode(value?.pensionPlanCode, "payroll_migration_pension_plan_required"),
+    providerCode: optionalText(value?.providerCode),
+    pensionBasisSek: normalizeNumber(value?.pensionBasisSek, "payroll_migration_pension_basis_required"),
+    premiumAmountSek: normalizeNumber(value?.premiumAmountSek, "payroll_migration_pension_premium_required"),
+    salaryExchangeAmountSek:
+      value?.salaryExchangeAmountSek == null
+        ? 0
+        : normalizeNumber(value.salaryExchangeAmountSek, "payroll_migration_pension_salary_exchange_invalid"),
+    specialPayrollTaxAmountSek:
+      value?.specialPayrollTaxAmountSek == null
+        ? null
+        : normalizeNumber(value.specialPayrollTaxAmountSek, "payroll_migration_pension_special_tax_invalid"),
+    sourceRecordRef: text(value?.sourceRecordRef, "payroll_migration_pension_source_record_ref_required"),
+    note: optionalText(value?.note)
+  }));
+}
+
 function normalizePayrollMigrationEvidenceMappings(values) {
   if (!Array.isArray(values)) {
     return [];
@@ -2916,7 +2979,17 @@ function normalizePayrollMigrationEvidenceMappings(values) {
   return values.map((value) => ({
     targetAreaCode: assertAllowed(
       normalizeCode(value?.targetAreaCode, "payroll_migration_evidence_target_area_required"),
-      ["EMPLOYEE_MASTER", "EMPLOYMENT_HISTORY", "YTD_BASIS", "AGI_HISTORY", "BENEFIT_HISTORY", "TRAVEL_HISTORY"],
+      [
+        "EMPLOYEE_MASTER",
+        "EMPLOYMENT_HISTORY",
+        "YTD_BASIS",
+        "AGI_HISTORY",
+        "ABSENCE_HISTORY",
+        "BENEFIT_HISTORY",
+        "TRAVEL_HISTORY",
+        "PENSION_HISTORY",
+        "AGREEMENT_SNAPSHOT"
+      ],
       "payroll_migration_evidence_target_area_invalid"
     ),
     sourceRecordRef: text(value?.sourceRecordRef, "payroll_migration_evidence_source_record_ref_required"),
@@ -2968,6 +3041,112 @@ function resolvePayrollMigrationAgreementReference({
   };
 }
 
+function normalizePayrollMigrationAgreementSnapshot({
+  value,
+  companyId,
+  batch,
+  collectiveAgreementsPlatform,
+  validationErrors
+}) {
+  const explicitSnapshot =
+    value?.agreementSnapshot && typeof value.agreementSnapshot === "object"
+      ? value.agreementSnapshot
+      : {};
+  const agreementReference = resolvePayrollMigrationAgreementReference({
+    companyId,
+    agreementVersionId: explicitSnapshot.agreementVersionId ?? value?.agreementVersionId,
+    agreementCatalogEntryId: explicitSnapshot.agreementCatalogEntryId ?? value?.agreementCatalogEntryId,
+    collectiveAgreementsPlatform,
+    validationErrors
+  });
+  const snapshotDate = explicitSnapshot.snapshotDate
+    ? dateOnly(explicitSnapshot.snapshotDate, "payroll_migration_agreement_snapshot_date_invalid")
+    : batch.effectiveCutoverDate;
+  const hasExplicitInlineSnapshot =
+    optionalText(explicitSnapshot.agreementCode) != null
+    || (explicitSnapshot.ruleSet && typeof explicitSnapshot.ruleSet === "object")
+    || (explicitSnapshot.rateComponents && typeof explicitSnapshot.rateComponents === "object");
+  const resolvedAgreementVersionId = agreementReference.agreementVersionId;
+  let version = null;
+  if (resolvedAgreementVersionId && collectiveAgreementsPlatform?.getAgreementVersion) {
+    version = collectiveAgreementsPlatform.getAgreementVersion({
+      companyId,
+      agreementVersionId: resolvedAgreementVersionId
+    });
+  }
+  if (!resolvedAgreementVersionId && !agreementReference.agreementCatalogEntryId && !hasExplicitInlineSnapshot) {
+    return {
+      agreementVersionId: null,
+      agreementCatalogEntryId: null,
+      agreementSnapshot: null
+    };
+  }
+  if (!version && !hasExplicitInlineSnapshot) {
+    validationErrors.push({
+      code: "payroll_migration_agreement_snapshot_missing",
+      severity: "blocking",
+      message: "Agreement snapshot requires a published agreement version or explicit inline snapshot payload."
+    });
+    return {
+      agreementVersionId: resolvedAgreementVersionId,
+      agreementCatalogEntryId: agreementReference.agreementCatalogEntryId,
+      agreementSnapshot: null
+    };
+  }
+  const explicitValidFrom = explicitSnapshot.validFrom
+    ? dateOnly(explicitSnapshot.validFrom, "payroll_migration_agreement_snapshot_valid_from_invalid")
+    : null;
+  const explicitValidTo = explicitSnapshot.validTo
+    ? dateOnly(explicitSnapshot.validTo, "payroll_migration_agreement_snapshot_valid_to_invalid")
+    : null;
+  if (explicitValidFrom && explicitValidTo && explicitValidTo < explicitValidFrom) {
+    validationErrors.push({
+      code: "payroll_migration_agreement_snapshot_window_invalid",
+      severity: "blocking",
+      message: "Agreement snapshot validTo cannot be earlier than validFrom."
+    });
+  }
+  const agreementCode =
+    optionalText(explicitSnapshot.agreementCode)
+    || optionalText(version?.versionCode)
+    || optionalText(version?.code)
+    || optionalText(version?.agreementCode)
+    || null;
+  if (!agreementCode) {
+    validationErrors.push({
+      code: "payroll_migration_agreement_snapshot_code_missing",
+      severity: "blocking",
+      message: "Agreement snapshot requires agreementCode or a published version with versionCode."
+    });
+  }
+  return {
+    agreementVersionId: resolvedAgreementVersionId,
+    agreementCatalogEntryId: agreementReference.agreementCatalogEntryId,
+    agreementSnapshot: {
+      snapshotDate,
+      sourceRecordRef: optionalText(explicitSnapshot.sourceRecordRef),
+      note: optionalText(explicitSnapshot.note),
+      agreementVersionId: resolvedAgreementVersionId,
+      agreementCatalogEntryId: agreementReference.agreementCatalogEntryId,
+      agreementFamilyId: optionalText(explicitSnapshot.agreementFamilyId) || optionalText(version?.agreementFamilyId),
+      agreementCode,
+      rulepackVersion: optionalText(explicitSnapshot.rulepackVersion) || optionalText(version?.rulepackVersion),
+      effectiveFrom: optionalText(explicitSnapshot.effectiveFrom) || optionalText(version?.effectiveFrom),
+      effectiveTo: optionalText(explicitSnapshot.effectiveTo) || optionalText(version?.effectiveTo),
+      agreementOverlayId: optionalText(explicitSnapshot.agreementOverlayId),
+      validFrom: explicitValidFrom,
+      validTo: explicitValidTo,
+      ruleSet: clone(explicitSnapshot.ruleSet || version?.ruleSet || {}),
+      rateComponents: clone(explicitSnapshot.rateComponents || {}),
+      sourceVersionRef:
+        optionalText(explicitSnapshot.sourceVersionRef)
+        || resolvedAgreementVersionId
+        || agreementReference.agreementCatalogEntryId
+        || null
+    }
+  };
+}
+
 function normalizeAgiCarryForwardBasis(value, validationErrors) {
   const basis = value && typeof value === "object" ? value : {};
   let reportedThroughPeriod = null;
@@ -3011,21 +3190,26 @@ function normalizeEmployeeMigrationRecords(records, { companyId, batch, hrPlatfo
       validationErrors
     );
     const employmentHistory = normalizeEmploymentHistory(value?.employmentHistory, validationErrors);
+    const absenceHistory = normalizeAbsenceHistory(value?.absenceHistory, validationErrors);
     const benefitHistory = normalizeBenefitHistory(value?.benefitHistory, validationErrors);
     const travelHistory = normalizeTravelHistory(value?.travelHistory, validationErrors);
+    const pensionHistory = normalizePensionHistory(value?.pensionHistory, validationErrors);
     const evidenceMappings = normalizePayrollMigrationEvidenceMappings(value?.evidenceMappings);
-    const agreementReference = resolvePayrollMigrationAgreementReference({
+    const agreementReference = normalizePayrollMigrationAgreementSnapshot({
+      value,
       companyId,
-      agreementVersionId: value?.agreementVersionId,
-      agreementCatalogEntryId: value?.agreementCatalogEntryId,
+      batch,
       collectiveAgreementsPlatform,
       validationErrors
     });
     const ytdBasis = normalizePayrollMigrationYtdBasis(value?.ytdBasis, validationErrors);
     const agiCarryForwardBasis = normalizeAgiCarryForwardBasis(value?.agiCarryForwardBasis, validationErrors);
     const requiredEvidenceAreas = resolveRequiredEvidenceAreas({
+      absenceHistory,
       benefitHistory,
-      travelHistory
+      travelHistory,
+      pensionHistory,
+      agreementSnapshot: agreementReference.agreementSnapshot
     });
     const coveredEvidenceAreas = [...new Set(evidenceMappings.map((mapping) => mapping.targetAreaCode))];
     const missingRequiredEvidenceAreas = requiredEvidenceAreas.filter((areaCode) => !coveredEvidenceAreas.includes(areaCode));
@@ -3045,14 +3229,17 @@ function normalizeEmployeeMigrationRecords(records, { companyId, batch, hrPlatfo
       sourceEmployeeRef: optionalText(value?.sourceEmployeeRef) || text(value?.personId, "payroll_migration_person_id_required"),
       employeeMasterSnapshot,
       employmentHistory,
+      absenceHistory,
       ytdBasis,
       priorPayslipSummary: clone(value?.priorPayslipSummary || {}),
       agiCarryForwardBasis,
       benefitHistory,
       travelHistory,
+      pensionHistory,
       evidenceMappings,
       agreementVersionId: agreementReference.agreementVersionId,
       agreementCatalogEntryId: agreementReference.agreementCatalogEntryId,
+      agreementSnapshot: agreementReference.agreementSnapshot,
       validationState: validationErrors.some((validationError) => (validationError.severity || "blocking") === "blocking") ? "blocking" : "valid",
       validationErrors
     };

@@ -290,9 +290,16 @@ export interface PayrollEmployeeMigrationRecord {
   readonly personId: string;
   readonly employeeId: string;
   readonly employmentId: string;
+  readonly employeeMasterSnapshot: Record<string, unknown> | null;
+  readonly employmentHistory: readonly Record<string, unknown>[];
+  readonly absenceHistory: readonly Record<string, unknown>[];
   readonly ytdBasis: Record<string, unknown>;
   readonly priorPayslipSummary: Record<string, unknown>;
   readonly agiCarryForwardBasis: Record<string, unknown>;
+  readonly benefitHistory: readonly Record<string, unknown>[];
+  readonly travelHistory: readonly Record<string, unknown>[];
+  readonly pensionHistory: readonly Record<string, unknown>[];
+  readonly agreementSnapshot: Record<string, unknown> | null;
   readonly validationState: "pending" | "valid" | "blocking";
 }
 
