@@ -308,6 +308,7 @@ const RAW_CRITICAL_DOMAIN_METHOD_INTENTS = Object.freeze({
     "snapshotSie": "read",
   }),
   "vat": Object.freeze({
+    "configureVatDecisionExecutionPolicy": "write",
     "createVatDeclarationRun": "write",
     "createVatPeriodicStatementRun": "write",
     "evaluateVatDecision": "write",

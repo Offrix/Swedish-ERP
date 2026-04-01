@@ -40,6 +40,8 @@ export interface VatDecisionRecord {
   readonly sourceSnapshotDate: string;
   readonly inputsHash: string;
   readonly effectiveDate: string;
+  readonly declarationEffectiveDate?: string | null;
+  readonly declarationTimingMode?: "effective_date" | "posting_date";
   readonly transactionLine: VatTransactionLine;
   readonly status: string;
   readonly lifecycleStatus?: "pending_review" | "approved" | "posted" | "declared" | "corrected";

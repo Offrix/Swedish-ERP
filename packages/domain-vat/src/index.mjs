@@ -19,6 +19,7 @@ export const VAT_REVIEW_QUEUE_STATUSES = Object.freeze(["open", "resolved", "wai
 export const VAT_PERIOD_LOCK_STATUSES = Object.freeze(["locked", "unlocked"]);
 export const VAT_BOX_AMOUNT_TYPES = Object.freeze(["taxable_base", "output_vat", "input_vat"]);
 export const VAT_POSTING_DIRECTIONS = Object.freeze(["debit", "credit"]);
+export const VAT_DECISION_DECLARATION_TIMING_MODES = Object.freeze(["effective_date", "posting_date"]);
 
 const DEMO_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 const EU_COUNTRY_CODES = new Set([
@@ -344,6 +345,7 @@ export function createVatEngine({
     getVatDeclarationRun,
     createVatPeriodicStatementRun,
     getVatPeriodicStatementRun,
+    configureVatDecisionExecutionPolicy,
     recordVatDecisionPosting,
     recordVatDecisionDeclaration,
     summarizeVatDeclarationBoxes,
@@ -477,6 +479,8 @@ export function createVatEngine({
       sourceSnapshotDate: rulePack.sourceSnapshotDate,
       inputsHash: classification.decision.inputsHash,
       effectiveDate: classification.decision.effectiveDate,
+      declarationEffectiveDate: classification.decision.effectiveDate,
+      declarationTimingMode: "effective_date",
       rulepackRef: buildVatRulepackRef(rulePack, classification.decision.effectiveDate),
       transactionLine: copy(normalizedLine),
       status: classification.decision.needsManualReview ? "review_required" : "decided",
@@ -568,6 +572,45 @@ export function createVatEngine({
       throw createError(404, "vat_decision_not_found", "VAT decision was not found.");
     }
     return copy(decision);
+  }
+
+  function configureVatDecisionExecutionPolicy({
+    companyId,
+    vatDecisionIds = [],
+    declarationTimingMode = "effective_date",
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedDeclarationTimingMode = resolveVatDecisionDeclarationTimingMode(declarationTimingMode);
+    const uniqueDecisionIds = [...new Set((Array.isArray(vatDecisionIds) ? vatDecisionIds : []).filter(Boolean))];
+    const updatedDecisions = [];
+    for (const vatDecisionId of uniqueDecisionIds) {
+      const decision = requireVatDecisionForCompany({
+        companyId: resolvedCompanyId,
+        vatDecisionId
+      });
+      decision.declarationTimingMode = resolvedDeclarationTimingMode;
+      decision.declarationEffectiveDate =
+        resolvedDeclarationTimingMode === "posting_date" && getVatDecisionLifecycleRank(decision) < VAT_DECISION_LIFECYCLE_ORDER.posted
+          ? null
+          : decision.effectiveDate;
+      decision.updatedAt = nowIso();
+      updatedDecisions.push(copy(decision));
+    }
+    if (updatedDecisions.length > 0) {
+      pushAudit({
+        companyId: resolvedCompanyId,
+        actorId: resolvedActorId,
+        correlationId,
+        action: "vat.decision.execution_policy_configured",
+        entityType: "vat_decision",
+        entityId: updatedDecisions[0].vatDecisionId,
+        explanation: `Configured declaration timing ${resolvedDeclarationTimingMode} for ${updatedDecisions.length} VAT decisions.`
+      });
+    }
+    return { items: updatedDecisions };
   }
 
   function listVatReviewQueue({ companyId, status = null } = {}) {
@@ -1110,6 +1153,11 @@ export function createVatEngine({
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const resolvedJournalEntryId = requireText(journalEntryId, "journal_entry_id_required");
     const resolvedActorId = requireText(actorId, "actor_id_required");
+    const resolvedPostingDate = resolveVatDecisionPostingDate({
+      ledgerPlatform,
+      companyId: resolvedCompanyId,
+      journalEntryId: resolvedJournalEntryId
+    });
     const uniqueDecisionIds = [...new Set((Array.isArray(vatDecisionIds) ? vatDecisionIds : []).filter(Boolean))];
     const updatedDecisions = [];
     for (const vatDecisionId of uniqueDecisionIds) {
@@ -1126,6 +1174,9 @@ export function createVatEngine({
         actorId: resolvedActorId,
         journalEntryId: resolvedJournalEntryId
       });
+      if (decision.declarationTimingMode === "posting_date" && resolvedPostingDate) {
+        decision.declarationEffectiveDate = resolvedPostingDate;
+      }
       updatedDecisions.push(copy(decision));
     }
     if (updatedDecisions.length > 0) {
@@ -2440,7 +2491,7 @@ function collectDecidedVatDecisions({ state, companyId, fromDate, toDate }) {
     .map((decisionId) => state.vatDecisions.get(decisionId))
     .filter(Boolean)
     .filter((decision) => isVatDecisionDeclarationEligible(decision))
-    .filter((decision) => decision.effectiveDate >= fromDate && decision.effectiveDate <= toDate)
+    .filter((decision) => isVatDecisionInDeclarationPeriod(decision, fromDate, toDate))
     .map(copy);
 }
 
@@ -2448,7 +2499,7 @@ function collectVatDecisionsForPeriod({ state, companyId, fromDate, toDate }) {
   return (state.vatDecisionIdsByCompany.get(companyId) || [])
     .map((decisionId) => state.vatDecisions.get(decisionId))
     .filter(Boolean)
-    .filter((decision) => decision.effectiveDate >= fromDate && decision.effectiveDate <= toDate)
+    .filter((decision) => isVatDecisionInDeclarationPeriod(decision, fromDate, toDate))
     .map(copy);
 }
 
@@ -2570,7 +2621,45 @@ function getVatDecisionLifecycleRank(decision) {
 }
 
 function isVatDecisionDeclarationEligible(decision) {
+  if (decision?.declarationTimingMode === "posting_date") {
+    return getVatDecisionLifecycleRank(decision) >= VAT_DECISION_LIFECYCLE_ORDER.posted;
+  }
   return VAT_DECISION_DECLARATION_ELIGIBLE_STATUSES.has(getVatDecisionLifecycleStatus(decision));
+}
+
+function resolveVatDecisionDeclarationTimingMode(value) {
+  const normalizedValue = requireText(value, "vat_decision_declaration_timing_mode_required");
+  if (!VAT_DECISION_DECLARATION_TIMING_MODES.includes(normalizedValue)) {
+    throw createError(
+      400,
+      "vat_decision_declaration_timing_mode_invalid",
+      `Declaration timing mode must be one of ${VAT_DECISION_DECLARATION_TIMING_MODES.join(", ")}.`
+    );
+  }
+  return normalizedValue;
+}
+
+function resolveVatDecisionDeclarationDate(decision) {
+  return decision?.declarationEffectiveDate || decision?.effectiveDate || null;
+}
+
+function isVatDecisionInDeclarationPeriod(decision, fromDate, toDate) {
+  const declarationDate = resolveVatDecisionDeclarationDate(decision);
+  return Boolean(declarationDate) && declarationDate >= fromDate && declarationDate <= toDate;
+}
+
+function resolveVatDecisionPostingDate({ ledgerPlatform, companyId, journalEntryId }) {
+  if (!ledgerPlatform || typeof ledgerPlatform.getJournalEntry !== "function") {
+    return null;
+  }
+  const journalEntry = ledgerPlatform.getJournalEntry({
+    companyId,
+    journalEntryId
+  });
+  if (!journalEntry?.journalDate) {
+    return null;
+  }
+  return normalizeDate(journalEntry.journalDate, "vat_posting_journal_date_invalid");
 }
 
 function applyVatDecisionLifecycleTransition(

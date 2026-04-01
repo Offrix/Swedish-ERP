@@ -308,6 +308,11 @@ test("Phase 8.6 direct platform cash-method AP flow recognizes expense and VAT o
     supplierInvoiceId: ingested.supplierInvoiceId,
     actorId: "admin"
   });
+  const septemberBasis = platform.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2027-09-01",
+    toDate: "2027-09-30"
+  });
   const bankAccount = platform.createBankAccount({
     companyId: COMPANY_ID,
     bankName: "Nordea",
@@ -356,6 +361,11 @@ test("Phase 8.6 direct platform cash-method AP flow recognizes expense and VAT o
     bookedOn: "2027-10-26",
     actorId: "admin"
   });
+  const octoberBasis = platform.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2027-10-01",
+    toDate: "2027-10-31"
+  });
   const bookingJournal = platform.getJournalEntry({
     companyId: COMPANY_ID,
     journalEntryId: booked.bankPaymentEvent.journalEntryId
@@ -383,11 +393,21 @@ test("Phase 8.6 direct platform cash-method AP flow recognizes expense and VAT o
     companyId: COMPANY_ID,
     apOpenItemId: posted.apOpenItemId
   });
+  const octoberAfterReturnBasis = platform.getVatDeclarationBasis({
+    companyId: COMPANY_ID,
+    fromDate: "2027-10-01",
+    toDate: "2027-10-31"
+  });
 
   assert.equal(matched.invoice.status, "approved");
   assert.equal(posted.journalEntryId, null);
   assert.equal(posted.primaryRecognitionTrigger, "AP_PAYMENT_SETTLEMENT");
+  assert.equal(septemberBasis.decisionCount, 1);
+  assert.equal(septemberBasis.declarationEligibleDecisionCount, 0);
+  assert.deepEqual(septemberBasis.declarationBoxSummary, []);
   assert.equal(reservedOpenItem.lastReservationJournalEntryId, null);
+  assert.equal(octoberBasis.declarationEligibleDecisionCount, 1);
+  assert.deepEqual(octoberBasis.declarationBoxSummary, [{ boxCode: "48", amount: 250, amountType: "input_vat" }]);
   assert.equal(sumDebits(bookingJournal, "5410"), 1000);
   assert.equal(sumDebits(bookingJournal, "2640"), 250);
   assert.equal(sumCredits(bookingJournal, "1110"), 1250);
@@ -398,6 +418,8 @@ test("Phase 8.6 direct platform cash-method AP flow recognizes expense and VAT o
   assert.equal(sumDebits(returnJournal, "1110"), 1250);
   assert.equal(sumCredits(returnJournal, "5410"), 1000);
   assert.equal(sumCredits(returnJournal, "2640"), 250);
+  assert.equal(octoberAfterReturnBasis.declarationEligibleDecisionCount, 2);
+  assert.deepEqual(octoberAfterReturnBasis.declarationBoxSummary, [{ boxCode: "48", amount: 0, amountType: "input_vat" }]);
   assert.equal(reopenedInvoice.status, "posted");
   assert.equal(reopenedInvoice.recognizedGrossAmount, 0);
   assert.equal(reopenedInvoice.recognizedVatAmount, 0);

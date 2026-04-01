@@ -1646,6 +1646,13 @@ export function createApEngine({
       applySupplierInvoiceRecognition(invoice, invoice.journalEntryId);
     } else {
       resetSupplierInvoiceRecognition(invoice);
+      configureSupplierInvoiceVatDecisionExecutionPolicy({
+        vatPlatform,
+        invoice,
+        actorId,
+        correlationId,
+        declarationTimingMode: "posting_date"
+      });
     }
     invoice.postedAt = nowIso(clock);
     invoice.updatedAt = nowIso(clock);
@@ -2105,6 +2112,13 @@ export function createApEngine({
     invoice.status = "paid";
     invoice.paidAt = nowIso(clock);
     if (cashMethodRecognition) {
+      recordSupplierInvoiceVatDecisionPosting({
+        vatPlatform,
+        invoice,
+        actorId,
+        correlationId,
+        journalEntryId: journalEntry.journalEntryId
+      });
       applySupplierInvoiceRecognition(invoice, journalEntry.journalEntryId);
     }
     invoice.updatedAt = nowIso(clock);
@@ -2156,6 +2170,21 @@ export function createApEngine({
       journalEntryId: openItem.lastSettlementJournalEntryId
     });
     const cashMethodRecognitionPending = isApCashMethodRecognitionPending(invoice);
+    const supplier = cashMethodRecognitionPending ? requireSupplierRecord(state, companyId, invoice.supplierId) : null;
+    const correctionVatDecisionIds =
+      cashMethodRecognitionPending
+        ? buildCashMethodApReturnVatCorrections({
+            vatPlatform,
+            invoice,
+            supplier,
+            companyId,
+            returnedOn: resolvedReturnedOn,
+            actorId,
+            correlationId,
+            paymentOrderId: openItem.lastPaymentOrderId || openItem.paymentOrderId || paymentOrderId,
+            apOpenItemId: openItem.apOpenItemId
+          })
+        : [];
     const journalEntry = postApLifecycleJournal({
       ledgerPlatform,
       companyId: openItem.companyId,
@@ -2232,6 +2261,15 @@ export function createApEngine({
     invoice.status = "posted";
     invoice.paidAt = null;
     if (cashMethodRecognitionPending) {
+      if (correctionVatDecisionIds.length > 0 && vatPlatform && typeof vatPlatform.recordVatDecisionPosting === "function") {
+        vatPlatform.recordVatDecisionPosting({
+          companyId: invoice.companyId,
+          vatDecisionIds: correctionVatDecisionIds,
+          journalEntryId: journalEntry.journalEntryId,
+          actorId,
+          correlationId
+        });
+      }
       resetSupplierInvoiceRecognition(invoice, journalEntry.journalEntryId);
     }
     invoice.updatedAt = nowIso(clock);
@@ -3545,6 +3583,83 @@ function buildCashMethodApSettlementRecognition({
   };
 }
 
+function buildCashMethodApReturnVatCorrections({
+  vatPlatform,
+  invoice,
+  supplier,
+  companyId,
+  returnedOn,
+  actorId,
+  correlationId,
+  paymentOrderId,
+  apOpenItemId
+}) {
+  if (!vatPlatform || typeof vatPlatform.evaluateVatDecision !== "function") {
+    throw createError(500, "vat_platform_missing", "VAT platform is required to mirror cash-method AP return corrections.");
+  }
+  const correctionVatDecisionIds = [];
+  for (const invoiceLine of invoice.lines || []) {
+    if (!invoiceLine.vatProposal?.vatDecisionId) {
+      continue;
+    }
+    const vatEvaluation = vatPlatform.evaluateVatDecision({
+      companyId,
+      actorId,
+      correlationId,
+      transactionLine: {
+        source_type: "AP_PAYMENT_RETURN",
+        source_id: `ap_payment_return:${apOpenItemId}:${paymentOrderId || "manual"}:${returnedOn}:${invoiceLine.vatProposal.vatDecisionId}`,
+        supply_type: "purchase",
+        seller_country: supplier.countryCode,
+        seller_vat_registration_country: supplier.countryCode,
+        buyer_country: "SE",
+        goods_or_services: normalizeOptionalText(invoiceLine.goodsOrServices)?.toLowerCase() === "goods" ? "goods" : "services",
+        invoice_date: returnedOn,
+        delivery_date: returnedOn,
+        tax_date: returnedOn,
+        prepayment_date: returnedOn,
+        currency: invoice.currencyCode,
+        line_amount_ex_vat: invoiceLine.netAmount,
+        line_quantity: invoiceLine.quantity,
+        vat_rate: invoiceLine.vatProposal.vatRate ?? deriveVatRateFromCode(invoiceLine.vatProposal.vatCode) ?? 25,
+        reverse_charge_flag: invoiceLine.reverseChargeFlag === true || supplier.reverseChargeDefault === true,
+        import_flag: supplier.countryCode !== "SE" && !EU_COUNTRY_CODES.has(supplier.countryCode) && invoiceLine.goodsOrServices === "goods",
+        export_flag: false,
+        buyer_is_taxable_person: true,
+        construction_service_flag: invoiceLine.constructionServiceFlag === true,
+        oss_flag: false,
+        ioss_flag: false,
+        vat_code_candidate: invoiceLine.vatProposal.vatCode || invoiceLine.vatCode,
+        deduction_ratio: invoiceLine.deductionRatio == null ? 1 : invoiceLine.deductionRatio,
+        credit_note_flag: true,
+        original_vat_decision_id: invoiceLine.vatProposal.vatDecisionId
+      }
+    });
+    if (vatEvaluation.reviewQueueItem || vatEvaluation.vatDecision.status !== "decided") {
+      throw createError(
+        409,
+        "ap_payment_return_vat_review_required",
+        "Cash-method AP return requires a deterministic mirrored VAT correction before reopening the supplier invoice."
+      );
+    }
+    correctionVatDecisionIds.push(vatEvaluation.vatDecision.vatDecisionId);
+  }
+  if (
+    correctionVatDecisionIds.length > 0
+    && vatPlatform
+    && typeof vatPlatform.configureVatDecisionExecutionPolicy === "function"
+  ) {
+    vatPlatform.configureVatDecisionExecutionPolicy({
+      companyId,
+      vatDecisionIds: correctionVatDecisionIds,
+      declarationTimingMode: "posting_date",
+      actorId,
+      correlationId
+    });
+  }
+  return correctionVatDecisionIds;
+}
+
 function mergeJournalLines(lines) {
   const grouped = new Map();
   for (const line of lines) {
@@ -4490,6 +4605,56 @@ function applySupplierInvoiceAccountingMethodSnapshot(invoice, accountingDirecti
   invoice.accountingMethodProfileId = accountingDirective.methodProfileId || null;
   invoice.accountingMethodTimingMode = accountingDirective.timingMode || "invoice_date_accrual";
   invoice.primaryRecognitionTrigger = accountingDirective.apInvoiceRecognitionTrigger || "AP_INVOICE_POST";
+}
+
+function collectSupplierInvoiceVatDecisionIds(invoice) {
+  return [...new Set((invoice?.lines || []).map((line) => line.vatProposal?.vatDecisionId).filter(Boolean))];
+}
+
+function configureSupplierInvoiceVatDecisionExecutionPolicy({
+  vatPlatform,
+  invoice,
+  actorId,
+  correlationId,
+  declarationTimingMode
+}) {
+  if (!vatPlatform || typeof vatPlatform.configureVatDecisionExecutionPolicy !== "function") {
+    return;
+  }
+  const vatDecisionIds = collectSupplierInvoiceVatDecisionIds(invoice);
+  if (vatDecisionIds.length === 0) {
+    return;
+  }
+  vatPlatform.configureVatDecisionExecutionPolicy({
+    companyId: invoice.companyId,
+    vatDecisionIds,
+    declarationTimingMode,
+    actorId,
+    correlationId
+  });
+}
+
+function recordSupplierInvoiceVatDecisionPosting({
+  vatPlatform,
+  invoice,
+  journalEntryId,
+  actorId,
+  correlationId
+}) {
+  if (!vatPlatform || typeof vatPlatform.recordVatDecisionPosting !== "function") {
+    return;
+  }
+  const vatDecisionIds = collectSupplierInvoiceVatDecisionIds(invoice);
+  if (vatDecisionIds.length === 0) {
+    return;
+  }
+  vatPlatform.recordVatDecisionPosting({
+    companyId: invoice.companyId,
+    vatDecisionIds,
+    journalEntryId,
+    actorId,
+    correlationId
+  });
 }
 
 function applySupplierInvoiceRecognition(invoice, journalEntryId) {
