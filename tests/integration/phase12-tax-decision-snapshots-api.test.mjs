@@ -142,7 +142,7 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
       body: {
         companyId: COMPANY_ID,
         employmentId: aSinkEmployee.employment.employmentId,
-        decisionType: "asink",
+        decisionType: "a_sink",
         incomeYear: 2026,
         validFrom: "2026-01-01",
         validTo: "2026-12-31",
@@ -152,6 +152,7 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
       }
     });
     assert.equal(aSinkDecision.status, "approved");
+    assert.equal(aSinkDecision.decisionType, "asink");
 
     const aSinkRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
       method: "POST",
@@ -241,6 +242,48 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
     assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 3400);
     assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.oneTimeLookupRatePercent, 34);
     assert.equal(oneTimeRun.payslips[0].totals.taxDecision.outputs.annualIncomeBasisAmount, 480000);
+
+    const legacyJamkningEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Lova",
+      familyName: "Legacyjamkningapi",
+      identityValue: "19800112-0172"
+    });
+    const legacyJamkningDecision = await requestJson(baseUrl, "/v1/payroll/tax-decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: legacyJamkningEmployee.employment.employmentId,
+        decisionType: "jamkning",
+        incomeYear: 2026,
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        municipalityCode: "0180",
+        tableCode: "34",
+        columnCode: "1",
+        fixedAdjustmentAmount: -500,
+        decisionSource: "skatteverket_adjustment_decision",
+        decisionReference: "jamkning-legacy-api-2026",
+        evidenceRef: "evidence-jamkning-legacy-api-2026"
+      }
+    });
+    assert.equal(legacyJamkningDecision.decisionType, "jamkning_fast");
+    const legacyJamkningRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [legacyJamkningEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(legacyJamkningRun.payslips[0].totals.taxDecision.outputs.decisionType, "jamkning_fast");
+    assert.equal(legacyJamkningRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8152);
 
     const emergencyEmployee = await createMonthlyEmployee({
       baseUrl,

@@ -160,6 +160,40 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
   assert.equal(jamkningPercentRun.payslips[0].totals.taxDecision.outputs.decisionType, "jamkning_procent");
   assert.equal(jamkningPercentRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 10800);
 
+  const legacyJamkningEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Lina",
+    familyName: "Legacyjamkning",
+    monthlySalary: 40000,
+    identityValue: "19800112-0164"
+  });
+  const legacyJamkningDecision = payrollPlatform.createTaxDecisionSnapshot({
+    companyId: COMPANY_ID,
+    employmentId: legacyJamkningEmployee.employment.employmentId,
+    decisionType: "jamkning",
+    incomeYear: 2026,
+    validFrom: "2026-01-01",
+    validTo: "2026-12-31",
+    municipalityCode: "0180",
+    tableCode: "34",
+    columnCode: "1",
+    adjustmentFixedAmount: -500,
+    decisionSource: "skatteverket_adjustment_decision",
+    decisionReference: "jamkning-legacy-2026-001",
+    evidenceRef: "evidence-jamkning-legacy-2026",
+    actorId: "unit-test"
+  });
+  assert.equal(legacyJamkningDecision.decisionType, "jamkning_fast");
+  const legacyJamkningRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [legacyJamkningEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(legacyJamkningRun.payslips[0].totals.taxDecision.outputs.decisionType, "jamkning_fast");
+  assert.equal(legacyJamkningRun.payslips[0].totals.taxDecision.outputs.preliminaryTax, 8152);
+
   const extraEmployee = createMonthlyEmployee({
     hrPlatform,
     givenName: "Ella",
@@ -209,10 +243,10 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     monthlySalary: 40000,
     identityValue: "19800112-5551"
   });
-  payrollPlatform.createTaxDecisionSnapshot({
+  const aSinkDecision = payrollPlatform.createTaxDecisionSnapshot({
     companyId: COMPANY_ID,
     employmentId: aSinkEmployee.employment.employmentId,
-    decisionType: "asink",
+    decisionType: "a_sink",
     incomeYear: 2026,
     validFrom: "2026-01-01",
     validTo: "2026-12-31",
@@ -221,6 +255,7 @@ test("Phase 12.1 tax decision snapshots replace manual-rate default and enforce 
     evidenceRef: "evidence-asink-2026",
     actorId: "unit-test"
   });
+  assert.equal(aSinkDecision.decisionType, "asink");
   const aSinkRun = payrollPlatform.createPayRun({
     companyId: COMPANY_ID,
     payCalendarId: payCalendar.payCalendarId,

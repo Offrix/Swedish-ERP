@@ -81,6 +81,32 @@ function isJamkningDecisionType(decisionType) {
 function isASinkDecisionType(decisionType) {
   return decisionType === "a_sink" || decisionType === "asink";
 }
+
+function canonicalizeTaxDecisionType({
+  decisionType,
+  adjustmentFixedAmount = null,
+  adjustmentPercentage = null,
+  withholdingRatePercent = null
+}) {
+  if (decisionType === "a_sink") {
+    return "asink";
+  }
+  if (decisionType !== "jamkning") {
+    return decisionType;
+  }
+  if (adjustmentPercentage != null || withholdingRatePercent != null) {
+    return "jamkning_procent";
+  }
+  return "jamkning_fast";
+}
+
+function resolveTaxDecisionTypeFilter(decisionType) {
+  const canonicalDecisionType = canonicalizeTaxDecisionType({ decisionType });
+  if (decisionType === "jamkning") {
+    return new Set(["jamkning_fast", "jamkning_procent"]);
+  }
+  return new Set([canonicalDecisionType]);
+}
 export const PAYROLL_AGI_PROVIDER_CODE = "skatteverket_agi";
 export const PAYROLL_AGI_PROVIDER_BASELINE_CODE = "SE-SKATTEVERKET-AGI-API";
 export const PAYROLL_PROVIDER_BASELINES = Object.freeze([
@@ -783,8 +809,10 @@ export function createPayrollEngine({
     const resolvedStatus = status
       ? assertAllowed(status, PAYROLL_TAX_DECISION_STATUSES, "tax_decision_snapshot_status_invalid")
       : null;
-    const resolvedDecisionType = decisionType
-      ? assertAllowed(decisionType, PAYROLL_TAX_DECISION_TYPES, "tax_decision_snapshot_type_invalid")
+    const resolvedDecisionTypes = decisionType
+      ? resolveTaxDecisionTypeFilter(
+          assertAllowed(decisionType, PAYROLL_TAX_DECISION_TYPES, "tax_decision_snapshot_type_invalid")
+        )
       : null;
     const ids = employmentId
       ? state.taxDecisionSnapshotIdsByEmployment.get(buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))) || []
@@ -793,7 +821,7 @@ export function createPayrollEngine({
       .map((taxDecisionSnapshotId) => state.taxDecisionSnapshots.get(taxDecisionSnapshotId))
       .filter(Boolean)
       .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
-      .filter((candidate) => (resolvedDecisionType ? candidate.decisionType === resolvedDecisionType : true))
+      .filter((candidate) => (resolvedDecisionTypes ? resolvedDecisionTypes.has(candidate.decisionType) : true))
       .filter((candidate) => (effectiveDate ? decisionSnapshotCoversDate(candidate, effectiveDate) : true))
       .sort(
         (left, right) =>
@@ -9209,11 +9237,17 @@ function normalizeTaxDecisionSnapshots(taxDecisionSnapshots) {
 }
 
 function normalizeTaxDecisionSnapshot(snapshot = {}) {
-  const decisionType = assertAllowed(
+  const rawDecisionType = assertAllowed(
     normalizeOptionalText(snapshot.decisionType),
     PAYROLL_TAX_DECISION_TYPES,
     "tax_decision_snapshot_type_invalid"
   );
+  const decisionType = canonicalizeTaxDecisionType({
+    decisionType: rawDecisionType,
+    adjustmentFixedAmount: snapshot.fixedAdjustmentAmount ?? snapshot.adjustmentFixedAmount,
+    adjustmentPercentage: snapshot.percentageAdjustment ?? snapshot.adjustmentPercentage,
+    withholdingRatePercent: snapshot.withholdingRatePercent
+  });
   const validFrom = normalizeRequiredDate(snapshot.validFrom, "tax_decision_snapshot_valid_from_invalid");
   const validTo = normalizeOptionalDate(snapshot.validTo, "tax_decision_snapshot_valid_to_invalid");
   if (validTo && validTo < validFrom) {
