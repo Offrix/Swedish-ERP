@@ -13,6 +13,7 @@
 import {
   applyReviewCenterClaimSideEffects,
   applyReviewCenterDecisionSideEffects,
+  applyReviewCenterSourceAction,
   resolveReviewCenterDecisionReasonCode
 } from "./review-center-decision-effects.mjs";
 
@@ -596,6 +597,39 @@ export async function tryHandlePhase14ReviewRoutes({ req, res, url, path, platfo
       actorId: principal.userId
     });
     writeJson(res, 200, sourceObjectSnapshot ? { ...decided, sourceObjectSnapshot } : decided);
+    return true;
+  }
+
+  const reviewCenterSourceActionMatch = matchPath(path, "/v1/review-center/items/:reviewItemId/source-action");
+  if (req.method === "POST" && reviewCenterSourceActionMatch) {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "companyId is required.");
+    const sessionToken = readSessionToken(req, body);
+    const principal = authorizeCompanyAccess({ platform, sessionToken, companyId, action: "company.read", objectType: "review_item", objectId: reviewCenterSourceActionMatch.reviewItemId, scopeCode: "review_center" });
+    assertReviewCenterActionAccess({
+      platform,
+      principal,
+      companyId,
+      reviewItemId: reviewCenterSourceActionMatch.reviewItemId,
+      operation: "decide"
+    });
+    const reviewItem = platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterSourceActionMatch.reviewItemId
+    });
+    const sourceObjectSnapshot = applyReviewCenterSourceAction({
+      platform,
+      companyId,
+      reviewItem,
+      actionCode: body.actionCode,
+      actionPayload: body.actionPayload || {},
+      actorId: principal.userId
+    });
+    const refreshedReviewItem = platform.getReviewCenterItem({
+      companyId,
+      reviewItemId: reviewCenterSourceActionMatch.reviewItemId
+    });
+    writeJson(res, 200, sourceObjectSnapshot ? { ...refreshedReviewItem, sourceObjectSnapshot } : refreshedReviewItem);
     return true;
   }
 

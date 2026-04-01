@@ -326,6 +326,7 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/review-center/items/:reviewItemId/escalate", override("review", "review_center_escalate", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/start", override("review", "review_center_start", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/request-more-input", override("review", "review_center_request_more_input", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
+  ["POST /v1/review-center/items/:reviewItemId/source-action", override("review", "review_center_source_action", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/reassign", override("review", "review_center_reassign", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/review-center/items/:reviewItemId/close", override("review", "review_center_close", "mfa", "review_item", "review_item", "review_item", "approval.approve", true)],
   ["POST /v1/work-items/:workItemId/assign", override("ops", "operational_work_item_assign", "strong_mfa", "operational_work_item", "backoffice", "operational_work_item", "company.manage", true)],

@@ -135,3 +135,46 @@ export function applyReviewCenterDecisionSideEffects({
 
   return null;
 }
+
+export function applyReviewCenterSourceAction({
+  platform,
+  companyId,
+  reviewItem,
+  actionCode,
+  actionPayload = {},
+  actorId
+} = {}) {
+  if (!reviewItem) {
+    return null;
+  }
+
+  const resolvedActorId = typeof actorId === "string" && actorId.trim().length > 0 ? actorId.trim() : null;
+  if (!resolvedActorId) {
+    throw createHttpError(400, "actor_id_required", "actorId is required.");
+  }
+  const resolvedActionCode = typeof actionCode === "string" && actionCode.trim().length > 0 ? actionCode.trim().toLowerCase() : null;
+  if (!resolvedActionCode) {
+    throw createHttpError(400, "review_center_source_action_required", "actionCode is required.");
+  }
+
+  if (reviewItem.sourceDomainCode === "DOCUMENTS" && reviewItem.sourceObjectType === "review_task" && resolvedActionCode === "correct") {
+    if (typeof platform.correctReviewTask !== "function") {
+      throw createHttpError(409, "review_center_source_action_unavailable", "Document correction runtime is unavailable.");
+    }
+    return platform.correctReviewTask({
+      companyId,
+      reviewTaskId: reviewItem.sourceObjectId,
+      correctedDocumentType: actionPayload.correctedDocumentType,
+      correctedFieldsJson: actionPayload.correctedFieldsJson || {},
+      correctionComment: actionPayload.correctionComment || null,
+      actorId: resolvedActorId,
+      reviewCenterManaged: true
+    });
+  }
+
+  throw createHttpError(
+    409,
+    "review_center_source_action_unavailable",
+    `Source action ${resolvedActionCode} is unavailable for ${reviewItem.sourceDomainCode}/${reviewItem.sourceObjectType}.`
+  );
+}

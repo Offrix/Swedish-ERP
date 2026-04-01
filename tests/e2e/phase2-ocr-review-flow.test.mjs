@@ -129,9 +129,10 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
     assert.equal(claimed.status, "claimed");
     assert.equal(claimed.sourceObjectSnapshot?.task?.status, "claimed");
 
-    await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/correct`, {
+    const directCorrectionBlocked = await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/correct`, {
       method: "POST",
       token: sessionToken,
+      expectedStatus: 409,
       body: {
         companyId: "00000000-0000-4000-8000-000000000001",
         correctedDocumentType: "contract",
@@ -143,6 +144,26 @@ test("Phase 2.3 OCR routes can be disabled and support review-driven correction 
         }
       }
     });
+    assert.equal(directCorrectionBlocked.error, "review_task_review_center_required");
+
+    const corrected = await requestJson(enabledBaseUrl, `/v1/review-center/items/${reviewRun.reviewTask.reviewItemId}/source-action`, {
+      method: "POST",
+      token: sessionToken,
+      body: {
+        companyId: "00000000-0000-4000-8000-000000000001",
+        actionCode: "correct",
+        actionPayload: {
+          correctedDocumentType: "contract",
+          correctedFieldsJson: {
+            contractTitle: {
+              value: "Manual service agreement",
+              confidence: 1
+            }
+          }
+        }
+      }
+    });
+    assert.equal(corrected.sourceObjectSnapshot?.task?.status, "corrected");
 
     await requestJson(enabledBaseUrl, `/v1/review-tasks/${reviewRun.reviewTask.reviewTaskId}/approve`, {
       method: "POST",

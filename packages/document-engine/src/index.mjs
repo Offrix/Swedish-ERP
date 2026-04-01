@@ -962,11 +962,15 @@ export function createDocumentArchiveEngine({
     correctedFieldsJson = {},
     correctionComment = null,
     actorId = "system",
-    correlationId = crypto.randomUUID()
+    correlationId = crypto.randomUUID(),
+    reviewCenterManaged = false
   } = {}) {
     const task = requireReviewTask({ companyId, reviewTaskId });
     const reviewCenterPlatform = resolveReviewCenterPlatform();
-    if (task.reviewItemId && reviewCenterPlatform) {
+    if (task.reviewItemId && reviewCenterPlatform && !reviewCenterManaged) {
+      throw createError(409, "review_task_review_center_required", "Review task correction must go through review center.");
+    }
+    if (task.reviewItemId && reviewCenterPlatform && reviewCenterManaged) {
       assertClaimedReviewItem({
         reviewCenterPlatform,
         companyId: task.companyId,

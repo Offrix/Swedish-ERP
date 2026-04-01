@@ -547,6 +547,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/review-center/items/:reviewItemId/claim",
               "/v1/review-center/items/:reviewItemId/start",
               "/v1/review-center/items/:reviewItemId/request-more-input",
+              "/v1/review-center/items/:reviewItemId/source-action",
               "/v1/review-center/items/:reviewItemId/reassign",
               "/v1/review-center/items/:reviewItemId/approve",
               "/v1/review-center/items/:reviewItemId/reject",
