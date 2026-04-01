@@ -270,6 +270,237 @@ test("Phase 6.3 API blocks unauthorized payments, books payouts correctly and re
   }
 });
 
+test("Phase 8.6 API cash-method AP flow recognizes expense and VAT on settlement date", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2027-09-25T08:00:00Z")
+  });
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "system"
+  });
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId: COMPANY_ID,
+    annualNetTurnoverSek: 500000,
+    legalFormCode: "AB",
+    actorId: "setup"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "setup"
+  });
+  platform.activateMethodProfile({
+    companyId: COMPANY_ID,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "setup"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: COMPANY_ID,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "setup"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: COMPANY_ID,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "setup"
+  });
+  platform.activateFiscalYear({
+    companyId: COMPANY_ID,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "setup"
+  });
+  const server = createApiServer({
+    platform,
+    flags: {
+      phase1AuthOnboardingEnabled: true,
+      phase2DocumentArchiveEnabled: true,
+      phase2CompanyInboxEnabled: true,
+      phase2OcrReviewEnabled: true,
+      phase3LedgerEnabled: true,
+      phase4VatEnabled: true,
+      phase5ArEnabled: true,
+      phase6ApEnabled: true
+    }
+  });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminSessionToken = await loginWithRequiredFactors({ baseUrl, platform, companyId: COMPANY_ID, email: DEMO_ADMIN_EMAIL });
+
+    const supplier = await requestJson(baseUrl, "/v1/ap/suppliers", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        legalName: "API Cash Supplier AB",
+        countryCode: "SE",
+        currencyCode: "SEK",
+        paymentTermsCode: "NET30",
+        bankgiro: "9898-9898",
+        paymentRecipient: "API Cash Supplier AB",
+        defaultExpenseAccountNumber: "5410",
+        defaultVatCode: "VAT_SE_DOMESTIC_25",
+        requiresPo: false
+      }
+    });
+
+    const invoice = await requestJson(baseUrl, "/v1/ap/invoices/ingest", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        supplierId: supplier.supplierId,
+        externalInvoiceRef: "API-CASH-8603",
+        invoiceDate: "2027-09-25",
+        dueDate: "2027-10-25",
+        sourceChannel: "api",
+        lines: [
+          {
+            description: "Cash-method supplier service",
+            quantity: 1,
+            unitPrice: 1000,
+            expenseAccountNumber: "5410",
+            vatCode: "VAT_SE_DOMESTIC_25"
+          }
+        ]
+      }
+    });
+
+    const matched = await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}/match`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const posted = await requestJson(baseUrl, `/v1/ap/invoices/${invoice.supplierInvoiceId}/post`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+
+    const bankAccount = await requestJson(baseUrl, "/v1/banking/accounts", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        bankName: "Nordea",
+        ledgerAccountNumber: "1110",
+        accountNumber: "123450000987",
+        currencyCode: "SEK",
+        isDefault: true
+      }
+    });
+    const proposal = await requestJson(baseUrl, "/v1/banking/payment-proposals", {
+      method: "POST",
+      token: adminSessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        bankAccountId: bankAccount.bankAccountId,
+        apOpenItemIds: [posted.apOpenItemId],
+        paymentDate: "2027-10-25"
+      }
+    });
+    await requestJson(baseUrl, `/v1/banking/payment-proposals/${proposal.paymentProposalId}/approve`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    await requestJson(baseUrl, `/v1/banking/payment-proposals/${proposal.paymentProposalId}/export`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    await requestJson(baseUrl, `/v1/banking/payment-proposals/${proposal.paymentProposalId}/submit`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const accepted = await requestJson(baseUrl, `/v1/banking/payment-proposals/${proposal.paymentProposalId}/accept`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: { companyId: COMPANY_ID }
+    });
+    const paymentOrderId = accepted.orders[0].paymentOrderId;
+    const reservedOpenItem = platform.getApOpenItem({
+      companyId: COMPANY_ID,
+      apOpenItemId: posted.apOpenItemId
+    });
+
+    const booked = await requestJson(baseUrl, `/v1/banking/payment-orders/${paymentOrderId}/book`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: {
+        companyId: COMPANY_ID,
+        bankEventId: "BANK-BOOK-API-CASH-8603",
+        bookedOn: "2027-10-26"
+      }
+    });
+    const bookingJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: booked.bankPaymentEvent.journalEntryId
+    });
+    const paidInvoice = platform.getSupplierInvoice({
+      companyId: COMPANY_ID,
+      supplierInvoiceId: invoice.supplierInvoiceId
+    });
+
+    const returned = await requestJson(baseUrl, `/v1/banking/payment-orders/${paymentOrderId}/return`, {
+      method: "POST",
+      token: adminSessionToken,
+      body: {
+        companyId: COMPANY_ID,
+        bankEventId: "BANK-RETURN-API-CASH-8603",
+        returnedOn: "2027-10-27"
+      }
+    });
+    const returnJournal = platform.getJournalEntry({
+      companyId: COMPANY_ID,
+      journalEntryId: returned.bankPaymentEvent.journalEntryId
+    });
+    const reopenedInvoice = platform.getSupplierInvoice({
+      companyId: COMPANY_ID,
+      supplierInvoiceId: invoice.supplierInvoiceId
+    });
+    const reopenedOpenItem = platform.getApOpenItem({
+      companyId: COMPANY_ID,
+      apOpenItemId: posted.apOpenItemId
+    });
+
+    assert.equal(matched.invoice.status, "approved");
+    assert.equal(posted.journalEntryId, null);
+    assert.equal(posted.primaryRecognitionTrigger, "AP_PAYMENT_SETTLEMENT");
+    assert.equal(reservedOpenItem.lastReservationJournalEntryId, null);
+    assert.equal(sumDebits(bookingJournal, "5410"), 1000);
+    assert.equal(sumDebits(bookingJournal, "2640"), 250);
+    assert.equal(sumCredits(bookingJournal, "1110"), 1250);
+    assert.equal(paidInvoice.recognizedGrossAmount, 1250);
+    assert.equal(paidInvoice.recognizedVatAmount, 250);
+    assert.equal(paidInvoice.lines[0].recognizedNetAmount, 1000);
+    assert.equal(paidInvoice.lines[0].recognizedVatAmount, 250);
+    assert.equal(sumDebits(returnJournal, "1110"), 1250);
+    assert.equal(sumCredits(returnJournal, "5410"), 1000);
+    assert.equal(sumCredits(returnJournal, "2640"), 250);
+    assert.equal(reopenedInvoice.status, "posted");
+    assert.equal(reopenedInvoice.recognizedGrossAmount, 0);
+    assert.equal(reopenedInvoice.recognizedVatAmount, 0);
+    assert.equal(reopenedOpenItem.status, "open");
+    assert.equal(reopenedOpenItem.openAmount, 1250);
+  } finally {
+    await stopServer(server);
+  }
+});
+
 test("Phase 9.2 API creates AP credit notes and exposes non-payable payment preparation", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-10-03T08:00:00Z")

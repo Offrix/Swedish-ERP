@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApEngine } from "../../packages/domain-ap/src/index.mjs";
+import { createAccountingMethodEngine } from "../../packages/domain-accounting-method/src/index.mjs";
 import { createDocumentArchiveEngine } from "../../packages/document-engine/src/index.mjs";
 import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs";
 import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
@@ -125,6 +126,91 @@ test("Phase 6.2 ingests OCR invoice lines, explains VAT and posts multiple cost 
   assert.equal(journal.metadataJson.journalType, "operational_posting");
   assert.equal(journal.metadataJson.postingSignalCode, "ap.invoice.posted");
   assert.equal(journal.metadataJson.sourceObjectVersion, invoice.duplicateFingerprintHash);
+});
+
+test("Phase 8.6 cash method posts supplier invoices operationally without invoice-date ledger booking", () => {
+  const clock = () => new Date("2026-03-29T10:00:00Z");
+  const ledger = createLedgerPlatform({ clock });
+  const vat = createVatPlatform({ clock, ledgerPlatform: ledger });
+  const accountingMethod = createActiveAccountingMethodPlatform({
+    clock,
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2026-01-01"
+  });
+  const ap = createApEngine({
+    clock,
+    seedDemo: false,
+    accountingMethodPlatform: accountingMethod,
+    vatPlatform: vat,
+    ledgerPlatform: ledger
+  });
+  ledger.installLedgerCatalog({ companyId: COMPANY_ID, actorId: "user-1" });
+  ledger.ensureAccountingYearPeriod({
+    companyId: COMPANY_ID,
+    fiscalYear: 2026,
+    actorId: "user-1"
+  });
+
+  const supplier = ap.createSupplier({
+    companyId: COMPANY_ID,
+    legalName: "Cash Method Supplier AB",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    paymentRecipient: "Cash Method Supplier AB",
+    bankgiro: "5555-7777",
+    defaultExpenseAccountNumber: "5410",
+    defaultVatCode: "VAT_SE_DOMESTIC_25",
+    requiresPo: false,
+    actorId: "user-1"
+  });
+  const invoice = ap.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "CASH-AP-6201",
+    invoiceDate: "2026-03-29",
+    dueDate: "2026-04-28",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Cash-method supplier invoice",
+        quantity: 1,
+        unitPrice: 1000,
+        expenseAccountNumber: "5410",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    ],
+    actorId: "user-1"
+  });
+  const matched = ap.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: invoice.supplierInvoiceId,
+    actorId: "user-1"
+  });
+  const posted = ap.postSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: invoice.supplierInvoiceId,
+    actorId: "user-1"
+  });
+  const openItem = ap.getApOpenItem({
+    companyId: COMPANY_ID,
+    apOpenItemId: posted.apOpenItemId
+  });
+  const ledgerEntries = ledger.snapshotLedger().journalEntries.filter((entry) => entry.sourceId === invoice.supplierInvoiceId);
+
+  assert.equal(matched.invoice.status, "approved");
+  assert.equal(posted.status, "posted");
+  assert.equal(posted.journalEntryId, null);
+  assert.equal(posted.primaryRecognitionTrigger, "AP_PAYMENT_SETTLEMENT");
+  assert.equal(posted.recognizedGrossAmount, 0);
+  assert.equal(posted.recognizedVatAmount, 0);
+  assert.equal(posted.lines[0].recognizedNetAmount, 0);
+  assert.equal(posted.lines[0].recognizedVatAmount, 0);
+  assert.equal(openItem.openAmount, 1250);
+  assert.equal(openItem.status, "open");
+  assert.equal(openItem.journalEntryId, null);
+  assert.equal(ledgerEntries.length, 0);
 });
 
 test("Phase 6.2 blocks posting when 3-way matching finds receipt variance", () => {
@@ -372,3 +458,31 @@ test("Phase 9.2 blocks AP posting for missing governed allocation dimensions and
   const expenseLine = journal.lines.find((line) => line.accountNumber === "5410");
   assert.equal(expenseLine.dimensionJson.serviceLineCode, "SL-OPS");
 });
+
+function createActiveAccountingMethodPlatform({ clock, companyId, methodCode, effectiveFrom }) {
+  const accountingMethod = createAccountingMethodEngine({
+    seedDemo: false,
+    clock
+  });
+  const assessment = accountingMethod.assessCashMethodEligibility({
+    companyId,
+    annualNetTurnoverSek: 1_000_000,
+    legalFormCode: "AB",
+    actorId: "user-1"
+  });
+  const profile = accountingMethod.createMethodProfile({
+    companyId,
+    methodCode,
+    effectiveFrom,
+    fiscalYearStartDate: effectiveFrom,
+    eligibilityAssessmentId: assessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "user-1"
+  });
+  accountingMethod.activateMethodProfile({
+    companyId,
+    methodProfileId: profile.methodProfileId,
+    actorId: "user-1"
+  });
+  return accountingMethod;
+}

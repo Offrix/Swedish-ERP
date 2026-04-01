@@ -220,6 +220,191 @@ test("Phase 6.3 direct platform flow supports multi-step approval, payment reser
   assert.equal(reopenedOpenItem.openAmount, 1250);
 });
 
+test("Phase 8.6 direct platform cash-method AP flow recognizes expense and VAT on settlement date", () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2027-09-25T08:00:00Z")
+  });
+  platform.installLedgerCatalog({
+    companyId: COMPANY_ID,
+    actorId: "system"
+  });
+  const eligibilityAssessment = platform.assessCashMethodEligibility({
+    companyId: COMPANY_ID,
+    annualNetTurnoverSek: 500000,
+    legalFormCode: "AB",
+    actorId: "setup"
+  });
+  const methodProfile = platform.createMethodProfile({
+    companyId: COMPANY_ID,
+    methodCode: "KONTANTMETOD",
+    effectiveFrom: "2027-01-01",
+    fiscalYearStartDate: "2027-01-01",
+    eligibilityAssessmentId: eligibilityAssessment.assessmentId,
+    onboardingOverride: true,
+    actorId: "setup"
+  });
+  platform.activateMethodProfile({
+    companyId: COMPANY_ID,
+    methodProfileId: methodProfile.methodProfileId,
+    actorId: "setup"
+  });
+  const fiscalYearProfile = platform.createFiscalYearProfile({
+    companyId: COMPANY_ID,
+    legalFormCode: "AKTIEBOLAG",
+    actorId: "setup"
+  });
+  const fiscalYear = platform.createFiscalYear({
+    companyId: COMPANY_ID,
+    fiscalYearProfileId: fiscalYearProfile.fiscalYearProfileId,
+    startDate: "2027-01-01",
+    endDate: "2027-12-31",
+    approvalBasisCode: "BASELINE",
+    actorId: "setup"
+  });
+  platform.activateFiscalYear({
+    companyId: COMPANY_ID,
+    fiscalYearId: fiscalYear.fiscalYearId,
+    actorId: "setup"
+  });
+
+  const supplier = platform.createSupplier({
+    companyId: COMPANY_ID,
+    legalName: "Cash AP Supplier AB",
+    countryCode: "SE",
+    currencyCode: "SEK",
+    paymentTermsCode: "NET30",
+    paymentRecipient: "Cash AP Supplier AB",
+    bankgiro: "5555-8888",
+    defaultExpenseAccountNumber: "5410",
+    defaultVatCode: "VAT_SE_DOMESTIC_25",
+    requiresPo: false,
+    actorId: "admin"
+  });
+  const ingested = platform.ingestSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierId: supplier.supplierId,
+    externalInvoiceRef: "SUP-CASH-8603",
+    invoiceDate: "2027-09-25",
+    dueDate: "2027-10-25",
+    sourceChannel: "api",
+    lines: [
+      {
+        description: "Cash-method supplier service",
+        quantity: 1,
+        unitPrice: 1000,
+        expenseAccountNumber: "5410",
+        vatCode: "VAT_SE_DOMESTIC_25"
+      }
+    ],
+    actorId: "admin"
+  });
+  const matched = platform.runSupplierInvoiceMatch({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: ingested.supplierInvoiceId,
+    actorId: "admin"
+  });
+  const posted = platform.postSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: ingested.supplierInvoiceId,
+    actorId: "admin"
+  });
+  const bankAccount = platform.createBankAccount({
+    companyId: COMPANY_ID,
+    bankName: "Nordea",
+    ledgerAccountNumber: "1110",
+    accountNumber: "1234567890",
+    currencyCode: "SEK",
+    isDefault: true,
+    actorId: "admin"
+  });
+  const proposal = platform.createPaymentProposal({
+    companyId: COMPANY_ID,
+    bankAccountId: bankAccount.bankAccountId,
+    apOpenItemIds: [posted.apOpenItemId],
+    paymentDate: "2027-10-25",
+    actorId: "admin"
+  });
+  platform.approvePaymentProposal({
+    companyId: COMPANY_ID,
+    paymentProposalId: proposal.paymentProposalId,
+    actorId: "admin"
+  });
+  platform.exportPaymentProposal({
+    companyId: COMPANY_ID,
+    paymentProposalId: proposal.paymentProposalId,
+    actorId: "admin"
+  });
+  platform.submitPaymentProposal({
+    companyId: COMPANY_ID,
+    paymentProposalId: proposal.paymentProposalId,
+    actorId: "admin"
+  });
+  const accepted = platform.acceptPaymentProposal({
+    companyId: COMPANY_ID,
+    paymentProposalId: proposal.paymentProposalId,
+    actorId: "admin"
+  });
+  const paymentOrderId = accepted.orders[0].paymentOrderId;
+  const reservedOpenItem = platform.getApOpenItem({
+    companyId: COMPANY_ID,
+    apOpenItemId: posted.apOpenItemId
+  });
+  const booked = platform.bookPaymentOrder({
+    companyId: COMPANY_ID,
+    paymentOrderId,
+    bankEventId: "BANK-BOOK-CASH-8603",
+    bookedOn: "2027-10-26",
+    actorId: "admin"
+  });
+  const bookingJournal = platform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: booked.bankPaymentEvent.journalEntryId
+  });
+  const paidInvoice = platform.getSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: ingested.supplierInvoiceId
+  });
+  const returned = platform.returnPaymentOrder({
+    companyId: COMPANY_ID,
+    paymentOrderId,
+    bankEventId: "BANK-RETURN-CASH-8603",
+    returnedOn: "2027-10-27",
+    actorId: "admin"
+  });
+  const returnJournal = platform.getJournalEntry({
+    companyId: COMPANY_ID,
+    journalEntryId: returned.bankPaymentEvent.journalEntryId
+  });
+  const reopenedInvoice = platform.getSupplierInvoice({
+    companyId: COMPANY_ID,
+    supplierInvoiceId: ingested.supplierInvoiceId
+  });
+  const reopenedOpenItem = platform.getApOpenItem({
+    companyId: COMPANY_ID,
+    apOpenItemId: posted.apOpenItemId
+  });
+
+  assert.equal(matched.invoice.status, "approved");
+  assert.equal(posted.journalEntryId, null);
+  assert.equal(posted.primaryRecognitionTrigger, "AP_PAYMENT_SETTLEMENT");
+  assert.equal(reservedOpenItem.lastReservationJournalEntryId, null);
+  assert.equal(sumDebits(bookingJournal, "5410"), 1000);
+  assert.equal(sumDebits(bookingJournal, "2640"), 250);
+  assert.equal(sumCredits(bookingJournal, "1110"), 1250);
+  assert.equal(paidInvoice.recognizedGrossAmount, 1250);
+  assert.equal(paidInvoice.recognizedVatAmount, 250);
+  assert.equal(paidInvoice.lines[0].recognizedNetAmount, 1000);
+  assert.equal(paidInvoice.lines[0].recognizedVatAmount, 250);
+  assert.equal(sumDebits(returnJournal, "1110"), 1250);
+  assert.equal(sumCredits(returnJournal, "5410"), 1000);
+  assert.equal(sumCredits(returnJournal, "2640"), 250);
+  assert.equal(reopenedInvoice.status, "posted");
+  assert.equal(reopenedInvoice.recognizedGrossAmount, 0);
+  assert.equal(reopenedInvoice.recognizedVatAmount, 0);
+  assert.equal(reopenedOpenItem.status, "open");
+  assert.equal(reopenedOpenItem.openAmount, 1250);
+});
+
 test("Phase 6.4 direct platform flow blocks person-linked AP documents from posting and payment readiness", () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-09-26T08:00:00Z")
