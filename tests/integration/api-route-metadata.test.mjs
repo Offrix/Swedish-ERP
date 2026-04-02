@@ -228,6 +228,8 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/work-logs",
   "/v1/projects/:projectId/revenue-plans",
   "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
+  "/v1/projects/:projectId/revenue-recognition-plans",
+  "/v1/projects/:projectId/revenue-recognition-plans/:projectRevenueRecognitionPlanId/activate",
   "/v1/projects/:projectId/billing-plans",
   "/v1/projects/:projectId/status-updates",
   "/v1/projects/:projectId/capacity-reservations",
@@ -241,6 +243,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/invoice-readiness-assessments",
   "/v1/projects/:projectId/invoice-simulations",
   "/v1/projects/:projectId/profitability-snapshots",
+  "/v1/projects/:projectId/wip-ledger-bridges",
   "/v1/projects/portfolio/nodes",
   "/v1/projects/portfolio/summary",
   "/v1/projects/:projectId/live-conversion-plans",
@@ -292,7 +295,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
 
 function parseRoutesFromSource(sourceText) {
   const bindings = new Map(
-    [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(path,\s*"([^"]+)"\)/g)].map((match) => [match[1], match[2]])
+    [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(\s*path\s*,\s*"([^"]+)"\s*\)/g)].map((match) => [match[1], match[2]])
   );
   const routes = [];
 
@@ -468,6 +471,32 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(closeAdjustmentContract.requiredActionClass, "close_adjustment_post");
     assert.equal(closeAdjustmentContract.requiredTrustLevel, "strong_mfa");
     assert.equal(closeAdjustmentContract.requiredScopeType, "close_reopen_request");
+
+    const projectRevenueRecognitionPlanCreateContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/revenue-recognition-plans"
+    );
+    assert.ok(projectRevenueRecognitionPlanCreateContract);
+    assert.equal(projectRevenueRecognitionPlanCreateContract.requiredActionClass, "project_revenue_recognition_plan_create");
+    assert.equal(projectRevenueRecognitionPlanCreateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectRevenueRecognitionPlanCreateContract.requiredScopeType, "project");
+
+    const projectRevenueRecognitionPlanActivateContract = payload.routeContracts.find(
+      (routeContract) =>
+        routeContract.method === "POST"
+        && routeContract.path === "/v1/projects/:projectId/revenue-recognition-plans/:projectRevenueRecognitionPlanId/activate"
+    );
+    assert.ok(projectRevenueRecognitionPlanActivateContract);
+    assert.equal(projectRevenueRecognitionPlanActivateContract.requiredActionClass, "project_revenue_recognition_plan_activate");
+    assert.equal(projectRevenueRecognitionPlanActivateContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectRevenueRecognitionPlanActivateContract.requiredScopeType, "project");
+
+    const projectWipLedgerBridgePostContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/wip-ledger-bridges"
+    );
+    assert.ok(projectWipLedgerBridgePostContract);
+    assert.equal(projectWipLedgerBridgePostContract.requiredActionClass, "project_wip_ledger_bridge_post");
+    assert.equal(projectWipLedgerBridgePostContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectWipLedgerBridgePostContract.requiredScopeType, "project");
 
     const closeRelockContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/relock"

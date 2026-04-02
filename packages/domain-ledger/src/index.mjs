@@ -378,6 +378,16 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultSignalCode: "hus.recovery.confirmed"
   }),
   Object.freeze({
+    recipeCode: "PROJECT_WIP_BRIDGE",
+    version: "2026.1",
+    sourceDomain: "projects",
+    journalType: "operational_posting",
+    allowedSourceTypes: Object.freeze(["PROJECT_WIP"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "A",
+    defaultSignalCode: "project.wip_ledger_bridge.posted"
+  }),
+  Object.freeze({
     recipeCode: "YEAR_END_ADJUSTMENT",
     version: "2026.1",
     sourceDomain: "ledger_close",

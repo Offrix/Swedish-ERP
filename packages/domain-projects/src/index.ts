@@ -25,6 +25,7 @@ export type ProjectWorkPackageStatus = "draft" | "active" | "completed" | "cance
 export type ProjectDeliveryMilestoneStatus = "planned" | "ready" | "achieved" | "accepted" | "cancelled";
 export type ProjectWorkLogStatus = "recorded" | "approved" | "rejected";
 export type ProjectRevenuePlanStatus = "draft" | "approved" | "superseded";
+export type ProjectRevenueRecognitionPlanStatus = "draft" | "active" | "completed" | "reversed";
 export type ProjectBillingPlanStatus = "draft" | "active" | "superseded" | "cancelled";
 export type ProjectStatusUpdateHealthCode = "green" | "amber" | "red";
 export type ProjectProfitabilityAdjustmentStatus = "pending_review" | "approved" | "rejected";
@@ -237,6 +238,38 @@ export interface ProjectRevenuePlanRef {
   };
   readonly approvedAt: string | null;
   readonly approvedByActorId: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectRevenueRecognitionJournalRulesRef {
+  readonly ruleVersion: string;
+  readonly recognitionBasisCode: string;
+  readonly revenueAccountNumber: string;
+  readonly contractAssetAccountNumber: string;
+  readonly deferredRevenueAccountNumber: string;
+  readonly costWipAssetAccountNumber: string;
+  readonly costWipChangeAccountNumber: string;
+  readonly sourceProjectRevenuePlanId: string | null;
+  readonly projectBillingModelCode: string | null;
+  readonly methodCode: ProjectRevenueRecognitionModelCode;
+}
+
+export interface ProjectRevenueRecognitionPlanRef {
+  readonly projectRevenueRecognitionPlanId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly sourceProjectRevenuePlanId: string | null;
+  readonly methodCode: ProjectRevenueRecognitionModelCode;
+  readonly journalRules: ProjectRevenueRecognitionJournalRulesRef;
+  readonly status: ProjectRevenueRecognitionPlanStatus;
+  readonly activatedAt: string | null;
+  readonly activatedByActorId: string | null;
+  readonly completedAt: string | null;
+  readonly completedByActorId: string | null;
+  readonly reversedAt: string | null;
+  readonly reversedByActorId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -567,6 +600,37 @@ export interface ProjectWipSnapshotRef {
   readonly status: ProjectSnapshotStatus;
   readonly explanationCodes: readonly string[];
   readonly snapshotHash: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
+export interface ProjectWipLedgerBridgeRef {
+  readonly projectWipLedgerBridgeId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly projectRevenueRecognitionPlanId: string;
+  readonly projectCostSnapshotId: string;
+  readonly projectWipSnapshotId: string;
+  readonly projectProfitabilitySnapshotId: string;
+  readonly reportingPeriod: string;
+  readonly cutoffDate: string;
+  readonly journalDate: string;
+  readonly methodCode: ProjectRevenueRecognitionModelCode;
+  readonly sourceProjectRevenuePlanId: string | null;
+  readonly journalRules: ProjectRevenueRecognitionJournalRulesRef;
+  readonly recognizedRevenueTargetAmount: number;
+  readonly operationalWipAmount: number;
+  readonly operationalDeferredRevenueAmount: number;
+  readonly targetContractAssetAmount: number;
+  readonly targetDeferredRevenueAmount: number;
+  readonly targetCostWipAmount: number;
+  readonly deltaContractAssetAmount: number;
+  readonly deltaDeferredRevenueAmount: number;
+  readonly deltaCostWipAmount: number;
+  readonly balanceStateHash: string;
+  readonly status: "posted" | "noop";
+  readonly journalEntryId: string | null;
+  readonly postingIntentId: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
 }

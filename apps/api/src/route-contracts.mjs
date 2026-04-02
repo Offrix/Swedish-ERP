@@ -345,6 +345,8 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/projects/:projectId/work-logs", override("projects", "project_work_log_record", "strong_mfa", "project", "project", "project_work_log", "company.manage", true)],
   ["POST /v1/projects/:projectId/revenue-plans", override("projects", "project_revenue_plan_create", "strong_mfa", "project", "project", "project_revenue_plan", "company.manage", true)],
   ["POST /v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve", override("projects", "project_revenue_plan_approve", "strong_mfa", "project", "project", "project_revenue_plan", "company.manage", true)],
+  ["POST /v1/projects/:projectId/revenue-recognition-plans", override("projects", "project_revenue_recognition_plan_create", "strong_mfa", "project", "project", "project_revenue_recognition_plan", "company.manage", true)],
+  ["POST /v1/projects/:projectId/revenue-recognition-plans/:projectRevenueRecognitionPlanId/activate", override("projects", "project_revenue_recognition_plan_activate", "strong_mfa", "project", "project", "project_revenue_recognition_plan", "company.manage", true)],
   ["POST /v1/projects/:projectId/billing-plans", override("projects", "project_billing_plan_create", "strong_mfa", "project", "project", "project_billing_plan", "company.manage", true)],
   ["POST /v1/projects/:projectId/status-updates", override("projects", "project_status_update_create", "strong_mfa", "project", "project", "project_status_update", "company.manage", true)],
   ["POST /v1/projects/:projectId/capacity-reservations", override("projects", "project_capacity_reservation_create", "strong_mfa", "project", "project", "project_capacity_reservation", "company.manage", true)],
@@ -358,6 +360,7 @@ const EXPLICIT_ROUTE_OVERRIDES = new Map([
   ["POST /v1/projects/:projectId/invoice-readiness-assessments", override("projects", "project_invoice_readiness_assess", "strong_mfa", "project", "project", "project_invoice_readiness_assessment", "company.manage", true)],
   ["POST /v1/projects/:projectId/invoice-simulations", override("projects", "project_invoice_simulation_create", "strong_mfa", "project", "project", "project_invoice_simulation", "company.manage", true)],
   ["POST /v1/projects/:projectId/profitability-snapshots", override("projects", "project_profitability_snapshot_materialize", "strong_mfa", "project", "project", "project_profitability_snapshot", "company.manage", true)],
+  ["POST /v1/projects/:projectId/wip-ledger-bridges", override("projects", "project_wip_ledger_bridge_post", "strong_mfa", "project", "project", "project_wip_ledger_bridge", "company.manage", true)],
   ["POST /v1/projects/:projectId/live-conversion-plans", override("projects", "project_live_conversion_plan_create", "strong_mfa", "project", "project", "project_live_conversion_plan", "company.manage", true)],
   ["POST /v1/personalliggare/sites", override("personalliggare", "personalliggare_site_create", "strong_mfa", "company", "personalliggare_site", "personalliggare_site", "company.manage", false)],
   ["POST /v1/personalliggare/sites/:constructionSiteId/registrations", override("personalliggare", "personalliggare_registration_create", "strong_mfa", "construction_site", "personalliggare_site", "personalliggare_registration", "company.manage", true)],
@@ -624,7 +627,7 @@ function parseMutatingRoutesFromSource(fileUrl) {
 function parseRoutesFromSource(fileUrl, allowedMethods) {
   const sourceText = fs.readFileSync(fileURLToPath(fileUrl), "utf8");
   const bindings = new Map(
-    [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(path,\s*"([^"]+)"\)/g)].map((match) => [match[1], match[2]])
+    [...sourceText.matchAll(/const\s+(\w+)\s*=\s*matchPath\(\s*path\s*,\s*"([^"]+)"\s*\)/g)].map((match) => [match[1], match[2]])
   );
   const routes = [];
   for (const match of sourceText.matchAll(/if\s*\(([^\{]+)\)\s*\{/g)) {

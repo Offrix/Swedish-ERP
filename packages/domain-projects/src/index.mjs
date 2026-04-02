@@ -211,6 +211,7 @@ export const PROJECT_WORK_PACKAGE_STATUSES = Object.freeze(["draft", "active", "
 export const PROJECT_DELIVERY_MILESTONE_STATUSES = Object.freeze(["planned", "ready", "achieved", "accepted", "cancelled"]);
 export const PROJECT_WORK_LOG_STATUSES = Object.freeze(["recorded", "approved", "rejected"]);
 export const PROJECT_REVENUE_PLAN_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
+export const PROJECT_REVENUE_RECOGNITION_PLAN_STATUSES = Object.freeze(["draft", "active", "completed", "reversed"]);
 export const PROJECT_BILLING_PLAN_STATUSES = Object.freeze(["draft", "active", "superseded", "cancelled"]);
 export const PROJECT_STATUS_UPDATE_HEALTH_CODES = Object.freeze(["green", "amber", "red"]);
 export const PROJECT_PROFITABILITY_ADJUSTMENT_STATUSES = Object.freeze(["pending_review", "approved", "rejected"]);
@@ -258,6 +259,7 @@ export function createProjectEngine({
   timePlatform = null,
   payrollPlatform = null,
   vatPlatform = null,
+  ledgerPlatform = null,
   evidencePlatform = null,
   fieldPlatform = null,
   husPlatform = null,
@@ -286,6 +288,8 @@ export function createProjectEngine({
     projectWorkLogIdsByProject: new Map(),
     projectRevenuePlans: new Map(),
     projectRevenuePlanIdsByProject: new Map(),
+    projectRevenueRecognitionPlans: new Map(),
+    projectRevenueRecognitionPlanIdsByProject: new Map(),
     projectProfitabilitySnapshots: new Map(),
     projectProfitabilitySnapshotIdsByProject: new Map(),
     budgetVersions: new Map(),
@@ -299,6 +303,8 @@ export function createProjectEngine({
     projectPayrollCostAllocationIdsBySnapshot: new Map(),
     wipSnapshots: new Map(),
     wipSnapshotIdsByProject: new Map(),
+    projectWipLedgerBridges: new Map(),
+    projectWipLedgerBridgeIdsByProject: new Map(),
     forecastSnapshots: new Map(),
     forecastSnapshotIdsByProject: new Map(),
     projectDeviations: new Map(),
@@ -334,6 +340,7 @@ export function createProjectEngine({
     projectDeliveryMilestoneStatuses: PROJECT_DELIVERY_MILESTONE_STATUSES,
     projectWorkLogStatuses: PROJECT_WORK_LOG_STATUSES,
     projectRevenuePlanStatuses: PROJECT_REVENUE_PLAN_STATUSES,
+    projectRevenueRecognitionPlanStatuses: PROJECT_REVENUE_RECOGNITION_PLAN_STATUSES,
     projectBillingPlanStatuses: PROJECT_BILLING_PLAN_STATUSES,
     projectStatusUpdateHealthCodes: PROJECT_STATUS_UPDATE_HEALTH_CODES,
     projectProfitabilityAdjustmentStatuses: PROJECT_PROFITABILITY_ADJUSTMENT_STATUSES,
@@ -384,6 +391,9 @@ export function createProjectEngine({
     listProjectRevenuePlans,
     createProjectRevenuePlan,
     approveProjectRevenuePlan,
+    listProjectRevenueRecognitionPlans,
+    createProjectRevenueRecognitionPlan,
+    activateRevenueRecognitionPlan,
     listProjectBillingPlans,
     createProjectBillingPlan,
     listProjectStatusUpdates,
@@ -420,6 +430,8 @@ export function createProjectEngine({
     materializeProjectCostSnapshot,
     listProjectWipSnapshots,
     materializeProjectWipSnapshot,
+    listProjectWipLedgerBridges,
+    bridgeProjectWipToLedger,
     listProjectForecastSnapshots,
     materializeProjectForecastSnapshot,
     listProjectChangeOrders,
@@ -481,6 +493,7 @@ export function createProjectEngine({
     const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
     const agreements = listProjectAgreements({ companyId: project.companyId, projectId: project.projectId });
     const signedAgreements = agreements.filter((record) => record.status === "signed");
+    const revenueRecognitionPlans = listProjectRevenueRecognitionPlans({ companyId: project.companyId, projectId: project.projectId });
     const billingPlans = listProjectBillingPlans({ companyId: project.companyId, projectId: project.projectId });
     const statusUpdates = listProjectStatusUpdates({ companyId: project.companyId, projectId: project.projectId });
     const currentStatusUpdate = selectWorkspaceSnapshot(statusUpdates, cutoffDate, "statusDate");
@@ -494,8 +507,17 @@ export function createProjectEngine({
       agreements: signedAgreements,
       cutoffDate
     });
+    const currentProjectRevenueRecognitionPlan = selectCurrentProjectRevenueRecognitionPlan({
+      plans: revenueRecognitionPlans,
+      cutoffDate
+    });
     const currentBillingPlan = billingPlans.filter((record) => record.status === "active").pop() || billingPlans.at(-1) || null;
     const currentInvoiceReadinessAssessment = selectWorkspaceSnapshot(invoiceReadinessAssessments, cutoffDate, "assessedAt");
+    const projectWipLedgerBridges = listProjectWipLedgerBridges({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const currentProjectWipLedgerBridge = selectWorkspaceSnapshot(projectWipLedgerBridges, cutoffDate);
     const customerContext = summarizeProjectCustomerContext({
       project,
       opportunityLinks,
@@ -610,6 +632,12 @@ export function createProjectEngine({
     if (revenuePlans.filter((record) => record.status === "approved").length === 0) {
       warningCodes.push("approved_revenue_plan_missing");
     }
+    if (project.status === "active" && project.revenueRecognitionModelCode && !currentProjectRevenueRecognitionPlan) {
+      warningCodes.push("revenue_recognition_plan_missing");
+    }
+    if (currentWipSnapshot && !currentProjectWipLedgerBridge) {
+      warningCodes.push("wip_ledger_bridge_missing");
+    }
     if (currentInvoiceReadinessAssessment?.status === "blocked") {
       warningCodes.push("invoice_readiness_blocked");
     }
@@ -655,14 +683,17 @@ export function createProjectEngine({
       currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
       currentProfitabilitySnapshotId: currentProfitabilitySnapshot?.projectProfitabilitySnapshotId || null,
       currentProjectAgreementId: currentProjectAgreement?.projectAgreementId || null,
+      currentProjectRevenueRecognitionPlanId: currentProjectRevenueRecognitionPlan?.projectRevenueRecognitionPlanId || null,
       currentBillingPlanId: currentBillingPlan?.projectBillingPlanId || null,
       currentInvoiceReadinessAssessmentId: currentInvoiceReadinessAssessment?.projectInvoiceReadinessAssessmentId || null,
+      currentProjectWipLedgerBridgeId: currentProjectWipLedgerBridge?.projectWipLedgerBridgeId || null,
       latestEstimateVersionId: kalkylSummary.latestEstimateVersionId,
       latestEstimateStatus: kalkylSummary.latestEstimateStatus,
       opportunityLinkCount: opportunityLinks.length,
       quoteLinkCount: quoteLinks.length,
       agreementCount: agreements.length,
       signedAgreementCount: signedAgreements.length,
+      revenueRecognitionPlanCount: revenueRecognitionPlans.length,
       billingPlanCount: billingPlans.length,
       profitabilityAdjustmentCount: profitabilityAdjustments.length,
       invoiceReadinessAssessmentCount: invoiceReadinessAssessments.length,
@@ -675,6 +706,7 @@ export function createProjectEngine({
       workPackageCount: workPackages.length,
       deliveryMilestoneCount: deliveryMilestones.length,
       approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length,
+      wipLedgerBridgeCount: projectWipLedgerBridges.length,
       trialScenarioRunCount: projectTrialScenarioRuns.length,
       importBatchCount: projectImportBatches.length,
       invoiceSimulationCount: projectInvoiceSimulations.length,
@@ -706,8 +738,10 @@ export function createProjectEngine({
       currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
       currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
       currentProjectAgreement: currentProjectAgreement ? copy(currentProjectAgreement) : null,
+      currentProjectRevenueRecognitionPlan: currentProjectRevenueRecognitionPlan ? copy(currentProjectRevenueRecognitionPlan) : null,
       currentBillingPlan: currentBillingPlan ? copy(currentBillingPlan) : null,
       currentInvoiceReadinessAssessment: currentInvoiceReadinessAssessment ? copy(currentInvoiceReadinessAssessment) : null,
+      currentProjectWipLedgerBridge: currentProjectWipLedgerBridge ? copy(currentProjectWipLedgerBridge) : null,
       currentProjectInvoiceSimulation: currentProjectInvoiceSimulation ? copy(currentProjectInvoiceSimulation) : null,
       currentProjectLiveConversionPlan: currentProjectLiveConversionPlan ? copy(currentProjectLiveConversionPlan) : null,
       projectOpportunityLinks: opportunityLinks.map(copy),
@@ -718,6 +752,7 @@ export function createProjectEngine({
       projectWorkPackages: workPackages.map(copy),
       projectDeliveryMilestones: deliveryMilestones.map(copy),
       projectRevenuePlans: revenuePlans.map(copy),
+      projectRevenueRecognitionPlans: revenueRecognitionPlans.map(copy),
       projectBillingPlans: billingPlans.map(copy),
       projectStatusUpdates: statusUpdates.map(copy),
       projectCapacityReservations: capacityReservations.map(copy),
@@ -725,6 +760,7 @@ export function createProjectEngine({
       projectRisks: projectRisks.map(copy),
       projectProfitabilityAdjustments: profitabilityAdjustments.map(copy),
       projectInvoiceReadinessAssessments: invoiceReadinessAssessments.map(copy),
+      projectWipLedgerBridges: projectWipLedgerBridges.map(copy),
       projectTrialScenarioRuns: projectTrialScenarioRuns.map(copy),
       projectImportBatches: projectImportBatches.map(copy),
       projectInvoiceSimulations: projectInvoiceSimulations.map(copy),
@@ -835,6 +871,7 @@ export function createProjectEngine({
       opportunityLinks: [],
       quoteLinks: [],
       agreements: [],
+      revenueRecognitionPlans: [],
       billingPlans: [],
       statusUpdates: [],
       capacityReservations: [],
@@ -844,6 +881,7 @@ export function createProjectEngine({
       invoiceReadinessAssessments: [],
       changeOrders: [],
       buildVatAssessments: [],
+      wipLedgerBridges: [],
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
       updatedAt: nowIso(clock)
@@ -853,6 +891,17 @@ export function createProjectEngine({
     state.projectIdByAlias.set(toCompanyScopedKey(record.companyId, record.projectId), record.projectId);
     state.projectIdByAlias.set(toCompanyScopedKey(record.companyId, record.projectCode), record.projectId);
     state.projectIdByAlias.set(toCompanyScopedKey(record.companyId, record.projectReferenceCode), record.projectId);
+    if (ledgerPlatform?.upsertLedgerDimensionValue) {
+      ledgerPlatform.upsertLedgerDimensionValue({
+        companyId: record.companyId,
+        dimensionType: "projects",
+        code: record.projectId,
+        label: `${record.projectCode} ${record.displayName}`.trim(),
+        sourceDomain: "projects",
+        actorId: record.createdByActorId,
+        correlationId
+      });
+    }
     pushAudit(state, clock, {
       companyId: record.companyId,
       actorId: record.createdByActorId,
@@ -2071,6 +2120,145 @@ export function createProjectEngine({
       entityId: record.projectRevenuePlanId,
       projectId: record.projectId,
       explanation: `Approved revenue plan version ${record.versionNo} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectRevenueRecognitionPlans({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return (state.projectRevenueRecognitionPlanIdsByProject.get(project.projectId) || [])
+      .map((projectRevenueRecognitionPlanId) => state.projectRevenueRecognitionPlans.get(projectRevenueRecognitionPlanId))
+      .filter(Boolean)
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort(
+        (left, right) =>
+          String(left.activatedAt || left.createdAt).localeCompare(String(right.activatedAt || right.createdAt))
+          || left.createdAt.localeCompare(right.createdAt)
+          || left.projectRevenueRecognitionPlanId.localeCompare(right.projectRevenueRecognitionPlanId)
+      )
+      .map(copy);
+  }
+
+  function createProjectRevenueRecognitionPlan({
+    companyId,
+    projectId,
+    projectRevenueRecognitionPlanId = null,
+    sourceProjectRevenuePlanId = null,
+    methodCode = null,
+    journalRules = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const sourceRevenuePlan =
+      normalizeOptionalText(sourceProjectRevenuePlanId)
+        ? requireProjectRevenuePlan(state, project.companyId, project.projectId, sourceProjectRevenuePlanId)
+        : listProjectRevenuePlans({ companyId: project.companyId, projectId: project.projectId, status: "approved" }).at(-1) || null;
+    const resolvedMethodCode = assertAllowed(
+      methodCode || project.revenueRecognitionModelCode,
+      PROJECT_REVENUE_RECOGNITION_MODEL_CODES,
+      "project_revenue_recognition_method_invalid"
+    );
+    if (project.revenueRecognitionModelCode && resolvedMethodCode !== project.revenueRecognitionModelCode) {
+      throw createError(
+        409,
+        "project_revenue_recognition_method_mismatch",
+        "Revenue recognition plan method must align with the project's selected revenue recognition method."
+      );
+    }
+    const normalizedJournalRules = normalizeProjectRevenueRecognitionJournalRules({
+      project,
+      methodCode: resolvedMethodCode,
+      journalRules,
+      sourceRevenuePlan
+    });
+    const duplicate = listProjectRevenueRecognitionPlans({ companyId: project.companyId, projectId: project.projectId }).find(
+      (record) =>
+        record.methodCode === resolvedMethodCode
+        && record.sourceProjectRevenuePlanId === (sourceRevenuePlan?.projectRevenuePlanId || null)
+        && hashObject(record.journalRules || {}) === hashObject(normalizedJournalRules)
+    );
+    if (duplicate) {
+      return duplicate;
+    }
+    const record = {
+      projectRevenueRecognitionPlanId: normalizeOptionalText(projectRevenueRecognitionPlanId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      sourceProjectRevenuePlanId: sourceRevenuePlan?.projectRevenuePlanId || null,
+      methodCode: resolvedMethodCode,
+      journalRules: normalizedJournalRules,
+      status: "draft",
+      activatedAt: null,
+      activatedByActorId: null,
+      completedAt: null,
+      completedByActorId: null,
+      reversedAt: null,
+      reversedByActorId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    if (!Array.isArray(project.revenueRecognitionPlans)) {
+      project.revenueRecognitionPlans = [];
+    }
+    project.revenueRecognitionPlans.push(record);
+    project.updatedAt = nowIso(clock);
+    state.projectRevenueRecognitionPlans.set(record.projectRevenueRecognitionPlanId, record);
+    appendToIndex(state.projectRevenueRecognitionPlanIdsByProject, project.projectId, record.projectRevenueRecognitionPlanId);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.revenue_recognition_plan.created",
+      entityType: "project_revenue_recognition_plan",
+      entityId: record.projectRevenueRecognitionPlanId,
+      projectId: record.projectId,
+      explanation: `Created revenue recognition plan ${record.methodCode} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function activateRevenueRecognitionPlan({
+    companyId,
+    projectId,
+    projectRevenueRecognitionPlanId,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const record = requireProjectRevenueRecognitionPlan(state, project.companyId, project.projectId, projectRevenueRecognitionPlanId);
+    if (record.status === "active") {
+      return copy(record);
+    }
+    const existingActivePlan = listProjectRevenueRecognitionPlans({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      status: "active"
+    }).find((candidate) => candidate.projectRevenueRecognitionPlanId !== record.projectRevenueRecognitionPlanId);
+    if (existingActivePlan) {
+      throw createError(
+        409,
+        "project_revenue_recognition_plan_active_conflict",
+        "Only one active revenue recognition plan is allowed per project."
+      );
+    }
+    project.revenueRecognitionModelCode = record.methodCode;
+    project.updatedAt = nowIso(clock);
+    record.status = "active";
+    record.activatedAt = nowIso(clock);
+    record.activatedByActorId = requireText(actorId, "actor_id_required");
+    record.updatedAt = record.activatedAt;
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.activatedByActorId,
+      correlationId,
+      action: "project.revenue_recognition.activated",
+      entityType: "project_revenue_recognition_plan",
+      entityId: record.projectRevenueRecognitionPlanId,
+      projectId: record.projectId,
+      explanation: `Activated revenue recognition plan ${record.methodCode} for ${project.projectCode}.`
     });
     return copy(record);
   }
@@ -3672,6 +3860,183 @@ export function createProjectEngine({
     return copy(record);
   }
 
+  function listProjectWipLedgerBridges({ companyId, projectId, reportingPeriod = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedReportingPeriod = normalizeOptionalText(reportingPeriod);
+    return (state.projectWipLedgerBridgeIdsByProject.get(project.projectId) || [])
+      .map((projectWipLedgerBridgeId) => state.projectWipLedgerBridges.get(projectWipLedgerBridgeId))
+      .filter(Boolean)
+      .filter((record) => (resolvedReportingPeriod ? record.reportingPeriod === resolvedReportingPeriod : true))
+      .sort(
+        (left, right) =>
+          left.cutoffDate.localeCompare(right.cutoffDate)
+          || left.createdAt.localeCompare(right.createdAt)
+          || left.projectWipLedgerBridgeId.localeCompare(right.projectWipLedgerBridgeId)
+      )
+      .map(copy);
+  }
+
+  function bridgeProjectWipToLedger({
+    companyId,
+    projectId,
+    cutoffDate,
+    journalDate = null,
+    projectRevenueRecognitionPlanId = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    if (!ledgerPlatform?.applyPostingIntent) {
+      throw createError(503, "project_ledger_bridge_unavailable", "Ledger platform is required for project WIP posting.");
+    }
+    const resolvedCutoffDate = normalizeRequiredDate(cutoffDate, "project_cutoff_date_required");
+    const resolvedJournalDate = normalizeRequiredDate(journalDate || resolvedCutoffDate, "project_wip_journal_date_required");
+    const revenueRecognitionPlan =
+      normalizeOptionalText(projectRevenueRecognitionPlanId)
+        ? requireProjectRevenueRecognitionPlan(state, project.companyId, project.projectId, projectRevenueRecognitionPlanId)
+        : selectActiveProjectRevenueRecognitionPlan({
+            plans: listProjectRevenueRecognitionPlans({ companyId: project.companyId, projectId: project.projectId })
+          });
+    if (!revenueRecognitionPlan || revenueRecognitionPlan.status !== "active") {
+      throw createError(
+        409,
+        "project_revenue_recognition_plan_missing",
+        "An active revenue recognition plan is required before WIP can bridge to the ledger."
+      );
+    }
+    const costSnapshot = materializeProjectCostSnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const wipSnapshot = materializeProjectWipSnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const profitabilitySnapshot = materializeProjectProfitabilitySnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    if (wipSnapshot.status === "review_required") {
+      throw createError(
+        409,
+        "project_wip_snapshot_review_required",
+        "WIP snapshots requiring review cannot create ledger effect."
+      );
+    }
+    if ((profitabilitySnapshot.blockerRefs || []).length > 0) {
+      throw createError(
+        409,
+        "project_profitability_blockers_present",
+        "Profitability blockers must be cleared before WIP can bridge to the ledger."
+      );
+    }
+    const latestBridge = listProjectWipLedgerBridges({
+      companyId: project.companyId,
+      projectId: project.projectId
+    }).at(-1) || null;
+    const bridgeState = buildProjectWipLedgerBridgeState({
+      state,
+      project,
+      revenueRecognitionPlan,
+      costSnapshot,
+      profitabilitySnapshot,
+      wipSnapshot,
+      previousBridge: latestBridge
+    });
+    if (
+      latestBridge
+      && latestBridge.reportingPeriod === wipSnapshot.reportingPeriod
+      && latestBridge.balanceStateHash === bridgeState.balanceStateHash
+    ) {
+      return latestBridge;
+    }
+    const record = {
+      projectWipLedgerBridgeId: crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectRevenueRecognitionPlanId: revenueRecognitionPlan.projectRevenueRecognitionPlanId,
+      projectCostSnapshotId: costSnapshot.projectCostSnapshotId,
+      projectWipSnapshotId: wipSnapshot.projectWipSnapshotId,
+      projectProfitabilitySnapshotId: profitabilitySnapshot.projectProfitabilitySnapshotId,
+      reportingPeriod: wipSnapshot.reportingPeriod,
+      cutoffDate: resolvedCutoffDate,
+      journalDate: resolvedJournalDate,
+      methodCode: revenueRecognitionPlan.methodCode,
+      sourceProjectRevenuePlanId: revenueRecognitionPlan.sourceProjectRevenuePlanId || null,
+      journalRules: copy(revenueRecognitionPlan.journalRules),
+      recognizedRevenueTargetAmount: bridgeState.recognizedRevenueTargetAmount,
+      operationalWipAmount: wipSnapshot.wipAmount,
+      operationalDeferredRevenueAmount: wipSnapshot.deferredRevenueAmount,
+      targetContractAssetAmount: bridgeState.targetContractAssetAmount,
+      targetDeferredRevenueAmount: bridgeState.targetDeferredRevenueAmount,
+      targetCostWipAmount: bridgeState.targetCostWipAmount,
+      deltaContractAssetAmount: bridgeState.deltaContractAssetAmount,
+      deltaDeferredRevenueAmount: bridgeState.deltaDeferredRevenueAmount,
+      deltaCostWipAmount: bridgeState.deltaCostWipAmount,
+      balanceStateHash: bridgeState.balanceStateHash,
+      status: bridgeState.lines.length > 0 ? "posted" : "noop",
+      journalEntryId: null,
+      postingIntentId: null,
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+    if (bridgeState.lines.length > 0) {
+      const posting = ledgerPlatform.applyPostingIntent({
+        companyId: project.companyId,
+        journalDate: resolvedJournalDate,
+        recipeCode: "PROJECT_WIP_BRIDGE",
+        sourceType: "PROJECT_WIP",
+        sourceId: `${project.projectId}:${wipSnapshot.reportingPeriod}`,
+        sourceObjectVersion: record.balanceStateHash,
+        actorId: record.createdByActorId,
+        approvedByActorId: record.createdByActorId,
+        idempotencyKey: `project-wip-bridge:${project.projectId}:${wipSnapshot.reportingPeriod}:${record.balanceStateHash}`,
+        description: `Project WIP bridge ${project.projectCode} ${wipSnapshot.reportingPeriod}`,
+        lines: bridgeState.lines,
+        metadataJson: {
+          projectId: project.projectId,
+          projectCode: project.projectCode,
+          projectWipSnapshotId: wipSnapshot.projectWipSnapshotId,
+          projectProfitabilitySnapshotId: profitabilitySnapshot.projectProfitabilitySnapshotId,
+          projectRevenueRecognitionPlanId: revenueRecognitionPlan.projectRevenueRecognitionPlanId
+        },
+        correlationId
+      });
+      record.journalEntryId = posting.journalEntry.journalEntryId;
+      record.postingIntentId = posting.postingIntent.intentId;
+    }
+    if (!Array.isArray(project.wipLedgerBridges)) {
+      project.wipLedgerBridges = [];
+    }
+    project.wipLedgerBridges.push(record);
+    project.updatedAt = nowIso(clock);
+    state.projectWipLedgerBridges.set(record.projectWipLedgerBridgeId, record);
+    appendToIndex(state.projectWipLedgerBridgeIdsByProject, project.projectId, record.projectWipLedgerBridgeId);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: record.status === "posted" ? "project.wip_ledger_bridge.posted" : "project.wip_ledger_bridge.noop",
+      entityType: "project_wip_ledger_bridge",
+      entityId: record.projectWipLedgerBridgeId,
+      projectId: project.projectId,
+      explanation:
+        record.status === "posted"
+          ? `Bridged project WIP to ledger for ${project.projectCode} at ${resolvedCutoffDate}.`
+          : `Evaluated project WIP ledger bridge for ${project.projectCode} at ${resolvedCutoffDate} without journal delta.`
+    });
+    return copy(record);
+  }
+
   function listProjectForecastSnapshots({ companyId, projectId } = {}) {
     const project = requireProject(state, companyId, projectId);
     return (state.forecastSnapshotIdsByProject.get(project.projectId) || [])
@@ -4204,6 +4569,7 @@ function exportProjectEvidenceBundle({
       projectWorkPackages: copy(workspace.projectWorkPackages || []),
       projectDeliveryMilestones: copy(workspace.projectDeliveryMilestones || []),
       projectRevenuePlans: copy(workspace.projectRevenuePlans || []),
+      projectRevenueRecognitionPlans: copy(workspace.projectRevenueRecognitionPlans || []),
       projectBillingPlans: copy(workspace.projectBillingPlans || []),
       projectStatusUpdates: copy(workspace.projectStatusUpdates || []),
       projectCapacityReservations: copy(workspace.projectCapacityReservations || []),
@@ -4211,14 +4577,17 @@ function exportProjectEvidenceBundle({
       projectRisks: copy(workspace.projectRisks || []),
       projectProfitabilityAdjustments: copy(workspace.projectProfitabilityAdjustments || []),
       projectInvoiceReadinessAssessments: copy(workspace.projectInvoiceReadinessAssessments || []),
+      projectWipLedgerBridges: copy(workspace.projectWipLedgerBridges || []),
       projectTrialScenarioRuns: copy(workspace.projectTrialScenarioRuns || []),
       projectImportBatches: copy(workspace.projectImportBatches || []),
       projectInvoiceSimulations: copy(workspace.projectInvoiceSimulations || []),
       projectLiveConversionPlans: copy(workspace.projectLiveConversionPlans || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
       currentProjectAgreement: copy(workspace.currentProjectAgreement),
+      currentProjectRevenueRecognitionPlan: copy(workspace.currentProjectRevenueRecognitionPlan),
       currentBillingPlan: copy(workspace.currentBillingPlan),
       currentInvoiceReadinessAssessment: copy(workspace.currentInvoiceReadinessAssessment),
+      currentProjectWipLedgerBridge: copy(workspace.currentProjectWipLedgerBridge),
       currentProjectInvoiceSimulation: copy(workspace.currentProjectInvoiceSimulation),
       currentProjectLiveConversionPlan: copy(workspace.currentProjectLiveConversionPlan),
       budgetActualForecastSummary: copy(workspace.budgetActualForecastSummary),
@@ -4242,6 +4611,9 @@ function exportProjectEvidenceBundle({
         workspace.currentCostSnapshotId,
         workspace.currentWipSnapshotId,
         workspace.currentForecastSnapshotId
+        ,
+        workspace.currentProjectRevenueRecognitionPlanId,
+        workspace.currentProjectWipLedgerBridgeId
       ]
         .filter(Boolean)
         .join(":") || workspace.projectStatus,
@@ -4259,8 +4631,10 @@ function exportProjectEvidenceBundle({
           ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
           ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId],
           ["project_agreement", workspace.currentProjectAgreementId],
+          ["project_revenue_recognition_plan", workspace.currentProjectRevenueRecognitionPlanId],
           ["project_billing_plan", workspace.currentBillingPlanId],
           ["project_invoice_readiness_assessment", workspace.currentInvoiceReadinessAssessmentId],
+          ["project_wip_ledger_bridge", workspace.currentProjectWipLedgerBridgeId],
           ["project_status_update", workspace.latestStatusUpdate?.projectStatusUpdateId || null]
         ]
           .filter(([, artifactRef]) => artifactRef)
@@ -4337,6 +4711,10 @@ function exportProjectEvidenceBundle({
           objectType: "project_capacity_reservation",
           objectId: reservation.projectCapacityReservationId
         })),
+        (workspace.projectRevenueRecognitionPlans || []).map((plan) => ({
+          objectType: "project_revenue_recognition_plan",
+          objectId: plan.projectRevenueRecognitionPlanId
+        })),
         (workspace.projectAssignmentPlans || []).map((assignmentPlan) => ({
           objectType: "project_assignment_plan",
           objectId: assignmentPlan.projectAssignmentPlanId
@@ -4344,6 +4722,10 @@ function exportProjectEvidenceBundle({
         (workspace.projectRisks || []).map((risk) => ({
           objectType: "project_risk",
           objectId: risk.projectRiskId
+        })),
+        (workspace.projectWipLedgerBridges || []).map((bridge) => ({
+          objectType: "project_wip_ledger_bridge",
+          objectId: bridge.projectWipLedgerBridgeId
         })),
         (workspace.projectInvoiceSimulations || []).map((simulation) => ({
           objectType: "project_invoice_simulation",
@@ -5236,6 +5618,12 @@ function compareStatusUpdates(left, right) {
 
 function compareAssessedAt(left, right) {
   return String(left.assessedAt).localeCompare(String(right.assessedAt));
+}
+
+function compareProjectRevenueRecognitionPlans(left, right) {
+  return String(left.activatedAt || left.createdAt).localeCompare(String(right.activatedAt || right.createdAt))
+    || String(left.createdAt).localeCompare(String(right.createdAt))
+    || String(left.projectRevenueRecognitionPlanId).localeCompare(String(right.projectRevenueRecognitionPlanId));
 }
 
 function buildWorkspaceIndicatorStrip({
@@ -6136,6 +6524,205 @@ function summarizeBudgetVersion(budgetVersion, reportingPeriod) {
   };
 }
 
+function normalizeProjectRevenueRecognitionJournalRules({ project, methodCode, journalRules, sourceRevenuePlan } = {}) {
+  if (!sourceRevenuePlan && methodCode !== "billing_equals_revenue") {
+    throw createError(
+      409,
+      "project_revenue_recognition_source_plan_required",
+      "An approved project revenue plan is required before draft revenue recognition rules can be created."
+    );
+  }
+  const input = journalRules && typeof journalRules === "object" ? journalRules : {};
+  const resolvedRecognitionBasisCode = normalizeCode(
+    input.recognitionBasisCode
+      || input.revenueRecognitionBasisCode
+      || (sourceRevenuePlan ? "approved_revenue_plan_cutoff" : "billing_equals_revenue"),
+    "project_revenue_recognition_basis_invalid"
+  ).toLowerCase();
+  return Object.freeze({
+    ruleVersion: "2026.1",
+    recognitionBasisCode: resolvedRecognitionBasisCode,
+    revenueAccountNumber: normalizeProjectLedgerAccountNumber(
+      input.revenueAccountNumber || input.revenueRecognitionAccountNumber || input.recognizedRevenueAccountNumber || "3090",
+      "project_revenue_recognition_revenue_account_invalid"
+    ),
+    contractAssetAccountNumber: normalizeProjectLedgerAccountNumber(
+      input.contractAssetAccountNumber || "1620",
+      "project_revenue_recognition_contract_asset_account_invalid"
+    ),
+    deferredRevenueAccountNumber: normalizeProjectLedgerAccountNumber(
+      input.deferredRevenueAccountNumber || "2450",
+      "project_revenue_recognition_deferred_revenue_account_invalid"
+    ),
+    costWipAssetAccountNumber: normalizeProjectLedgerAccountNumber(
+      input.costWipAssetAccountNumber || "1440",
+      "project_revenue_recognition_cost_wip_asset_account_invalid"
+    ),
+    costWipChangeAccountNumber: normalizeProjectLedgerAccountNumber(
+      input.costWipChangeAccountNumber || "4070",
+      "project_revenue_recognition_cost_wip_change_account_invalid"
+    ),
+    sourceProjectRevenuePlanId: sourceRevenuePlan?.projectRevenuePlanId || null,
+    projectBillingModelCode: project?.billingModelCode || null,
+    methodCode: requireText(methodCode, "project_revenue_recognition_method_invalid")
+  });
+}
+
+function buildProjectWipLedgerBridgeState({
+  state,
+  project,
+  revenueRecognitionPlan,
+  costSnapshot,
+  profitabilitySnapshot,
+  wipSnapshot,
+  previousBridge = null
+}) {
+  const sourceRevenuePlan =
+    revenueRecognitionPlan.sourceProjectRevenuePlanId
+      ? requireProjectRevenuePlan(
+          state,
+          project.companyId,
+          project.projectId,
+          revenueRecognitionPlan.sourceProjectRevenuePlanId
+        )
+      : null;
+  const recognizedRevenueTargetAmount = roundMoney(
+    sourceRevenuePlan
+      ? calculateRevenuePlanAmountAtCutoff(sourceRevenuePlan, wipSnapshot.cutoffDate)
+      : revenueRecognitionPlan.methodCode === "billing_equals_revenue"
+        ? Number(profitabilitySnapshot.billedRevenueAmount || 0)
+        : Number(profitabilitySnapshot.recognizedRevenueAmount || 0)
+  );
+  let targetContractAssetAmount = 0;
+  let targetDeferredRevenueAmount = 0;
+  let targetCostWipAmount = 0;
+
+  if (revenueRecognitionPlan.methodCode !== "billing_equals_revenue") {
+    targetContractAssetAmount = roundMoney(
+      Math.max(0, recognizedRevenueTargetAmount - Number(profitabilitySnapshot.billedRevenueAmount || 0))
+    );
+    targetDeferredRevenueAmount = roundMoney(
+      Math.max(0, Number(profitabilitySnapshot.billedRevenueAmount || 0) - recognizedRevenueTargetAmount)
+    );
+  }
+  if (revenueRecognitionPlan.methodCode === "deferred_until_milestone" && recognizedRevenueTargetAmount <= 0) {
+    targetCostWipAmount = roundMoney(Number(costSnapshot.actualCostAmount || 0));
+  }
+
+  const deltaContractAssetAmount = roundMoney(targetContractAssetAmount - Number(previousBridge?.targetContractAssetAmount || 0));
+  const deltaDeferredRevenueAmount = roundMoney(targetDeferredRevenueAmount - Number(previousBridge?.targetDeferredRevenueAmount || 0));
+  const deltaCostWipAmount = roundMoney(targetCostWipAmount - Number(previousBridge?.targetCostWipAmount || 0));
+  const lines = [];
+  appendProjectBridgeLines({
+    lines,
+    deltaAmount: deltaContractAssetAmount,
+    debitAccountNumber: revenueRecognitionPlan.journalRules.contractAssetAccountNumber,
+    creditAccountNumber: revenueRecognitionPlan.journalRules.revenueAccountNumber,
+    projectId: project.projectId,
+    balanceCode: "contract_asset"
+  });
+  appendProjectBridgeLines({
+    lines,
+    deltaAmount: deltaDeferredRevenueAmount,
+    debitAccountNumber: revenueRecognitionPlan.journalRules.revenueAccountNumber,
+    creditAccountNumber: revenueRecognitionPlan.journalRules.deferredRevenueAccountNumber,
+    projectId: project.projectId,
+    balanceCode: "deferred_revenue"
+  });
+  appendProjectBridgeLines({
+    lines,
+    deltaAmount: deltaCostWipAmount,
+    debitAccountNumber: revenueRecognitionPlan.journalRules.costWipAssetAccountNumber,
+    creditAccountNumber: revenueRecognitionPlan.journalRules.costWipChangeAccountNumber,
+    projectId: project.projectId,
+    balanceCode: "cost_wip"
+  });
+  const balanceStateHash = hashObject({
+    projectId: project.projectId,
+    reportingPeriod: wipSnapshot.reportingPeriod,
+    cutoffDate: wipSnapshot.cutoffDate,
+    methodCode: revenueRecognitionPlan.methodCode,
+    sourceProjectRevenuePlanId: revenueRecognitionPlan.sourceProjectRevenuePlanId || null,
+    recognizedRevenueTargetAmount,
+    targetContractAssetAmount,
+    targetDeferredRevenueAmount,
+    targetCostWipAmount,
+    journalRules: revenueRecognitionPlan.journalRules
+  });
+  return {
+    recognizedRevenueTargetAmount,
+    targetContractAssetAmount,
+    targetDeferredRevenueAmount,
+    targetCostWipAmount,
+    deltaContractAssetAmount,
+    deltaDeferredRevenueAmount,
+    deltaCostWipAmount,
+    balanceStateHash,
+    lines: Object.freeze(lines.map(copy))
+  };
+}
+
+function appendProjectBridgeLines({
+  lines,
+  deltaAmount,
+  debitAccountNumber,
+  creditAccountNumber,
+  projectId,
+  balanceCode
+}) {
+  const normalizedDeltaAmount = roundMoney(Number(deltaAmount || 0));
+  if (normalizedDeltaAmount === 0) {
+    return;
+  }
+  const absoluteAmount = roundMoney(Math.abs(normalizedDeltaAmount));
+  if (normalizedDeltaAmount > 0) {
+    lines.push(buildProjectBridgeLine({
+      accountNumber: debitAccountNumber,
+      debitAmount: absoluteAmount,
+      projectId,
+      balanceCode
+    }));
+    lines.push(buildProjectBridgeLine({
+      accountNumber: creditAccountNumber,
+      creditAmount: absoluteAmount,
+      projectId,
+      balanceCode
+    }));
+    return;
+  }
+  lines.push(buildProjectBridgeLine({
+    accountNumber: creditAccountNumber,
+    debitAmount: absoluteAmount,
+    projectId,
+    balanceCode
+  }));
+  lines.push(buildProjectBridgeLine({
+    accountNumber: debitAccountNumber,
+    creditAmount: absoluteAmount,
+    projectId,
+    balanceCode
+  }));
+}
+
+function buildProjectBridgeLine({ accountNumber, debitAmount = 0, creditAmount = 0, projectId, balanceCode }) {
+  const line = {
+    accountNumber: normalizeProjectLedgerAccountNumber(accountNumber, "project_ledger_bridge_account_invalid"),
+    dimensionJson: {
+      projectId: requireText(projectId, "project_id_required")
+    },
+    metadataJson: {
+      projectBridgeBalanceCode: requireText(balanceCode, "project_ledger_bridge_balance_code_required")
+    }
+  };
+  if (debitAmount > 0) {
+    line.debitAmount = roundMoney(debitAmount);
+  }
+  if (creditAmount > 0) {
+    line.creditAmount = roundMoney(creditAmount);
+  }
+  return line;
+}
+
 function normalizeBudgetLines(lines) {
   if (!Array.isArray(lines)) {
     throw createError(400, "project_budget_lines_invalid", "Project budget lines must be an array.");
@@ -6639,6 +7226,16 @@ function requireProjectRevenuePlan(state, companyId, projectId, projectRevenuePl
   return record;
 }
 
+function requireProjectRevenueRecognitionPlan(state, companyId, projectId, projectRevenueRecognitionPlanId) {
+  const record = state.projectRevenueRecognitionPlans.get(
+    requireText(projectRevenueRecognitionPlanId, "project_revenue_recognition_plan_id_required")
+  );
+  if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
+    throw createError(404, "project_revenue_recognition_plan_not_found", "Project revenue recognition plan was not found.");
+  }
+  return record;
+}
+
 function requireProjectChangeOrder(project, projectChangeOrderId) {
   const resolvedProjectChangeOrderId = requireText(projectChangeOrderId, "project_change_order_id_required");
   const record = (project.changeOrders || []).find((candidate) => candidate.projectChangeOrderId === resolvedProjectChangeOrderId);
@@ -7012,6 +7609,21 @@ function selectCurrentProjectAgreement({ agreements, cutoffDate = null } = {}) {
   return records.at(-1) || null;
 }
 
+function selectActiveProjectRevenueRecognitionPlan({ plans } = {}) {
+  return (Array.isArray(plans) ? plans : [])
+    .filter((record) => record?.status === "active")
+    .sort(compareProjectRevenueRecognitionPlans)
+    .at(-1) || null;
+}
+
+function selectCurrentProjectRevenueRecognitionPlan({ plans, cutoffDate = null } = {}) {
+  const eligible = (Array.isArray(plans) ? plans : [])
+    .filter(Boolean)
+    .filter((record) => !cutoffDate || String(record.activatedAt || record.createdAt || "").slice(0, 10) <= cutoffDate)
+    .sort(compareProjectRevenueRecognitionPlans);
+  return selectActiveProjectRevenueRecognitionPlan({ plans: eligible }) || eligible.at(-1) || null;
+}
+
 function resolveProjectAgreementQuoteLink({ project, projectQuoteLinkId = null, sourceQuoteId = null, sourceQuoteVersionId = null }) {
   if (normalizeOptionalText(projectQuoteLinkId)) {
     return requireProjectQuoteLink(project, projectQuoteLinkId);
@@ -7208,6 +7820,14 @@ function normalizeMoney(value, code) {
     throw createError(400, code, "Expected a finite numeric amount.");
   }
   return roundMoney(numberValue);
+}
+
+function normalizeProjectLedgerAccountNumber(value, code) {
+  const normalized = requireText(value, code);
+  if (!/^[1-8][0-9]{3}$/.test(normalized)) {
+    throw createError(400, code, "Ledger account number must be a four-digit BAS-style account.");
+  }
+  return normalized;
 }
 
 function roundShare(value) {

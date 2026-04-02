@@ -900,6 +900,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/projects/:projectId/work-logs",
               "/v1/projects/:projectId/revenue-plans",
               "/v1/projects/:projectId/revenue-plans/:projectRevenuePlanId/approve",
+              "/v1/projects/:projectId/revenue-recognition-plans",
+              "/v1/projects/:projectId/revenue-recognition-plans/:projectRevenueRecognitionPlanId/activate",
               "/v1/projects/:projectId/billing-plans",
               "/v1/projects/:projectId/status-updates",
               "/v1/projects/:projectId/profitability-adjustments",
@@ -924,6 +926,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/projects/:projectId/payroll-cost-allocations",
               "/v1/projects/:projectId/cost-snapshots",
               "/v1/projects/:projectId/wip-snapshots",
+              "/v1/projects/:projectId/wip-ledger-bridges",
               "/v1/projects/:projectId/forecast-snapshots",
               "/v1/projects/:projectId/change-orders",
               "/v1/projects/:projectId/change-orders/:projectChangeOrderId/status",
@@ -14289,6 +14292,89 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     return;
   }
 
+  const projectRevenueRecognitionPlansMatch = matchPath(path, "/v1/projects/:projectId/revenue-recognition-plans");
+  if (projectRevenueRecognitionPlansMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_revenue_recognition_plan",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectRevenueRecognitionPlans({
+        companyId,
+        projectId: projectRevenueRecognitionPlansMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectRevenueRecognitionPlansMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_revenue_recognition_plan",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectRevenueRecognitionPlan({
+        companyId,
+        projectId: projectRevenueRecognitionPlansMatch.projectId,
+        projectRevenueRecognitionPlanId: body.projectRevenueRecognitionPlanId ?? null,
+        sourceProjectRevenuePlanId: body.sourceProjectRevenuePlanId ?? null,
+        methodCode: body.methodCode ?? null,
+        journalRules: body.journalRules ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectRevenueRecognitionPlanActivateMatch = matchPath(
+    path,
+    "/v1/projects/:projectId/revenue-recognition-plans/:projectRevenueRecognitionPlanId/activate"
+  );
+  if (projectRevenueRecognitionPlanActivateMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_revenue_recognition_plan",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      200,
+      platform.activateRevenueRecognitionPlan({
+        companyId,
+        projectId: projectRevenueRecognitionPlanActivateMatch.projectId,
+        projectRevenueRecognitionPlanId: projectRevenueRecognitionPlanActivateMatch.projectRevenueRecognitionPlanId,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectBillingPlansMatch = matchPath(path, "/v1/projects/:projectId/billing-plans");
   if (projectBillingPlansMatch && req.method === "GET") {
     const companyId = requireText(
@@ -15259,6 +15345,59 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         companyId,
         projectId: projectWipSnapshotsMatch.projectId,
         cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectWipLedgerBridgesMatch = matchPath(path, "/v1/projects/:projectId/wip-ledger-bridges");
+  if (projectWipLedgerBridgesMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "CompanyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_wip_ledger_bridge",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectWipLedgerBridges({
+        companyId,
+        projectId: projectWipLedgerBridgesMatch.projectId,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null
+      })
+    });
+    return;
+  }
+
+  if (projectWipLedgerBridgesMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_wip_ledger_bridge",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.bridgeProjectWipToLedger({
+        companyId,
+        projectId: projectWipLedgerBridgesMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        journalDate: body.journalDate ?? null,
+        projectRevenueRecognitionPlanId: body.projectRevenueRecognitionPlanId ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })
