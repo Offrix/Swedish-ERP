@@ -116,8 +116,11 @@ export function createPersonalliggareEngine({
     if (state.siteIdByCode.has(scopedKey)) {
       throw createError(409, "construction_site_code_not_unique", `Construction site ${resolvedSiteCode} already exists.`);
     }
-    if (projectId && projectsPlatform?.getProject) {
-      projectsPlatform.getProject({ companyId: resolvedCompanyId, projectId });
+    const resolvedProjectId = normalizeOptionalText(projectId);
+    let projectVerticalPackLink = null;
+    if (resolvedProjectId && projectsPlatform?.getProject) {
+      projectsPlatform.getProject({ companyId: resolvedCompanyId, projectId: resolvedProjectId });
+      projectVerticalPackLink = requireProjectVerticalPackLink(projectsPlatform, resolvedCompanyId, resolvedProjectId, "personalliggare");
     }
     const estimatedAmount = normalizeMoney(estimatedTotalCostExVat, "construction_site_estimated_cost_invalid");
     const thresholdRequiredFlag = estimatedAmount > PERSONALLIGGARE_THRESHOLD_2026_EX_VAT;
@@ -129,7 +132,9 @@ export function createPersonalliggareEngine({
       siteName: requireText(siteName, "construction_site_name_required"),
       siteAddress: requireText(siteAddress, "construction_site_address_required"),
       builderOrgNo: requireText(builderOrgNo, "construction_site_builder_org_required"),
-      projectId: normalizeOptionalText(projectId),
+      projectId: resolvedProjectId,
+      verticalPackLinkId: projectVerticalPackLink?.projectVerticalPackLinkId || null,
+      financeTruthOwner: projectVerticalPackLink ? "projects" : null,
       industryPackCode: requireEnum(PERSONALLIGGARE_INDUSTRY_PACK_CODES, industryPackCode, "personalliggare_industry_pack_invalid"),
       siteTypeCode: "construction_site",
       workplaceIdentifier: normalizeOptionalText(workplaceIdentifier) || resolvedSiteCode,
@@ -737,6 +742,30 @@ export function createPersonalliggareEngine({
       throw createError(404, "kiosk_device_not_found", "Kiosk device was not found.");
     }
     return kioskDevice;
+  }
+
+  function requireProjectVerticalPackLink(projectsPlatformRef, companyId, projectId, packType) {
+    if (!projectsPlatformRef || typeof projectsPlatformRef.listProjectVerticalPackLinks !== "function") {
+      throw createError(
+        500,
+        "personalliggare_project_vertical_pack_link_support_required",
+        "Projects platform must support vertical pack links."
+      );
+    }
+    const links = projectsPlatformRef.listProjectVerticalPackLinks({
+      companyId,
+      projectId,
+      packType
+    });
+    const activeLink = Array.isArray(links) ? links.at(-1) || null : null;
+    if (!activeLink) {
+      throw createError(
+        409,
+        "personalliggare_vertical_pack_link_required",
+        `Project must link the ${packType} vertical pack before personalliggare sites can be created.`
+      );
+    }
+    return activeLink;
   }
 }
 

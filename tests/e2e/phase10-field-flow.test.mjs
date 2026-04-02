@@ -133,6 +133,18 @@ test("Phase 10.2 e2e covers field-mobile shell, disable flag, offline sync and i
         contractValueAmount: 75000
       }
     });
+    await requestJson(enabledBaseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
+      }
+    });
     const laborItem = await requestJson(enabledBaseUrl, "/v1/ar/items", {
       method: "POST",
       token: sessionToken,
@@ -269,14 +281,12 @@ test("Phase 10.2 e2e covers field-mobile shell, disable flag, offline sync and i
         laborMinutes: 75
       }
     });
-    const invoiceResult = await requestJson(enabledBaseUrl, `/v1/field/work-orders/${workOrder.workOrderId}/invoice`, {
+    const financeHandoffResult = await requestJson(enabledBaseUrl, `/v1/field/work-orders/${workOrder.workOrderId}/finance-handoffs`, {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
       body: {
-        companyId: COMPANY_ID,
-        issueDate: "2026-03-25",
-        dueDate: "2026-04-24"
+        companyId: COMPANY_ID
       }
     });
 
@@ -296,11 +306,12 @@ test("Phase 10.2 e2e covers field-mobile shell, disable flag, offline sync and i
       { token: sessionToken }
     );
 
-    assert.equal(invoiceResult.workOrder.status, "invoiced");
-    assert.equal(Boolean(workOrderDetail.customerInvoiceId), true);
+    assert.equal(financeHandoffResult.workOrder.status, "completed");
+    assert.equal(financeHandoffResult.financeHandoff.financeTruthOwner, "projects");
+    assert.equal(typeof workOrderDetail.currentFinanceHandoffId, "string");
     assert.equal(balances.items[0].onHandQuantity, 19);
     assert.equal(auditEvents.items.some((event) => event.action === "field.sync.synced"), true);
-    assert.equal(auditEvents.items.some((event) => event.action === "field.work_order.invoiced"), true);
+    assert.equal(auditEvents.items.some((event) => event.action === "field.work_order.finance_handoff.created"), true);
   } finally {
     await stopServer(mobileServer);
     await stopServer(disabledServer);

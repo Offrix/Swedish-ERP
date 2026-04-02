@@ -4,9 +4,9 @@ import { createFieldPlatform } from "../../packages/domain-field/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Phase 14.5 builds operational case runtime above optional work-order pack and blocks invoice on open conflicts", () => {
+test("Phase 14.5 builds operational case runtime above optional work-order pack and blocks finance handoff on open conflicts", () => {
   const fixture = createFieldFixture();
-  const { fieldPlatform, invoices, project, employment } = fixture;
+  const { fieldPlatform, project, employment } = fixture;
 
   const location = fieldPlatform.createInventoryLocation({
     companyId: COMPANY_ID,
@@ -156,11 +156,9 @@ test("Phase 14.5 builds operational case runtime above optional work-order pack 
 
   assert.throws(
     () =>
-      fieldPlatform.createWorkOrderInvoice({
+      fieldPlatform.createWorkOrderFinanceHandoff({
         companyId: COMPANY_ID,
         workOrderId: workOrderCase.workOrderId,
-        issueDate: "2026-03-25",
-        dueDate: "2026-04-24",
         actorId: "unit-test"
       }),
     (error) => error?.code === "field_operational_case_open_conflicts"
@@ -174,19 +172,18 @@ test("Phase 14.5 builds operational case runtime above optional work-order pack 
   });
   assert.equal(resolvedConflict.status, "resolved");
 
-  const invoiced = fieldPlatform.createWorkOrderInvoice({
+  const handoff = fieldPlatform.createWorkOrderFinanceHandoff({
     companyId: COMPANY_ID,
     workOrderId: workOrderCase.workOrderId,
-    issueDate: "2026-03-25",
-    dueDate: "2026-04-24",
     actorId: "unit-test"
   });
-  assert.equal(invoiced.workOrder.status, "invoiced");
-  assert.equal(invoices.length, 1);
+  assert.equal(handoff.workOrder.status, "completed");
+  assert.equal(handoff.financeHandoff.financeTruthOwner, "projects");
+  assert.equal(handoff.financeHandoff.candidateLines.length, 2);
+  assert.equal(typeof handoff.workOrder.currentFinanceHandoffId, "string");
 });
 
 function createFieldFixture() {
-  const invoices = [];
   const project = {
     projectId: "project-001",
     companyId: COMPANY_ID,
@@ -208,6 +205,20 @@ function createFieldFixture() {
         assert.equal(companyId, COMPANY_ID);
         assert.equal(projectId, project.projectId);
         return structuredClone(project);
+      },
+      listProjectVerticalPackLinks({ companyId, projectId, packType }) {
+        assert.equal(companyId, COMPANY_ID);
+        assert.equal(projectId, project.projectId);
+        assert.equal(packType, "field");
+        return [{
+          linkId: "field-pack-link-001",
+          projectVerticalPackLinkId: "field-pack-link-001",
+          companyId,
+          projectId,
+          packType,
+          verticalRefs: { workModelCodes: ["work_order"] },
+          financeTruthOwner: "projects"
+        }];
       }
     },
     hrPlatform: {
@@ -234,23 +245,9 @@ function createFieldFixture() {
           throw new Error(`Unknown AR item ${itemId}`);
         }
         return structuredClone(item);
-      },
-      createInvoice(payload) {
-        const invoice = {
-          customerInvoiceId: `invoice-${invoices.length + 1}`,
-          ...structuredClone(payload)
-        };
-        invoices.push(invoice);
-        return structuredClone(invoice);
-      },
-      issueInvoice({ customerInvoiceId }) {
-        return {
-          customerInvoiceId,
-          journalEntryId: `journal-${customerInvoiceId}`
-        };
       }
     }
   });
 
-  return { fieldPlatform, invoices, project, employment };
+  return { fieldPlatform, project, employment };
 }

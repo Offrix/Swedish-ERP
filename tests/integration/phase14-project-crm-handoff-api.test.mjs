@@ -198,7 +198,10 @@ test("Phase 14.2 API converts accepted quote into canonical project handoff obje
       financeTruthOwner: "projects",
       generalWorkModelCount: 0,
       verticalWorkModelCount: 1,
-      verticalPackCodes: ["field_service"]
+      verticalPackCodes: ["field_service"],
+      linkedPackTypes: [],
+      linkedPackLinkCount: 0,
+      disableSafeFlag: true
     });
   } finally {
     await stopServer(server);

@@ -17,6 +17,7 @@ export type ProjectGeneralWorkModelCode =
   | "subscription_service"
   | "internal_delivery";
 export type ProjectVerticalWorkModelCode = "field_service_optional" | "service_order" | "work_order" | "construction_stage";
+export type ProjectVerticalPackType = "field" | "personalliggare" | "id06";
 export type ProjectWorkModelCode =
   | ProjectGeneralWorkModelCode
   | ProjectVerticalWorkModelCode;
@@ -162,6 +163,19 @@ export interface ProjectWorkModelRef {
   readonly requiresMilestones: boolean;
   readonly requiresAttendance: boolean;
   readonly requiresId06: boolean;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface FieldPackLinkRef {
+  readonly linkId: string;
+  readonly projectVerticalPackLinkId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly packType: ProjectVerticalPackType;
+  readonly verticalRefs: Record<string, unknown>;
+  readonly financeTruthOwner: "projects";
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;

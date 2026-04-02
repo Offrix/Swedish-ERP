@@ -236,7 +236,10 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     financeTruthOwner: "projects",
     generalWorkModelCount: 1,
     verticalWorkModelCount: 0,
-    verticalPackCodes: []
+    verticalPackCodes: [],
+    linkedPackTypes: [],
+    linkedPackLinkCount: 0,
+    disableSafeFlag: true
   });
 
   const evidenceBundle = projectsPlatform.exportProjectEvidenceBundle({

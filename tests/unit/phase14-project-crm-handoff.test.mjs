@@ -66,7 +66,10 @@ test("Phase 14.2 accepted quote handoff creates canonical project links, plans a
     financeTruthOwner: "projects",
     generalWorkModelCount: 0,
     verticalWorkModelCount: 1,
-    verticalPackCodes: ["field_service"]
+    verticalPackCodes: ["field_service"],
+    linkedPackTypes: [],
+    linkedPackLinkCount: 0,
+    disableSafeFlag: true
   });
 
   const evidenceBundle = projectsPlatform.exportProjectEvidenceBundle({

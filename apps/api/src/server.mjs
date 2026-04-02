@@ -892,6 +892,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/projects/:projectId",
               "/v1/projects/:projectId/opportunity-links",
               "/v1/projects/:projectId/quote-links",
+              "/v1/projects/:projectId/vertical-pack-links",
               "/v1/projects/:projectId/agreements",
               "/v1/projects/:projectId/engagements",
               "/v1/projects/:projectId/work-models",
@@ -1002,7 +1003,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/field/work-orders/:workOrderId/material-withdrawals",
               "/v1/field/work-orders/:workOrderId/customer-signatures",
               "/v1/field/work-orders/:workOrderId/complete",
-              "/v1/field/work-orders/:workOrderId/invoice",
+              "/v1/field/work-orders/:workOrderId/finance-handoffs",
               "/v1/field/mobile/today",
               "/v1/field/sync/envelopes",
               "/v1/field/audit-events",
@@ -13853,6 +13854,59 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     return;
   }
 
+  const projectVerticalPackLinksMatch = matchPath(path, "/v1/projects/:projectId/vertical-pack-links");
+  if (projectVerticalPackLinksMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_vertical_pack_link",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectVerticalPackLinks({
+        companyId,
+        projectId: projectVerticalPackLinksMatch.projectId,
+        packType: url.searchParams.get("packType") || null
+      })
+    });
+    return;
+  }
+
+  if (projectVerticalPackLinksMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_vertical_pack_link",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.linkVerticalPack({
+        companyId,
+        projectId: projectVerticalPackLinksMatch.projectId,
+        linkId: body.linkId ?? null,
+        packType: body.packType,
+        verticalRefs: body.verticalRefs || {},
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectAgreementsMatch = matchPath(path, "/v1/projects/:projectId/agreements");
   if (projectAgreementsMatch && req.method === "GET") {
     const companyId = requireText(
@@ -18104,8 +18158,31 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     return;
   }
 
-  const fieldInvoiceMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/invoice");
-  if (fieldInvoiceMatch && req.method === "POST") {
+  const fieldFinanceHandoffsMatch = matchPath(path, "/v1/field/work-orders/:workOrderId/finance-handoffs");
+  if (fieldFinanceHandoffsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "field_work_order_finance_handoff",
+      scopeCode: "project"
+    });
+    writeJson(res, 200, {
+      items: platform.listWorkOrderFinanceHandoffs({
+        companyId,
+        workOrderId: fieldFinanceHandoffsMatch.workOrderId
+      })
+    });
+    return;
+  }
+
+  if (fieldFinanceHandoffsMatch && req.method === "POST") {
     const body = await readJsonBody(req);
     const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
     const principal = authorizeCompanyAccess({
@@ -18113,14 +18190,12 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       sessionToken: readSessionToken(req, body),
       companyId,
       permissionCode: "company.manage",
-      objectType: "field_work_order",
+      objectType: "field_work_order_finance_handoff",
       scopeCode: "project"
     });
-    writeJson(res, 201, platform.createWorkOrderInvoice({
+    writeJson(res, 201, platform.createWorkOrderFinanceHandoff({
       companyId,
-      workOrderId: fieldInvoiceMatch.workOrderId,
-      issueDate: body.issueDate,
-      dueDate: body.dueDate,
+      workOrderId: fieldFinanceHandoffsMatch.workOrderId,
       actorId: principal.userId,
       correlationId: body.correlationId || createCorrelationId()
     }));

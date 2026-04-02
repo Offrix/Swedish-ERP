@@ -102,6 +102,18 @@ test("Phase 14.5 API exposes operational cases, field evidence, reservations and
         contractValueAmount: 60000
       }
     });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
+      }
+    });
     const laborItem = await requestJson(baseUrl, "/v1/ar/items", {
       method: "POST",
       token: sessionToken,
@@ -320,14 +332,12 @@ test("Phase 14.5 API exposes operational cases, field evidence, reservations and
     assert.equal(conflicts.items.length, 1);
     assert.equal(reservations.items.length, 1);
 
-    await requestJson(baseUrl, `/v1/field/work-orders/${operationalCase.workOrderId}/invoice`, {
+    await requestJson(baseUrl, `/v1/field/work-orders/${operationalCase.workOrderId}/finance-handoffs`, {
       method: "POST",
       token: sessionToken,
       expectedStatus: 409,
       body: {
-        companyId: COMPANY_ID,
-        issueDate: "2026-03-25",
-        dueDate: "2026-04-24"
+        companyId: COMPANY_ID
       }
     });
 
@@ -345,18 +355,17 @@ test("Phase 14.5 API exposes operational cases, field evidence, reservations and
       }
     );
 
-    const invoiced = await requestJson(baseUrl, `/v1/field/work-orders/${operationalCase.workOrderId}/invoice`, {
+    const financeHandoff = await requestJson(baseUrl, `/v1/field/work-orders/${operationalCase.workOrderId}/finance-handoffs`, {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
       body: {
-        companyId: COMPANY_ID,
-        issueDate: "2026-03-25",
-        dueDate: "2026-04-24"
+        companyId: COMPANY_ID
       }
     });
-    assert.equal(Boolean(invoiced.invoice.customerInvoiceId), true);
-    assert.equal(invoiced.workOrder.status, "invoiced");
+    assert.equal(financeHandoff.workOrder.status, "completed");
+    assert.equal(financeHandoff.financeHandoff.financeTruthOwner, "projects");
+    assert.equal(financeHandoff.financeHandoff.candidateLines.length, 2);
   } finally {
     await stopServer(server);
   }

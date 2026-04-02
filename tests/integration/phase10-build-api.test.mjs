@@ -91,6 +91,18 @@ test("Phase 10.3 API handles change orders, build VAT, HUS and personalliggare f
         contractValueAmount: 120000
       }
     });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "personalliggare",
+        verticalRefs: {
+          siteMode: "construction"
+        }
+      }
+    });
 
     const changeOrder = await requestJson(baseUrl, `/v1/projects/${project.projectId}/change-orders`, {
       method: "POST",
@@ -277,6 +289,8 @@ test("Phase 10.3 API handles change orders, build VAT, HUS and personalliggare f
       }
     });
     assert.equal(site.thresholdRequiredFlag, true);
+    assert.equal(site.verticalPackLinkId !== null, true);
+    assert.equal(site.financeTruthOwner, "projects");
 
     await requestJson(baseUrl, `/v1/personalliggare/sites/${site.constructionSiteId}/registrations`, {
       method: "POST",

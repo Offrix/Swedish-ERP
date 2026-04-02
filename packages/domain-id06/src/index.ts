@@ -79,6 +79,9 @@ export interface Id06WorkplaceBindingRef {
   readonly workplaceId: string;
   readonly workplaceIdentifier: string;
   readonly constructionSiteId: string | null;
+  readonly projectId: string | null;
+  readonly verticalPackLinkId: string | null;
+  readonly financeTruthOwner: "projects" | null;
   readonly employerOrgNo: string;
   readonly workerIdentityType: string;
   readonly workerIdentityValue: string;
@@ -96,6 +99,9 @@ export interface Id06WorkPassRef {
   readonly id06WorkPassId: string;
   readonly companyId: string;
   readonly workplaceId: string;
+  readonly projectId: string | null;
+  readonly verticalPackLinkId: string | null;
+  readonly financeTruthOwner: "projects" | null;
   readonly id06WorkplaceBindingId: string;
   readonly workPassCode: string;
   readonly status: Id06WorkPassStatus;
@@ -122,6 +128,9 @@ export interface Id06EvidenceBundleRef {
   readonly companyId: string;
   readonly workplaceId: string;
   readonly workplaceIdentifier: string;
+  readonly projectId: string | null;
+  readonly verticalPackLinkId: string | null;
+  readonly financeTruthOwner: "projects" | null;
   readonly bindingCount: number;
   readonly workPassCount: number;
   readonly attendanceMirrorCount: number;

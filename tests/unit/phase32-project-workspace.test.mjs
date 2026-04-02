@@ -13,6 +13,7 @@ import { createProjectsPlatform } from "../../packages/domain-projects/src/index
 import { createFieldPlatform } from "../../packages/domain-field/src/index.mjs";
 import { createHusPlatform } from "../../packages/domain-hus/src/index.mjs";
 import { createPersonalliggarePlatform } from "../../packages/domain-personalliggare/src/index.mjs";
+import { createId06Engine } from "../../packages/domain-id06/src/index.mjs";
 import { createEgenkontrollPlatform } from "../../packages/domain-egenkontroll/src/index.mjs";
 import { createKalkylPlatform } from "../../packages/domain-kalkyl/src/index.mjs";
 import { buildTestCompanyProfile } from "../helpers/company-profiles.mjs";
@@ -35,6 +36,7 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
     fieldPlatform,
     husPlatform,
     personalliggarePlatform,
+    id06Platform,
     egenkontrollPlatform,
     kalkylPlatform
   } = createProjectWorkspaceFixture();
@@ -216,7 +218,7 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
     actorId: "unit-test"
   });
 
-  personalliggarePlatform.createConstructionSite({
+  const site = personalliggarePlatform.createConstructionSite({
     companyId: COMPANY_ID,
     siteCode: "SITE-32-UNIT-001",
     siteName: "Workspace site",
@@ -225,6 +227,45 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
     estimatedTotalCostExVat: 250000,
     startDate: "2026-03-20",
     projectId: project.projectId,
+    actorId: "unit-test"
+  });
+  projectsPlatform.createProjectWorkModel({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    modelCode: "service_order",
+    title: "ID06 field delivery",
+    operationalPackCode: "field_service",
+    requiresWorkOrders: true,
+    requiresAttendance: true,
+    requiresId06: true,
+    actorId: "unit-test"
+  });
+  id06Platform.verifyCompany({
+    companyId: COMPANY_ID,
+    orgNo: "5561112227",
+    companyName: "Workspace Employer AB",
+    actorId: "unit-test"
+  });
+  id06Platform.verifyPerson({
+    companyId: COMPANY_ID,
+    employmentId: employment.employmentId,
+    workerIdentityValue: "198902029999",
+    fullNameSnapshot: "Petra Workspace",
+    actorId: "unit-test"
+  });
+  id06Platform.validateCard({
+    companyId: COMPANY_ID,
+    employerOrgNo: "5561112227",
+    workerIdentityValue: "198902029999",
+    cardReference: "ID06-WS-001",
+    actorId: "unit-test"
+  });
+  id06Platform.createWorkplaceBinding({
+    companyId: COMPANY_ID,
+    workplaceId: site.workplaceId,
+    employerOrgNo: "5561112227",
+    workerIdentityValue: "198902029999",
+    cardReference: "ID06-WS-001",
     actorId: "unit-test"
   });
 
@@ -312,6 +353,7 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
   assert.equal(workspace.openWorkOrderCount, 1);
   assert.equal(workspace.husCaseCount, 1);
   assert.equal(workspace.personalliggareAlertCount, 1);
+  assert.equal(workspace.id06AlertCount, 0);
   assert.equal(workspace.egenkontrollSummary.openDeviationCount, 1);
   assert.equal(workspace.kalkylSummary.estimateCount, 1);
   assert.equal(workspace.kalkylSummary.latestEstimateStatus, "approved");
@@ -331,9 +373,20 @@ test("Step 32 project workspace aggregates field, HUS, personalliggare, egenkont
   assert.equal(workspace.warningCodes.includes("personalliggare_attention_required"), true);
   assert.equal(workspace.warningCodes.includes("project_risk_attention_required"), true);
   assert.equal(workspace.warningCodes.includes("egenkontroll_open_deviations"), true);
+  assert.equal(workspace.verticalIsolationSummary.financeTruthOwner, "projects");
+  assert.equal(workspace.verticalIsolationSummary.linkedPackTypes.includes("field"), true);
+  assert.equal(workspace.verticalIsolationSummary.linkedPackTypes.includes("personalliggare"), true);
+  assert.equal(workspace.verticalIsolationSummary.linkedPackTypes.includes("id06"), true);
+  assert.equal(workspace.id06Summary.activeBindingCount, 1);
   assert.equal(
     workspace.complianceIndicatorStrip.some(
       (indicator) => indicator.indicatorCode === "personalliggare" && indicator.status === "warning" && indicator.count === 1
+    ),
+    true
+  );
+  assert.equal(
+    workspace.complianceIndicatorStrip.some(
+      (indicator) => indicator.indicatorCode === "id06" && indicator.status === "ok" && indicator.count === 1
     ),
     true
   );
@@ -463,6 +516,7 @@ function createProjectWorkspaceFixture() {
   let fieldPlatform;
   let husPlatform;
   let personalliggarePlatform;
+  let id06Platform;
   let egenkontrollPlatform;
   let kalkylPlatform;
 
@@ -476,6 +530,7 @@ function createProjectWorkspaceFixture() {
     getFieldPlatform: () => fieldPlatform,
     getHusPlatform: () => husPlatform,
     getPersonalliggarePlatform: () => personalliggarePlatform,
+    getId06Platform: () => id06Platform,
     getEgenkontrollPlatform: () => egenkontrollPlatform,
     getKalkylPlatform: () => kalkylPlatform
   });
@@ -494,6 +549,11 @@ function createProjectWorkspaceFixture() {
   personalliggarePlatform = createPersonalliggarePlatform({
     clock,
     hrPlatform,
+    projectsPlatform
+  });
+  id06Platform = createId06Engine({
+    clock,
+    personalliggarePlatform,
     projectsPlatform
   });
   egenkontrollPlatform = createEgenkontrollPlatform({
@@ -592,6 +652,33 @@ function createProjectWorkspaceFixture() {
     contractValueAmount: 160000,
     actorId: "unit-test"
   });
+  projectsPlatform.linkVerticalPack({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    packType: "field",
+    verticalRefs: {
+      workModelCodes: ["work_order"]
+    },
+    actorId: "unit-test"
+  });
+  projectsPlatform.linkVerticalPack({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    packType: "personalliggare",
+    verticalRefs: {
+      siteMode: "construction"
+    },
+    actorId: "unit-test"
+  });
+  projectsPlatform.linkVerticalPack({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    packType: "id06",
+    verticalRefs: {
+      workplaceMode: "construction_access"
+    },
+    actorId: "unit-test"
+  });
 
   timePlatform.createTimeEntry({
     companyId: COMPANY_ID,
@@ -619,6 +706,7 @@ function createProjectWorkspaceFixture() {
     fieldPlatform,
     husPlatform,
     personalliggarePlatform,
+    id06Platform,
     egenkontrollPlatform,
     kalkylPlatform
   };

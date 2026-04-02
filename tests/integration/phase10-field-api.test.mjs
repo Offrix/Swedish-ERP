@@ -34,7 +34,7 @@ test("Phase 10.2 migration and seeds add work-order, inventory and sync artifact
   }
 });
 
-test("Phase 10.2 API manages dispatch, stock, signature, invoice and offline conflicts", async () => {
+test("Phase 10.2 API manages dispatch, stock, signature, finance handoff and offline conflicts", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-25T06:00:00Z")
   });
@@ -126,6 +126,18 @@ test("Phase 10.2 API manages dispatch, stock, signature, invoice and offline con
         billingModelCode: "time_and_material",
         revenueRecognitionModelCode: "billing_equals_revenue",
         contractValueAmount: 60000
+      }
+    });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
       }
     });
     const laborItem = await requestJson(baseUrl, "/v1/ar/items", {
@@ -289,18 +301,17 @@ test("Phase 10.2 API manages dispatch, stock, signature, invoice and offline con
     });
     assert.equal(completed.status, "completed");
 
-    const invoiced = await requestJson(baseUrl, `/v1/field/work-orders/${workOrder.workOrderId}/invoice`, {
+    const financeHandoff = await requestJson(baseUrl, `/v1/field/work-orders/${workOrder.workOrderId}/finance-handoffs`, {
       method: "POST",
       token: sessionToken,
       expectedStatus: 201,
       body: {
-        companyId: COMPANY_ID,
-        issueDate: "2026-03-25",
-        dueDate: "2026-04-24"
+        companyId: COMPANY_ID
       }
     });
-    assert.equal(Boolean(invoiced.invoice.customerInvoiceId), true);
-    assert.equal(invoiced.workOrder.status, "invoiced");
+    assert.equal(financeHandoff.workOrder.status, "completed");
+    assert.equal(financeHandoff.financeHandoff.financeTruthOwner, "projects");
+    assert.equal(financeHandoff.financeHandoff.candidateLines.length, 2);
 
     const conflict = await requestJson(baseUrl, "/v1/field/sync/envelopes", {
       method: "POST",
@@ -334,8 +345,8 @@ test("Phase 10.2 API manages dispatch, stock, signature, invoice and offline con
       { token: sessionToken }
     );
 
-    assert.equal(Boolean(workOrderDetail.customerInvoiceId), true);
-    assert.equal(auditEvents.items.some((event) => event.action === "field.work_order.invoiced"), true);
+    assert.equal(typeof workOrderDetail.currentFinanceHandoffId, "string");
+    assert.equal(auditEvents.items.some((event) => event.action === "field.work_order.finance_handoff.created"), true);
     assert.equal(auditEvents.items.some((event) => event.action === "field.sync.conflicted"), true);
   } finally {
     await stopServer(server);

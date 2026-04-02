@@ -48,9 +48,9 @@ test("Phase 10.2 offline queue survives network interruption and replays determi
   assert.equal(syncClient.listQueuedMutations()[0].syncStatus, "synced");
 });
 
-test("Phase 10.2 links material withdrawals to project and invoices completed work orders", () => {
+test("Phase 10.2 links material withdrawals to project and prepares completed work orders for finance review", () => {
   const fixture = createFieldFixture();
-  const { fieldPlatform, invoices } = fixture;
+  const { fieldPlatform } = fixture;
 
   const location = fieldPlatform.createInventoryLocation({
     companyId: COMPANY_ID,
@@ -154,27 +154,26 @@ test("Phase 10.2 links material withdrawals to project and invoices completed wo
   });
   assert.equal(completed.status, "completed");
 
-  const invoiced = fieldPlatform.createWorkOrderInvoice({
+  const handoff = fieldPlatform.createWorkOrderFinanceHandoff({
     companyId: COMPANY_ID,
     workOrderId: workOrder.workOrderId,
-    issueDate: "2026-03-25",
-    dueDate: "2026-04-24",
     actorId: "unit-test"
   });
 
-  assert.equal(invoiced.workOrder.status, "invoiced");
-  assert.equal(invoiced.invoice.customerInvoiceId, "invoice-1");
-  assert.equal(invoices.length, 1);
-  assert.equal(invoices[0].lines.length, 2);
-  assert.equal(invoices[0].lines[0].projectId, fixture.project.projectId);
-  assert.equal(invoices[0].lines[1].projectId, fixture.project.projectId);
+  assert.equal(handoff.workOrder.status, "completed");
+  assert.equal(handoff.workOrder.financeTruthOwner, "projects");
+  assert.equal(typeof handoff.workOrder.currentFinanceHandoffId, "string");
+  assert.equal(handoff.financeHandoff.financeTruthOwner, "projects");
+  assert.equal(handoff.financeHandoff.candidateLines.length, 2);
+  assert.equal(handoff.financeHandoff.candidateLines[0].projectId, fixture.project.projectId);
+  assert.equal(handoff.financeHandoff.candidateLines[1].projectId, fixture.project.projectId);
 
   const auditEvents = fieldPlatform.listFieldAuditEvents({
     companyId: COMPANY_ID,
     workOrderId: workOrder.workOrderId
   });
   assert.equal(auditEvents.some((event) => event.action === "field.material_withdrawal.created"), true);
-  assert.equal(auditEvents.some((event) => event.action === "field.work_order.invoiced"), true);
+  assert.equal(auditEvents.some((event) => event.action === "field.work_order.finance_handoff.created"), true);
 });
 
 test("Phase 10.2 marks stale offline envelopes as conflicts", () => {
@@ -227,7 +226,6 @@ test("Phase 10.2 marks stale offline envelopes as conflicts", () => {
 });
 
 function createFieldFixture() {
-  const invoices = [];
   const project = {
     projectId: "project-001",
     companyId: COMPANY_ID,
@@ -249,6 +247,20 @@ function createFieldFixture() {
         assert.equal(companyId, COMPANY_ID);
         assert.equal(projectId, project.projectId);
         return structuredClone(project);
+      },
+      listProjectVerticalPackLinks({ companyId, projectId, packType }) {
+        assert.equal(companyId, COMPANY_ID);
+        assert.equal(projectId, project.projectId);
+        assert.equal(packType, "field");
+        return [{
+          linkId: "field-pack-link-001",
+          projectVerticalPackLinkId: "field-pack-link-001",
+          companyId,
+          projectId,
+          packType,
+          verticalRefs: { workModelCodes: ["work_order"] },
+          financeTruthOwner: "projects"
+        }];
       }
     },
     hrPlatform: {
@@ -275,23 +287,9 @@ function createFieldFixture() {
           throw new Error(`Unknown AR item ${itemId}`);
         }
         return structuredClone(item);
-      },
-      createInvoice(payload) {
-        const invoice = {
-          customerInvoiceId: `invoice-${invoices.length + 1}`,
-          ...structuredClone(payload)
-        };
-        invoices.push(invoice);
-        return structuredClone(invoice);
-      },
-      issueInvoice({ customerInvoiceId }) {
-        return {
-          customerInvoiceId,
-          journalEntryId: `journal-${customerInvoiceId}`
-        };
       }
     }
   });
 
-  return { fieldPlatform, invoices, project, employment };
+  return { fieldPlatform, project, employment };
 }

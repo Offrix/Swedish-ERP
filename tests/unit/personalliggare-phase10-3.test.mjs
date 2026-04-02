@@ -88,3 +88,44 @@ test("Phase 10.3 personalliggare preserves offline events, corrections and contr
   assert.equal(auditEvents.some((candidate) => candidate.action === "personalliggare.attendance_corrected"), true);
   assert.equal(auditEvents.some((candidate) => candidate.action === "personalliggare.export.created"), true);
 });
+
+test("Phase 13.4 personalliggare requires project vertical pack linkage for project-scoped sites", () => {
+  const projectsPlatform = {
+    getProject({ companyId, projectId }) {
+      assert.equal(companyId, COMPANY_ID);
+      assert.equal(projectId, "project-personalliggare-1");
+      return { companyId, projectId };
+    },
+    listProjectVerticalPackLinks({ companyId, projectId, packType }) {
+      assert.equal(companyId, COMPANY_ID);
+      assert.equal(projectId, "project-personalliggare-1");
+      assert.equal(packType, "personalliggare");
+      return [
+        {
+          projectVerticalPackLinkId: "plink-personalliggare-1",
+          packType: "personalliggare"
+        }
+      ];
+    }
+  };
+  const personalliggarePlatform = createPersonalliggarePlatform({
+    clock: () => new Date("2026-03-24T06:00:00Z"),
+    projectsPlatform
+  });
+
+  const site = personalliggarePlatform.createConstructionSite({
+    companyId: COMPANY_ID,
+    siteCode: "SITE-TEST-PROJECT-001",
+    siteName: "Project-scoped site",
+    siteAddress: "Bygggatan 9, Stockholm",
+    builderOrgNo: "5561234567",
+    estimatedTotalCostExVat: PERSONALLIGGARE_THRESHOLD_2026_EX_VAT + 1000,
+    startDate: "2026-03-24",
+    projectId: "project-personalliggare-1",
+    actorId: "unit-test"
+  });
+
+  assert.equal(site.projectId, "project-personalliggare-1");
+  assert.equal(site.verticalPackLinkId, "plink-personalliggare-1");
+  assert.equal(site.financeTruthOwner, "projects");
+});

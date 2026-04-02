@@ -119,3 +119,87 @@ test("Step 28 builds an ID06 chain from company and person verification to workp
   assert.equal(auditEvents.some((item) => item.action === "id06.binding.activated"), true);
   assert.equal(auditEvents.some((item) => item.action === "id06.export.created"), true);
 });
+
+test("Phase 13.4 ID06 requires project vertical pack linkage for project-scoped workplace bindings", () => {
+  const projectsPlatform = {
+    getProject({ companyId, projectId }) {
+      assert.equal(companyId, COMPANY_ID);
+      assert.equal(projectId, "project-id06-1");
+      return { companyId, projectId };
+    },
+    listProjectVerticalPackLinks({ companyId, projectId, packType }) {
+      assert.equal(companyId, COMPANY_ID);
+      assert.equal(projectId, "project-id06-1");
+      assert.equal(packType, "id06");
+      return [
+        {
+          projectVerticalPackLinkId: "plink-id06-1",
+          packType: "id06"
+        }
+      ];
+    }
+  };
+  const personalliggare = createPersonalliggarePlatform({
+    clock: () => new Date("2026-03-25T08:00:00Z"),
+    projectsPlatform: {
+      ...projectsPlatform,
+      listProjectVerticalPackLinks({ companyId, projectId, packType }) {
+        if (packType === "personalliggare") {
+          return [{ projectVerticalPackLinkId: "plink-personalliggare-1", packType: "personalliggare" }];
+        }
+        return projectsPlatform.listProjectVerticalPackLinks({ companyId, projectId, packType });
+      }
+    }
+  });
+  const id06 = createId06Engine({
+    clock: () => new Date("2026-03-25T08:00:00Z"),
+    personalliggarePlatform: personalliggare,
+    projectsPlatform
+  });
+
+  const site = personalliggare.createConstructionSite({
+    companyId: COMPANY_ID,
+    siteCode: "ID06-PROJECT-SITE-001",
+    siteName: "ID06 Project Site",
+    siteAddress: "Kontrollgatan 2, Stockholm",
+    builderOrgNo: "5561234567",
+    estimatedTotalCostExVat: 500000,
+    startDate: "2026-03-24",
+    workplaceIdentifier: "ID06-PROJECT-WP-001",
+    projectId: "project-id06-1",
+    actorId: "id06-unit"
+  });
+
+  id06.verifyCompany({
+    companyId: COMPANY_ID,
+    orgNo: "5561112227",
+    companyName: "Demo Employer AB",
+    actorId: "id06-unit"
+  });
+  id06.verifyPerson({
+    companyId: COMPANY_ID,
+    workerIdentityValue: "198902029999",
+    fullNameSnapshot: "Sara Nilsson",
+    actorId: "id06-unit"
+  });
+  id06.validateCard({
+    companyId: COMPANY_ID,
+    employerOrgNo: "5561112227",
+    workerIdentityValue: "198902029999",
+    cardReference: "ID06-CARD-PROJECT-001",
+    actorId: "id06-unit"
+  });
+
+  const binding = id06.createWorkplaceBinding({
+    companyId: COMPANY_ID,
+    workplaceId: site.workplaceId,
+    employerOrgNo: "5561112227",
+    workerIdentityValue: "198902029999",
+    cardReference: "ID06-CARD-PROJECT-001",
+    actorId: "id06-unit"
+  });
+
+  assert.equal(binding.projectId, "project-id06-1");
+  assert.equal(binding.verticalPackLinkId, "plink-id06-1");
+  assert.equal(binding.financeTruthOwner, "projects");
+});

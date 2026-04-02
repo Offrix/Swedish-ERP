@@ -136,6 +136,8 @@ export function createFieldEngine({
     materialWithdrawalIdsByWorkOrder: new Map(),
     customerSignatures: new Map(),
     signatureIdsByWorkOrder: new Map(),
+    workOrderFinanceHandoffs: new Map(),
+    workOrderFinanceHandoffIdsByWorkOrder: new Map(),
     fieldEvidence: new Map(),
     fieldEvidenceIdsByWorkOrder: new Map(),
     syncEnvelopes: new Map(),
@@ -367,6 +369,10 @@ export function createFieldEngine({
 
   function getProjectFieldSummary({ companyId, projectId } = {}) {
     const project = requireProject(projectsPlatform, companyId, projectId);
+    const linkedFieldPacks =
+      projectsPlatform && typeof projectsPlatform.listProjectVerticalPackLinks === "function"
+        ? projectsPlatform.listProjectVerticalPackLinks({ companyId: project.companyId, projectId: project.projectId, packType: "field" })
+        : [];
     const workOrders = listWorkOrders({
       companyId: project.companyId,
       projectId: project.projectId
@@ -393,18 +399,14 @@ export function createFieldEngine({
         0
       ),
       materialWithdrawalCount: workOrders.reduce((sum, workOrder) => sum + workOrder.materialWithdrawals.length, 0),
-      materialWithdrawalAmount: roundMoney(
-        workOrders.reduce(
-          (sum, workOrder) =>
-            sum +
-            workOrder.materialWithdrawals.reduce(
-              (workOrderSum, withdrawal) =>
-                workOrderSum + Number(withdrawal.quantity || 0) * Number(withdrawal.salesUnitPriceAmount || 0),
-              0
-            ),
-          0
-        )
+      materialWithdrawalAmount: 0,
+      completedPendingFinanceCount: workOrders.filter((workOrder) => workOrder.status === "completed" && !workOrder.currentFinanceHandoffId).length,
+      financeHandoffCount: workOrders.reduce(
+        (sum, workOrder) => sum + (state.workOrderFinanceHandoffIdsByWorkOrder.get(workOrder.workOrderId) || []).length,
+        0
       ),
+      financeTruthOwner: "projects",
+      fieldPackLinkedFlag: linkedFieldPacks.length > 0,
       latestOperationalUpdateAt,
       workOrders: workOrders.map((workOrder) => ({
         workOrderId: workOrder.workOrderId,
@@ -414,6 +416,7 @@ export function createFieldEngine({
         priorityCode: workOrder.priorityCode,
         signatureStatus: workOrder.signatureStatus,
         customerInvoiceId: workOrder.customerInvoiceId,
+        currentFinanceHandoffId: workOrder.currentFinanceHandoffId || null,
         dispatchCount: workOrder.dispatchAssignments.length,
         materialWithdrawalCount: workOrder.materialWithdrawals.length,
         actualStartedAt: workOrder.actualStartedAt,
@@ -457,6 +460,9 @@ export function createFieldEngine({
     const project = requireProject(projectsPlatform, resolvedCompanyId, projectId);
     const resolvedPackCodes = normalizePackCodes(packCodes);
     const hasWorkOrderPack = resolvedPackCodes.includes("work_order");
+    const linkedFieldPack = hasWorkOrderPack
+      ? requireProjectVerticalPackLink(projectsPlatform, resolvedCompanyId, project.projectId, "field")
+      : null;
     const resolvedOperationalCaseNo = requireText(
       operationalCaseNo ||
         workOrderNo ||
@@ -500,6 +506,8 @@ export function createFieldEngine({
       signatureStatus: signatureRequired === true ? "pending" : "captured",
       invoicingPolicyCode: requireEnum(["manual_review", "explicit_rule"], invoicingPolicyCode, "field_operational_case_invoicing_policy_invalid"),
       customerInvoiceId: null,
+      currentFinanceHandoffId: null,
+      verticalPackLinkId: linkedFieldPack?.linkId || null,
       versionNo: 1,
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
@@ -926,64 +934,97 @@ export function createFieldEngine({
     return copy(enrichWorkOrder(state, workOrder));
   }
 
-  function createWorkOrderInvoice({
+  function listWorkOrderFinanceHandoffs({ companyId, workOrderId } = {}) {
+    const workOrder = requireWorkOrder(state, companyId, workOrderId);
+    return (state.workOrderFinanceHandoffIdsByWorkOrder.get(workOrder.workOrderId) || [])
+      .map((fieldWorkOrderFinanceHandoffId) => state.workOrderFinanceHandoffs.get(fieldWorkOrderFinanceHandoffId))
+      .filter(Boolean)
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt)
+          || left.fieldWorkOrderFinanceHandoffId.localeCompare(right.fieldWorkOrderFinanceHandoffId)
+      )
+      .map(copy);
+  }
+
+  function createWorkOrderFinanceHandoff({
     companyId,
     workOrderId,
-    issueDate,
-    dueDate,
     actorId = "system",
     correlationId = crypto.randomUUID()
   } = {}) {
     const workOrder = requireWorkOrder(state, companyId, workOrderId);
     if (workOrder.status !== "completed") {
-      throw createError(409, "field_work_order_not_completed", "Work order must be completed before invoicing.");
+      throw createError(409, "field_work_order_not_completed", "Work order must be completed before finance handoff.");
     }
     if (workOrder.invoicingPolicyCode !== "manual_review" && workOrder.invoicingPolicyCode !== "explicit_rule") {
       throw createError(409, "field_operational_case_invoicing_policy_invalid", "Operational case is missing invoicing policy.");
     }
     if (listOpenConflictRecordsForCase(state, workOrder.workOrderId).length > 0) {
-      throw createError(409, "field_operational_case_open_conflicts", "Operational case has open conflicts that block invoice readiness.");
+      throw createError(409, "field_operational_case_open_conflicts", "Operational case has open conflicts that block finance handoff readiness.");
     }
-    if (!arPlatform || typeof arPlatform.createInvoice !== "function" || typeof arPlatform.issueInvoice !== "function") {
-      throw createError(500, "field_ar_platform_missing", "AR platform is required to invoice field work.");
+    const linkedFieldPack = requireProjectVerticalPackLink(projectsPlatform, workOrder.companyId, workOrder.projectId, "field");
+    if (!arPlatform || typeof arPlatform.getItem !== "function") {
+      throw createError(500, "field_ar_platform_missing", "AR platform is required to prepare field finance handoffs.");
     }
     const customerId = requireText(
       normalizeOptionalText(workOrder.customerId) || normalizeOptionalText(requireProject(projectsPlatform, workOrder.companyId, workOrder.projectId).customerId),
       "field_work_order_customer_required"
     );
-    const invoiceLines = buildWorkOrderInvoiceLines({ state, arPlatform, companyId: workOrder.companyId, workOrder });
-    if (!invoiceLines.length) {
-      throw createError(409, "field_work_order_invoice_lines_missing", "Work order has no billable invoice lines.");
+    const candidateLines = buildWorkOrderFinanceCandidateLines({ state, arPlatform, companyId: workOrder.companyId, workOrder });
+    if (!candidateLines.length) {
+      throw createError(409, "field_work_order_finance_lines_missing", "Work order has no finance handoff candidate lines.");
     }
-    const invoice = arPlatform.createInvoice({
+    const record = {
+      fieldWorkOrderFinanceHandoffId: crypto.randomUUID(),
       companyId: workOrder.companyId,
+      projectId: workOrder.projectId,
+      workOrderId: workOrder.workOrderId,
+      operationalCaseId: workOrder.operationalCaseId || workOrder.workOrderId,
       customerId,
-      invoiceType: "standard",
-      issueDate: normalizeDate(issueDate, "field_work_order_invoice_issue_date_invalid"),
-      dueDate: normalizeDate(dueDate, "field_work_order_invoice_due_date_invalid"),
-      lines: invoiceLines,
-      actorId
-    });
-    const issued = arPlatform.issueInvoice({
+      packType: "field",
+      verticalPackLinkId: linkedFieldPack.linkId,
+      financeTruthOwner: "projects",
+      readinessStatus: "ready",
+      candidateLines: copy(candidateLines),
+      snapshotHash: hashObject({
+        workOrderId: workOrder.workOrderId,
+        versionNo: workOrder.versionNo,
+        verticalPackLinkId: linkedFieldPack.linkId,
+        candidateLines
+      }),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+    const existing = listWorkOrderFinanceHandoffs({
       companyId: workOrder.companyId,
-      customerInvoiceId: invoice.customerInvoiceId,
-      actorId
-    });
-    workOrder.customerInvoiceId = issued.customerInvoiceId;
-    transitionWorkOrder(clock, workOrder, "invoiced");
+      workOrderId: workOrder.workOrderId
+    }).find((candidate) => candidate.snapshotHash === record.snapshotHash);
+    if (existing) {
+      workOrder.currentFinanceHandoffId = existing.fieldWorkOrderFinanceHandoffId;
+      touchWorkOrder(clock, workOrder);
+      return {
+        workOrder: copy(enrichWorkOrder(state, workOrder)),
+        financeHandoff: existing
+      };
+    }
+    state.workOrderFinanceHandoffs.set(record.fieldWorkOrderFinanceHandoffId, record);
+    ensureCollection(state.workOrderFinanceHandoffIdsByWorkOrder, workOrder.workOrderId).push(record.fieldWorkOrderFinanceHandoffId);
+    workOrder.currentFinanceHandoffId = record.fieldWorkOrderFinanceHandoffId;
+    touchWorkOrder(clock, workOrder);
     pushAudit(state, clock, {
       companyId: workOrder.companyId,
       actorId,
       correlationId,
-      action: "field.work_order.invoiced",
-      entityType: "field_work_order",
-      entityId: workOrder.workOrderId,
+      action: "field.work_order.finance_handoff.created",
+      entityType: "field_work_order_finance_handoff",
+      entityId: record.fieldWorkOrderFinanceHandoffId,
       projectId: workOrder.projectId,
-      explanation: `Issued invoice for ${workOrder.workOrderNo}.`
+      explanation: `Prepared finance handoff for ${workOrder.workOrderNo}.`
     });
     return {
       workOrder: copy(enrichWorkOrder(state, workOrder)),
-      invoice: copy(issued)
+      financeHandoff: copy(record)
     };
   }
 
@@ -1260,7 +1301,8 @@ export function createFieldEngine({
     listCustomerSignatures,
     captureCustomerSignature,
     completeWorkOrder,
-    createWorkOrderInvoice,
+    listWorkOrderFinanceHandoffs,
+    createWorkOrderFinanceHandoff,
     listMobileToday,
     syncOfflineEnvelope,
     listSyncEnvelopes,
@@ -1338,6 +1380,9 @@ function enrichOperationalCase(state, record) {
     customerSignatures,
     fieldEvidence,
     conflictRecords,
+    currentFinanceHandoffId: record.currentFinanceHandoffId || null,
+    financeHandoffCount: (state.workOrderFinanceHandoffIdsByWorkOrder.get(operationalCaseId) || []).length,
+    financeTruthOwner: "projects",
     openConflictCount: conflictRecords.filter((conflictRecord) => conflictRecord.status === "open").length,
     invoiceReadyBlocked: conflictRecords.some((conflictRecord) => conflictRecord.status === "open")
   };
@@ -1347,30 +1392,41 @@ function enrichWorkOrder(state, record) {
   return enrichOperationalCase(state, record);
 }
 
-function buildWorkOrderInvoiceLines({ state, arPlatform, companyId, workOrder }) {
+function buildWorkOrderFinanceCandidateLines({ state, arPlatform, companyId, workOrder }) {
   const lines = [];
   if (workOrder.laborMinutes > 0) {
     const laborItem = workOrder.laborItemId ? arPlatform.getItem({ companyId, itemId: workOrder.laborItemId }) : null;
     if (!laborItem) {
-      throw createError(409, "field_work_order_labor_item_required", "Labor item must be set before invoicing a work order.");
+      throw createError(409, "field_work_order_labor_item_required", "Labor item must be set before preparing a finance handoff.");
     }
     lines.push({
-      itemId: laborItem.arItemId,
+      lineId: crypto.randomUUID(),
+      sourceType: "field_work_order_labor",
+      sourceObjectType: "field_work_order",
+      sourceObjectId: workOrder.workOrderId,
+      itemId: laborItem.arItemId || laborItem.itemId || workOrder.laborItemId,
+      itemCode: laborItem.itemCode || null,
       quantity: Number((workOrder.laborMinutes / 60).toFixed(2)),
-      unitPrice: workOrder.laborRateAmount > 0 ? workOrder.laborRateAmount : laborItem.standardPrice,
+      suggestedUnitPriceAmount: workOrder.laborRateAmount > 0 ? workOrder.laborRateAmount : Number(laborItem.standardPrice || 0),
       projectId: workOrder.projectId
     });
   }
   for (const materialWithdrawalId of state.materialWithdrawalIdsByWorkOrder.get(workOrder.workOrderId) || []) {
     const materialWithdrawal = state.materialWithdrawals.get(materialWithdrawalId);
     const inventoryItem = materialWithdrawal ? state.inventoryItems.get(materialWithdrawal.inventoryItemId) : null;
-    if (!materialWithdrawal || !inventoryItem || !inventoryItem.arItemId || inventoryItem.salesUnitPriceAmount <= 0) {
+    if (!materialWithdrawal || !inventoryItem || !inventoryItem.arItemId) {
       continue;
     }
+    const arItem = arPlatform.getItem({ companyId, itemId: inventoryItem.arItemId });
     lines.push({
+      lineId: crypto.randomUUID(),
+      sourceType: "field_material_withdrawal",
+      sourceObjectType: "field_material_withdrawal",
+      sourceObjectId: materialWithdrawal.materialWithdrawalId,
       itemId: inventoryItem.arItemId,
+      itemCode: arItem?.itemCode || null,
       quantity: materialWithdrawal.quantity,
-      unitPrice: inventoryItem.salesUnitPriceAmount,
+      suggestedUnitPriceAmount: Number(arItem?.standardPrice || 0),
       projectId: workOrder.projectId
     });
   }
@@ -1385,6 +1441,22 @@ function requireProject(projectsPlatform, companyId, projectId) {
     companyId,
     projectId: requireText(projectId, "project_id_required")
   });
+}
+
+function requireProjectVerticalPackLink(projectsPlatform, companyId, projectId, packType) {
+  if (!projectsPlatform || typeof projectsPlatform.listProjectVerticalPackLinks !== "function") {
+    throw createError(500, "field_project_vertical_pack_link_support_required", "Projects platform must support vertical pack links.");
+  }
+  const links = projectsPlatform.listProjectVerticalPackLinks({
+    companyId,
+    projectId,
+    packType
+  });
+  const activeLink = Array.isArray(links) ? links.at(-1) || null : null;
+  if (!activeLink) {
+    throw createError(409, "field_vertical_pack_link_required", `Project must link the ${packType} vertical pack before field work can be created.`);
+  }
+  return activeLink;
 }
 
 function requireEmployment(hrPlatform, companyId, employmentId) {
@@ -1641,6 +1713,7 @@ function seedFieldDemo(state, clock) {
     signatureStatus: "pending",
     invoicingPolicyCode: "manual_review",
     customerInvoiceId: null,
+    currentFinanceHandoffId: null,
     versionNo: 1,
     createdByActorId: "field_seed",
     createdAt: now,

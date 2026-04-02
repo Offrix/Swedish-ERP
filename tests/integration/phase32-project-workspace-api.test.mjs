@@ -122,6 +122,54 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
         contractValueAmount: 120000
       }
     });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
+      }
+    });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "personalliggare",
+        verticalRefs: {
+          siteMode: "construction"
+        }
+      }
+    });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "id06",
+        verticalRefs: {
+          workplaceMode: "construction_access"
+        }
+      }
+    });
+    await requestJson(baseUrl, `/v1/projects/${siblingProject.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
+      }
+    });
 
     await requestJson(baseUrl, "/v1/time/entries", {
       method: "POST",
@@ -338,6 +386,67 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
       }
     });
     assert.equal(site.thresholdRequiredFlag, true);
+    assert.equal(site.verticalPackLinkId !== null, true);
+    assert.equal(site.financeTruthOwner, "projects");
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/work-models`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        modelCode: "service_order",
+        title: "Workspace API ID06 model",
+        operationalPackCode: "field_service",
+        requiresWorkOrders: true,
+        requiresAttendance: true,
+        requiresId06: true
+      }
+    });
+    await requestJson(baseUrl, "/v1/id06/companies/verify", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        orgNo: "5561112227",
+        companyName: "Workspace Employer AB"
+      }
+    });
+    await requestJson(baseUrl, "/v1/id06/persons/verify", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        workerIdentityValue: "198902029999",
+        fullNameSnapshot: "Wilma Workspace"
+      }
+    });
+    await requestJson(baseUrl, "/v1/id06/cards/validate", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employerOrgNo: "5561112227",
+        workerIdentityValue: "198902029999",
+        cardReference: "ID06-API-WS-001"
+      }
+    });
+    const id06Binding = await requestJson(baseUrl, `/v1/id06/workplaces/${site.workplaceId}/bindings`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        employerOrgNo: "5561112227",
+        workerIdentityValue: "198902029999",
+        cardReference: "ID06-API-WS-001"
+      }
+    });
+    assert.equal(id06Binding.financeTruthOwner, "projects");
+    assert.equal(id06Binding.verticalPackLinkId !== null, true);
 
     const template = await requestJson(baseUrl, "/v1/egenkontroll/templates", {
       method: "POST",
@@ -454,13 +563,22 @@ test("Step 32 API exposes project workspace and deviation lifecycle across conne
     assert.equal(workspace.openWorkOrderCount, 1);
     assert.equal(workspace.husCaseCount, 1);
     assert.equal(workspace.personalliggareAlertCount, 1);
+    assert.equal(workspace.id06AlertCount, 0);
     assert.equal(workspace.egenkontrollSummary.openDeviationCount, 1);
     assert.equal(workspace.kalkylSummary.estimateCount, 1);
     assert.equal(workspace.kalkylSummary.latestEstimateStatus, "approved");
     assert.equal(workspace.payrollActuals.actualCostAmount > 0, true);
+    assert.equal(workspace.id06Summary.activeBindingCount, 1);
+    assert.equal(workspace.verticalIsolationSummary.linkedPackTypes.includes("id06"), true);
     assert.equal(
       workspace.complianceIndicatorStrip.some(
         (indicator) => indicator.indicatorCode === "personalliggare" && indicator.status === "warning"
+      ),
+      true
+    );
+    assert.equal(
+      workspace.complianceIndicatorStrip.some(
+        (indicator) => indicator.indicatorCode === "id06" && indicator.status === "ok" && indicator.count === 1
       ),
       true
     );

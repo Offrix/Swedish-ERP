@@ -221,6 +221,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/import-batches/:projectImportBatchId/commit",
   "/v1/projects/:projectId/opportunity-links",
   "/v1/projects/:projectId/quote-links",
+  "/v1/projects/:projectId/vertical-pack-links",
   "/v1/projects/:projectId/engagements",
   "/v1/projects/:projectId/work-models",
   "/v1/projects/:projectId/work-packages",
@@ -281,6 +282,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/field/operational-cases/:operationalCaseId/evidence",
   "/v1/field/operational-cases/:operationalCaseId/conflicts",
   "/v1/field/operational-cases/:operationalCaseId/conflicts/:conflictRecordId/resolve",
+  "/v1/field/work-orders/:workOrderId/finance-handoffs",
   "/v1/payroll/garnishments",
   "/v1/payroll/garnishments/:garnishmentDecisionSnapshotId/approve",
   "/v1/payroll/garnishment-remittances",
@@ -490,6 +492,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectRevenueRecognitionPlanActivateContract.requiredActionClass, "project_revenue_recognition_plan_activate");
     assert.equal(projectRevenueRecognitionPlanActivateContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectRevenueRecognitionPlanActivateContract.requiredScopeType, "project");
+
+    const projectVerticalPackLinkContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/vertical-pack-links"
+    );
+    assert.ok(projectVerticalPackLinkContract);
+    assert.equal(projectVerticalPackLinkContract.requiredActionClass, "project_vertical_pack_link_create");
+    assert.equal(projectVerticalPackLinkContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectVerticalPackLinkContract.requiredScopeType, "project");
 
     const projectWipLedgerBridgePostContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/wip-ledger-bridges"
@@ -707,6 +717,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(fieldConflictResolveContract.requiredActionClass, "field_conflict_record_resolve");
     assert.equal(fieldConflictResolveContract.requiredTrustLevel, "strong_mfa");
     assert.equal(fieldConflictResolveContract.requiredScopeType, "project");
+
+    const fieldFinanceHandoffContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/field/work-orders/:workOrderId/finance-handoffs"
+    );
+    assert.ok(fieldFinanceHandoffContract);
+    assert.equal(fieldFinanceHandoffContract.requiredActionClass, "field_work_order_finance_handoff_create");
+    assert.equal(fieldFinanceHandoffContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(fieldFinanceHandoffContract.requiredScopeType, "project");
 
     const personalliggareAttendanceRecordContract = payload.routeContracts.find(
       (routeContract) =>

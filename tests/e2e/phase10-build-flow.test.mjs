@@ -218,6 +218,18 @@ test("Phase 10.3 e2e covers field-mobile shell, build routes and deterministic o
         submittedOn: "2026-03-16"
       }
     });
+    await requestJson(enabledBaseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "personalliggare",
+        verticalRefs: {
+          siteMode: "construction"
+        }
+      }
+    });
 
     const site = await requestJson(enabledBaseUrl, "/v1/personalliggare/sites", {
       method: "POST",
@@ -234,6 +246,8 @@ test("Phase 10.3 e2e covers field-mobile shell, build routes and deterministic o
         projectId: project.projectId
       }
     });
+    assert.equal(site.verticalPackLinkId !== null, true);
+    assert.equal(site.financeTruthOwner, "projects");
     await requestJson(enabledBaseUrl, `/v1/personalliggare/sites/${site.constructionSiteId}/registrations`, {
       method: "POST",
       token: sessionToken,

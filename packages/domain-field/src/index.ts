@@ -42,6 +42,9 @@ export interface OperationalCaseRef {
   readonly status: FieldWorkOrderStatus;
   readonly invoiceReadyBlocked: boolean;
   readonly openConflictCount: number;
+  readonly currentFinanceHandoffId: string | null;
+  readonly financeHandoffCount: number;
+  readonly financeTruthOwner: "projects";
   readonly versionNo: number;
 }
 
@@ -58,7 +61,37 @@ export interface FieldWorkOrderRef {
   readonly status: FieldWorkOrderStatus;
   readonly signatureStatus: "pending" | "captured" | "voided";
   readonly customerInvoiceId: string | null;
+  readonly currentFinanceHandoffId: string | null;
+  readonly financeHandoffCount: number;
+  readonly financeTruthOwner: "projects";
   readonly versionNo: number;
+}
+
+export interface FieldWorkOrderFinanceHandoffRef {
+  readonly fieldWorkOrderFinanceHandoffId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly workOrderId: string;
+  readonly operationalCaseId: string;
+  readonly customerId: string;
+  readonly packType: "field";
+  readonly verticalPackLinkId: string;
+  readonly financeTruthOwner: "projects";
+  readonly readinessStatus: "ready";
+  readonly candidateLines: readonly {
+    readonly lineId: string;
+    readonly sourceType: string;
+    readonly sourceObjectType: string;
+    readonly sourceObjectId: string;
+    readonly itemId: string;
+    readonly itemCode: string | null;
+    readonly quantity: number;
+    readonly suggestedUnitPriceAmount: number;
+    readonly projectId: string;
+  }[];
+  readonly snapshotHash: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
 }
 
 export interface MaterialReservationRef {

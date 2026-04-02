@@ -120,6 +120,18 @@ test("Step 30 API creates templates, instances, deviations and sign-off chains",
         contractValueAmount: 120000
       }
     });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
+      }
+    });
 
     const workOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
       method: "POST",

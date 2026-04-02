@@ -14,7 +14,8 @@ export function createId06Platform(options = {}) {
 
 export function createId06Engine({
   clock = () => new Date(),
-  personalliggarePlatform = null
+  personalliggarePlatform = null,
+  projectsPlatform = null
 } = {}) {
   const state = {
     companyVerifications: new Map(),
@@ -284,6 +285,9 @@ export function createId06Engine({
       workplaceId: workplace.workplaceId,
       workplaceIdentifier: workplace.workplaceIdentifier,
       constructionSiteId: workplace.constructionSiteId,
+      projectId: workplace.projectId,
+      verticalPackLinkId: workplace.verticalPackLinkId,
+      financeTruthOwner: workplace.financeTruthOwner,
       employerOrgNo: companyVerification.orgNo,
       workerIdentityType: personVerification.workerIdentityType,
       workerIdentityValue: personVerification.workerIdentityValue,
@@ -357,6 +361,9 @@ export function createId06Engine({
       companyId: resolvedCompanyId,
       workplaceId: workplace.workplaceId,
       workplaceIdentifier: workplace.workplaceIdentifier,
+      projectId: workplace.projectId,
+      verticalPackLinkId: workplace.verticalPackLinkId,
+      financeTruthOwner: workplace.financeTruthOwner,
       bindingCount: bindings.length,
       workPassCount: workPasses.length,
       attendanceMirrorCount: attendanceMirrors.length,
@@ -429,6 +436,9 @@ export function createId06Engine({
       id06WorkPassId: crypto.randomUUID(),
       companyId,
       workplaceId,
+      projectId: binding.projectId || null,
+      verticalPackLinkId: binding.verticalPackLinkId || null,
+      financeTruthOwner: binding.financeTruthOwner || null,
       id06WorkplaceBindingId: binding.id06WorkplaceBindingId,
       workPassCode: `WP-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
       status: "issued",
@@ -549,7 +559,10 @@ export function createId06Engine({
       return {
         workplaceId: resolvedWorkplaceId,
         workplaceIdentifier: resolvedWorkplaceId,
-        constructionSiteId: null
+        constructionSiteId: null,
+        projectId: null,
+        verticalPackLinkId: null,
+        financeTruthOwner: null
       };
     }
     const site = personalliggarePlatform
@@ -558,11 +571,42 @@ export function createId06Engine({
     if (!site) {
       throw createError(404, "id06_workplace_not_found", "ID06 workplace must exist in personalliggare workplace registry.");
     }
+    const resolvedProjectId = optionalText(site.projectId);
+    const projectVerticalPackLink = resolvedProjectId
+      ? requireProjectVerticalPackLink(projectsPlatform, companyId, resolvedProjectId, "id06")
+      : null;
     return {
       workplaceId: site.workplaceId,
       workplaceIdentifier: site.workplaceIdentifier,
-      constructionSiteId: site.constructionSiteId
+      constructionSiteId: site.constructionSiteId,
+      projectId: resolvedProjectId,
+      verticalPackLinkId: projectVerticalPackLink?.projectVerticalPackLinkId || null,
+      financeTruthOwner: projectVerticalPackLink ? "projects" : null
     };
+  }
+
+  function requireProjectVerticalPackLink(projectsPlatformRef, companyId, projectId, packType) {
+    if (!projectsPlatformRef || typeof projectsPlatformRef.listProjectVerticalPackLinks !== "function") {
+      throw createError(
+        500,
+        "id06_project_vertical_pack_link_support_required",
+        "Projects platform must support vertical pack links."
+      );
+    }
+    const links = projectsPlatformRef.listProjectVerticalPackLinks({
+      companyId,
+      projectId,
+      packType
+    });
+    const activeLink = Array.isArray(links) ? links.at(-1) || null : null;
+    if (!activeLink) {
+      throw createError(
+        409,
+        "id06_vertical_pack_link_required",
+        `Project must link the ${packType} vertical pack before ID06 workplace bindings can be created.`
+      );
+    }
+    return activeLink;
   }
 
   function findCompanyVerificationByOrgNo(companyId, orgNo) {

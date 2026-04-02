@@ -244,6 +244,18 @@ test("Phase 14 access matrix denies field users on critical desktop-only surface
         ]
       }
     });
+    await requestJson(baseUrl, `/v1/projects/${project.projectId}/vertical-pack-links`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        packType: "field",
+        verticalRefs: {
+          workModelCodes: ["work_order"]
+        }
+      }
+    });
     const fieldWorkOrder = await requestJson(baseUrl, "/v1/field/work-orders", {
       method: "POST",
       token: adminToken,

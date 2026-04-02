@@ -202,6 +202,11 @@ export const PROJECT_VERTICAL_WORK_MODEL_CODES = Object.freeze([
   "work_order",
   "construction_stage"
 ]);
+export const PROJECT_VERTICAL_PACK_TYPES = Object.freeze([
+  "field",
+  "personalliggare",
+  "id06"
+]);
 export const PROJECT_WORK_MODEL_CODES = Object.freeze([
   ...PROJECT_GENERAL_WORK_MODEL_CODES,
   ...PROJECT_VERTICAL_WORK_MODEL_CODES
@@ -264,11 +269,13 @@ export function createProjectEngine({
   fieldPlatform = null,
   husPlatform = null,
   personalliggarePlatform = null,
+  id06Platform = null,
   egenkontrollPlatform = null,
   kalkylPlatform = null,
   getFieldPlatform = null,
   getHusPlatform = null,
   getPersonalliggarePlatform = null,
+  getId06Platform = null,
   getEgenkontrollPlatform = null,
   getKalkylPlatform = null
 } = {}) {
@@ -294,6 +301,9 @@ export function createProjectEngine({
     projectProfitabilitySnapshotIdsByProject: new Map(),
     projectProfitabilityMissionControlSnapshots: new Map(),
     projectProfitabilityMissionControlSnapshotIdsByProject: new Map(),
+    projectVerticalPackLinks: new Map(),
+    projectVerticalPackLinkIdsByProject: new Map(),
+    projectVerticalPackLinkIdsByScopedKey: new Map(),
     budgetVersions: new Map(),
     budgetVersionIdsByProject: new Map(),
     resourceAllocations: new Map(),
@@ -336,6 +346,7 @@ export function createProjectEngine({
     projectWorkModelCodes: PROJECT_GENERAL_WORK_MODEL_CODES,
     projectGeneralWorkModelCodes: PROJECT_GENERAL_WORK_MODEL_CODES,
     projectVerticalWorkModelCodes: PROJECT_VERTICAL_WORK_MODEL_CODES,
+    projectVerticalPackTypes: PROJECT_VERTICAL_PACK_TYPES,
     projectAllWorkModelCodes: PROJECT_WORK_MODEL_CODES,
     projectAgreementStatuses: PROJECT_AGREEMENT_STATUSES,
     projectWorkPackageStatuses: PROJECT_WORK_PACKAGE_STATUSES,
@@ -378,6 +389,8 @@ export function createProjectEngine({
     createProjectOpportunityLink,
     listProjectQuoteLinks,
     createProjectQuoteLink,
+    listProjectVerticalPackLinks,
+    linkVerticalPack,
     listProjectAgreements,
     createProjectAgreement,
     listProjectEngagements,
@@ -503,6 +516,7 @@ export function createProjectEngine({
     const revenuePlans = listProjectRevenuePlans({ companyId: project.companyId, projectId: project.projectId });
     const opportunityLinks = listProjectOpportunityLinks({ companyId: project.companyId, projectId: project.projectId });
     const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
+    const projectVerticalPackLinks = listProjectVerticalPackLinks({ companyId: project.companyId, projectId: project.projectId });
     const agreements = listProjectAgreements({ companyId: project.companyId, projectId: project.projectId });
     const signedAgreements = agreements.filter((record) => record.status === "signed");
     const revenueRecognitionPlans = listProjectRevenueRecognitionPlans({ companyId: project.companyId, projectId: project.projectId });
@@ -557,6 +571,13 @@ export function createProjectEngine({
       companyId: project.companyId,
       projectId: project.projectId,
       personalliggarePlatform: resolvePlatform(getPersonalliggarePlatform, personalliggarePlatform)
+    });
+    const id06Summary = summarizeId06Workspace({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      workModels,
+      personalliggarePlatform: resolvePlatform(getPersonalliggarePlatform, personalliggarePlatform),
+      id06Platform: resolvePlatform(getId06Platform, id06Platform)
     });
     const egenkontrollSummary = summarizeEgenkontrollWorkspace({
       companyId: project.companyId,
@@ -662,6 +683,18 @@ export function createProjectEngine({
     if (personalliggareSummary.alertCount > 0) {
       warningCodes.push("personalliggare_attention_required");
     }
+    if (fieldSummary.totalWorkOrderCount > 0 && !projectVerticalPackLinks.some((link) => link.packType === "field")) {
+      warningCodes.push("field_pack_link_missing");
+    }
+    if (personalliggareSummary.siteCount > 0 && !projectVerticalPackLinks.some((link) => link.packType === "personalliggare")) {
+      warningCodes.push("personalliggare_pack_link_missing");
+    }
+    if (workModels.some((record) => record.requiresId06 === true) && !projectVerticalPackLinks.some((link) => link.packType === "id06")) {
+      warningCodes.push("id06_pack_link_missing");
+    }
+    if (id06Summary.attentionCount > 0) {
+      warningCodes.push("id06_attention_required");
+    }
     if (egenkontrollSummary.openDeviationCount > 0) {
       warningCodes.push("egenkontroll_open_deviations");
     }
@@ -709,6 +742,7 @@ export function createProjectEngine({
       opportunityLinkCount: opportunityLinks.length,
       quoteLinkCount: quoteLinks.length,
       agreementCount: agreements.length,
+      verticalPackLinkCount: projectVerticalPackLinks.length,
       signedAgreementCount: signedAgreements.length,
       revenueRecognitionPlanCount: revenueRecognitionPlans.length,
       billingPlanCount: billingPlans.length,
@@ -732,6 +766,7 @@ export function createProjectEngine({
       openWorkOrderCount: fieldSummary.openWorkOrderCount,
       husCaseCount: husSummary.totalCaseCount,
       personalliggareAlertCount: personalliggareSummary.alertCount,
+      id06AlertCount: id06Summary.attentionCount,
       openProjectDeviationCount: openProjectDeviations.length,
       warningCodes,
       payrollActuals: {
@@ -745,10 +780,11 @@ export function createProjectEngine({
       fieldSummary,
       husSummary,
       personalliggareSummary,
+      id06Summary,
       egenkontrollSummary,
       kalkylSummary,
       customerContext,
-      verticalIsolationSummary: buildProjectVerticalIsolationSummary({ workModels }),
+      verticalIsolationSummary: buildProjectVerticalIsolationSummary({ workModels, projectVerticalPackLinks }),
       latestStatusUpdate: currentStatusUpdate ? copy(currentStatusUpdate) : null,
       currentBudgetVersion: currentBudgetVersion ? copy(currentBudgetVersion) : null,
       currentCostSnapshot: currentCostSnapshot ? copy(currentCostSnapshot) : null,
@@ -765,6 +801,7 @@ export function createProjectEngine({
       currentProjectLiveConversionPlan: currentProjectLiveConversionPlan ? copy(currentProjectLiveConversionPlan) : null,
       projectOpportunityLinks: opportunityLinks.map(copy),
       projectQuoteLinks: quoteLinks.map(copy),
+      projectVerticalPackLinks: projectVerticalPackLinks.map(copy),
       projectAgreements: agreements.map(copy),
       projectEngagements: engagements.map(copy),
       projectWorkModels: workModels.map(copy),
@@ -794,6 +831,7 @@ export function createProjectEngine({
         fieldSummary,
         husSummary,
         personalliggareSummary,
+        id06Summary,
         egenkontrollSummary,
         kalkylSummary,
         openProjectDeviationCount: openProjectDeviations.length,
@@ -1564,6 +1602,66 @@ export function createProjectEngine({
       entityId: record.projectQuoteLinkId,
       projectId: record.projectId,
       explanation: `Linked quote ${record.externalQuoteRef || record.sourceQuoteId} to ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
+  function listProjectVerticalPackLinks({ companyId, projectId, packType = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedPackType = normalizeProjectVerticalPackType(packType, "project_vertical_pack_type_invalid");
+    return (state.projectVerticalPackLinkIdsByProject.get(project.projectId) || [])
+      .map((linkId) => state.projectVerticalPackLinks.get(linkId))
+      .filter(Boolean)
+      .filter((record) => (resolvedPackType ? record.packType === resolvedPackType : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.linkId.localeCompare(right.linkId))
+      .map(copy);
+  }
+
+  function linkVerticalPack({
+    companyId,
+    projectId,
+    linkId = null,
+    packType,
+    verticalRefs = {},
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedPackType = normalizeProjectVerticalPackType(packType, "project_vertical_pack_type_required");
+    const resolvedVerticalRefs = normalizeVerticalPackRefs(verticalRefs);
+    const scopedKey = buildProjectVerticalPackLinkScopedKey(project.companyId, project.projectId, resolvedPackType, resolvedVerticalRefs);
+    const existingLinkId = state.projectVerticalPackLinkIdsByScopedKey.get(scopedKey);
+    if (existingLinkId) {
+      const existing = state.projectVerticalPackLinks.get(existingLinkId);
+      if (existing) {
+        return copy(existing);
+      }
+    }
+    const record = {
+      linkId: normalizeOptionalText(linkId) || crypto.randomUUID(),
+      projectVerticalPackLinkId: null,
+      companyId: project.companyId,
+      projectId: project.projectId,
+      packType: resolvedPackType,
+      verticalRefs: resolvedVerticalRefs,
+      financeTruthOwner: "projects",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    record.projectVerticalPackLinkId = record.linkId;
+    state.projectVerticalPackLinks.set(record.linkId, record);
+    appendToIndex(state.projectVerticalPackLinkIdsByProject, project.projectId, record.linkId);
+    state.projectVerticalPackLinkIdsByScopedKey.set(scopedKey, record.linkId);
+    pushAudit(state, clock, {
+      companyId: project.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.vertical_pack.linked",
+      entityType: "project_vertical_pack_link",
+      entityId: record.linkId,
+      projectId: project.projectId,
+      explanation: `Linked ${resolvedPackType} vertical pack to ${project.projectCode}.`
     });
     return copy(record);
   }
@@ -4865,6 +4963,7 @@ function exportProjectEvidenceBundle({
       verticalIsolationSummary: copy(workspace.verticalIsolationSummary),
       projectOpportunityLinks: copy(workspace.projectOpportunityLinks || []),
       projectQuoteLinks: copy(workspace.projectQuoteLinks || []),
+      projectVerticalPackLinks: copy(workspace.projectVerticalPackLinks || []),
       projectAgreements: copy(workspace.projectAgreements || []),
       projectEngagements: copy(workspace.projectEngagements || []),
       projectWorkModels: copy(workspace.projectWorkModels || []),
@@ -4902,6 +5001,7 @@ function exportProjectEvidenceBundle({
       fieldSummary: copy(workspace.fieldSummary),
       husSummary: copy(workspace.husSummary),
       personalliggareSummary: copy(workspace.personalliggareSummary),
+      id06Summary: copy(workspace.id06Summary),
       egenkontrollSummary: copy(workspace.egenkontrollSummary),
       kalkylSummary: copy(workspace.kalkylSummary)
     };
@@ -4919,7 +5019,10 @@ function exportProjectEvidenceBundle({
         workspace.currentProjectRevenueRecognitionPlanId,
         workspace.currentProjectWipLedgerBridgeId
         ,
-        workspace.currentProjectProfitabilityMissionControlSnapshotId
+        workspace.currentProjectProfitabilityMissionControlSnapshotId,
+        (workspace.projectVerticalPackLinks || []).length > 0
+          ? hashObject((workspace.projectVerticalPackLinks || []).map((link) => [link.linkId, link.packType]))
+          : null
       ]
         .filter(Boolean)
         .join(":") || workspace.projectStatus,
@@ -5037,6 +5140,10 @@ function exportProjectEvidenceBundle({
         (workspace.projectProfitabilityMissionControlSnapshots || []).map((snapshot) => ({
           objectType: "project_profitability_mission_control_snapshot",
           objectId: snapshot.projectProfitabilityMissionControlSnapshotId
+        })),
+        (workspace.projectVerticalPackLinks || []).map((link) => ({
+          objectType: "project_vertical_pack_link",
+          objectId: link.linkId
         })),
         (workspace.projectInvoiceSimulations || []).map((simulation) => ({
           objectType: "project_invoice_simulation",
@@ -5588,6 +5695,54 @@ function summarizePersonalliggareWorkspace({ companyId, projectId, personalligga
   };
 }
 
+function summarizeId06Workspace({ companyId, projectId, workModels = [], personalliggarePlatform, id06Platform }) {
+  const projectSites = personalliggarePlatform?.listConstructionSites
+    ? personalliggarePlatform.listConstructionSites({ companyId }).filter((record) => record.projectId === projectId)
+    : [];
+  const requiresId06Flag = (Array.isArray(workModels) ? workModels : []).some((record) => record?.requiresId06 === true);
+  const workplaces = projectSites.map((site) => {
+    const bindings = id06Platform?.listWorkplaceBindings
+      ? id06Platform.listWorkplaceBindings({ companyId, workplaceId: site.workplaceId })
+      : [];
+    const workPasses = id06Platform?.listWorkPasses
+      ? id06Platform.listWorkPasses({ companyId, workplaceId: site.workplaceId })
+      : [];
+    const evidenceBundles = id06Platform?.listEvidenceBundles
+      ? id06Platform.listEvidenceBundles({ companyId, workplaceId: site.workplaceId })
+      : [];
+    const attendanceMirrors = id06Platform?.listAttendanceMirrors
+      ? id06Platform.listAttendanceMirrors({ companyId, workplaceId: site.workplaceId })
+      : [];
+    const activeBindings = bindings.filter((binding) => binding.status === "active");
+    const issuedWorkPasses = workPasses.filter((workPass) => workPass.status === "issued");
+    const attentionRequired =
+      (requiresId06Flag && activeBindings.length === 0)
+      || (activeBindings.length > 0 && issuedWorkPasses.length === 0);
+    return {
+      workplaceId: site.workplaceId,
+      workplaceIdentifier: site.workplaceIdentifier,
+      constructionSiteId: site.constructionSiteId,
+      activeBindingCount: activeBindings.length,
+      workPassCount: issuedWorkPasses.length,
+      evidenceBundleCount: evidenceBundles.length,
+      attendanceMirrorCount: attendanceMirrors.length,
+      attentionRequired
+    };
+  });
+  return {
+    projectId,
+    financeTruthOwner: "projects",
+    requiresId06Flag,
+    workplaceCount: workplaces.length,
+    activeBindingCount: workplaces.reduce((sum, workplace) => sum + workplace.activeBindingCount, 0),
+    workPassCount: workplaces.reduce((sum, workplace) => sum + workplace.workPassCount, 0),
+    evidenceBundleCount: workplaces.reduce((sum, workplace) => sum + workplace.evidenceBundleCount, 0),
+    attendanceMirrorCount: workplaces.reduce((sum, workplace) => sum + workplace.attendanceMirrorCount, 0),
+    attentionCount: workplaces.filter((workplace) => workplace.attentionRequired).length,
+    workplaces
+  };
+}
+
 function summarizeEgenkontrollWorkspace({ companyId, projectId, egenkontrollPlatform }) {
   const instances = egenkontrollPlatform?.listChecklistInstances
     ? egenkontrollPlatform.listChecklistInstances({ companyId, projectId })
@@ -5947,6 +6102,7 @@ function buildWorkspaceIndicatorStrip({
   fieldSummary,
   husSummary,
   personalliggareSummary,
+  id06Summary,
   egenkontrollSummary,
   kalkylSummary,
   openProjectDeviationCount,
@@ -6003,6 +6159,11 @@ function buildWorkspaceIndicatorStrip({
       count: personalliggareSummary.alertCount
     },
     {
+      indicatorCode: "id06",
+      status: id06Summary.attentionCount > 0 ? "warning" : "ok",
+      count: id06Summary.activeBindingCount
+    },
+    {
       indicatorCode: "egenkontroll",
       status: egenkontrollSummary.openDeviationCount > 0 ? "warning" : "ok",
       count: egenkontrollSummary.openDeviationCount
@@ -6020,14 +6181,20 @@ function buildWorkspaceIndicatorStrip({
   ];
 }
 
-function buildProjectVerticalIsolationSummary({ workModels }) {
+function buildProjectVerticalIsolationSummary({ workModels, projectVerticalPackLinks = [] }) {
   const verticalWorkModels = (Array.isArray(workModels) ? workModels : []).filter((record) => isProjectVerticalWorkModelCode(record.modelCode));
   const generalWorkModels = (Array.isArray(workModels) ? workModels : []).filter((record) => !isProjectVerticalWorkModelCode(record.modelCode));
+  const linkedPackTypes = Array.from(
+    new Set((Array.isArray(projectVerticalPackLinks) ? projectVerticalPackLinks : []).map((record) => normalizeOptionalText(record?.packType)).filter(Boolean))
+  ).sort();
   return {
     financeTruthOwner: "projects",
     generalWorkModelCount: generalWorkModels.length,
     verticalWorkModelCount: verticalWorkModels.length,
-    verticalPackCodes: Array.from(new Set(verticalWorkModels.map((record) => normalizePackCode(record.operationalPackCode)).filter(Boolean))).sort()
+    verticalPackCodes: Array.from(new Set(verticalWorkModels.map((record) => normalizePackCode(record.operationalPackCode)).filter(Boolean))).sort(),
+    linkedPackTypes,
+    linkedPackLinkCount: (Array.isArray(projectVerticalPackLinks) ? projectVerticalPackLinks : []).length,
+    disableSafeFlag: true
   };
 }
 
@@ -8099,6 +8266,20 @@ function normalizePackCode(value) {
   return normalizeOptionalText(value)?.replaceAll("-", "_").replaceAll(" ", "_").toLowerCase() || null;
 }
 
+function normalizeProjectVerticalPackType(value, requiredCode) {
+  const normalized = normalizePackCode(value);
+  if (!normalized) {
+    if (requiredCode === "project_vertical_pack_type_invalid") {
+      return null;
+    }
+    throw createError(400, requiredCode, "Required value is missing.");
+  }
+  if (!PROJECT_VERTICAL_PACK_TYPES.includes(normalized)) {
+    throw createError(400, "project_vertical_pack_type_invalid", `Value ${normalized} is not allowed.`);
+  }
+  return normalized;
+}
+
 function isProjectVerticalWorkModelCode(value) {
   return PROJECT_VERTICAL_WORK_MODEL_CODES.includes(requireText(value, "project_work_model_invalid"));
 }
@@ -8160,6 +8341,41 @@ function normalizeDimensions(value) {
   return copy(value);
 }
 
+function normalizeVerticalPackRefs(value) {
+  return normalizeNestedProjectRefValue(normalizeDimensions(value)) || {};
+}
+
+function normalizeNestedProjectRefValue(value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeNestedProjectRefValue(item))
+      .filter((item) => item != null)
+      .sort(compareNormalizedProjectRefValues);
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value)
+      .sort()
+      .reduce((accumulator, key) => {
+        const normalized = normalizeNestedProjectRefValue(value[key]);
+        if (normalized != null) {
+          accumulator[key] = normalized;
+        }
+        return accumulator;
+      }, {});
+  }
+  if (typeof value === "string") {
+    return normalizeOptionalText(value);
+  }
+  if (value == null) {
+    return null;
+  }
+  return value;
+}
+
+function compareNormalizedProjectRefValues(left, right) {
+  return stableStringify(left).localeCompare(stableStringify(right));
+}
+
 function assertAllowed(value, allowedValues, code) {
   const normalized = requireText(value, code);
   if (!allowedValues.includes(normalized)) {
@@ -8188,6 +8404,10 @@ function appendToIndex(map, key, value) {
   const current = map.get(key) || [];
   current.push(value);
   map.set(key, current);
+}
+
+function buildProjectVerticalPackLinkScopedKey(companyId, projectId, packType, verticalRefs) {
+  return `${toCompanyScopedKey(companyId, `${projectId}:${packType}`)}:${hashObject(verticalRefs)}`;
 }
 
 function addMoneyToMap(map, key, amount) {

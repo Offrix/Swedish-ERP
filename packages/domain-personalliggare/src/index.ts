@@ -150,6 +150,8 @@ export interface ConstructionSiteRef {
   readonly siteAddress: string;
   readonly builderOrgNo: string;
   readonly projectId: string | null;
+  readonly verticalPackLinkId: string | null;
+  readonly financeTruthOwner: "projects" | null;
   readonly industryPackCode: PersonalliggareIndustryPackCode;
   readonly siteTypeCode: string;
   readonly workplaceIdentifier: string;
