@@ -4453,13 +4453,14 @@ export function createTenantControlEngine({
 
   function assertTrialEnvironmentStatus(trialEnvironment, allowedStatuses, code) {
     const allowed = Array.isArray(allowedStatuses) ? allowedStatuses : [];
+    const evaluationTime = nowIso(clock);
     if (
       trialEnvironment.status === "active"
       && normalizeOptionalText(trialEnvironment.expiresAt)
-      && trialEnvironment.expiresAt < nowIso()
+      && trialEnvironment.expiresAt < evaluationTime
     ) {
       trialEnvironment.status = "expired";
-      trialEnvironment.updatedAt = nowIso();
+      trialEnvironment.updatedAt = evaluationTime;
     }
     if (!allowed.includes(trialEnvironment.status)) {
       throw httpError(409, code, `Trial environment status ${trialEnvironment.status} is not allowed for this operation.`);

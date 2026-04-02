@@ -48,7 +48,7 @@ test("Phase 15.1 materializes payroll, tax-account and submission reporting snap
   assert.equal(payrollSnapshot.lines.length, 1);
   assert.equal(payrollSnapshot.lines[0].metricValues.payroll_run_count, 1);
   assert.equal(payrollSnapshot.lines[0].metricValues.payroll_agi_submission_count, 1);
-  assert.equal(payrollSnapshot.lines[0].metricValues.payroll_exception_count, 1);
+  assert.equal(payrollSnapshot.lines[0].metricValues.payroll_exception_count, 2);
   assert.equal(payrollSnapshot.lines[0].metricValues.payroll_gross_earnings_amount > 0, true);
   assert.equal(payrollSnapshot.lines[0].metricValues.payroll_vacation_liability_amount > 0, true);
 
@@ -84,9 +84,19 @@ async function seedPhase15Reporting(platform) {
   });
 
   const employee = createHourlyEmployee(platform);
+  const vacationEmployee = createMonthlyVacationLiabilityEmployee(platform);
   platform.upsertEmploymentStatutoryProfile({
     companyId: COMPANY_ID,
     employmentId: employee.employment.employmentId,
+    taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
+    taxRatePercent: 30,
+    contributionClassCode: "full",
+    actorId: "phase15-unit"
+  });
+  platform.upsertEmploymentStatutoryProfile({
+    companyId: COMPANY_ID,
+    employmentId: vacationEmployee.employment.employmentId,
     taxMode: "manual_rate",
     manualRateReasonCode: "emergency_manual_transition",
     taxRatePercent: 30,
@@ -114,7 +124,7 @@ async function seedPhase15Reporting(platform) {
     companyId: COMPANY_ID,
     payCalendarId: payCalendar.payCalendarId,
     reportingPeriod: "202603",
-    employmentIds: [employee.employment.employmentId],
+    employmentIds: [employee.employment.employmentId, vacationEmployee.employment.employmentId],
     manualInputs: [
       {
         employmentId: employee.employment.employmentId,
@@ -233,7 +243,7 @@ function createHourlyEmployee(platform) {
     givenName: "Petra",
     familyName: "Report",
     identityType: "personnummer",
-    identityValue: "19800112-1238",
+    identityValue: "19900101-0017",
     workEmail: "petra.report@example.com",
     actorId: "phase15-unit"
   });
@@ -265,6 +275,114 @@ function createHourlyEmployee(platform) {
     accountNumber: "1234567890",
     bankName: "Payroll Employee Bank",
     primaryAccount: true,
+    actorId: "phase15-unit"
+  });
+  return {
+    employee,
+    employment
+  };
+}
+
+function createMonthlyVacationLiabilityEmployee(platform) {
+  const employee = platform.createEmployee({
+    companyId: COMPANY_ID,
+    givenName: "Lova",
+    familyName: "Vacationmetric",
+    identityType: "personnummer",
+    identityValue: "19800112-1238",
+    workEmail: "lova.vacationmetric@example.com",
+    actorId: "phase15-unit"
+  });
+  const employment = platform.createEmployment({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Vacation metric employee",
+    payModelCode: "monthly_salary",
+    startDate: "2025-01-01",
+    actorId: "phase15-unit"
+  });
+  platform.recordEmploymentSalaryBasis({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    validFrom: "2025-01-01",
+    salaryBasisCode: "MONTHLY_STANDARD",
+    payModelCode: "monthly_salary",
+    standardWeeklyHours: 40,
+    ordinaryHoursPerMonth: 160,
+    actorId: "phase15-unit"
+  });
+  platform.addEmploymentContract({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    validFrom: "2025-01-01",
+    salaryModelCode: "monthly_salary",
+    monthlySalary: 32000,
+    actorId: "phase15-unit"
+  });
+  platform.addEmployeeBankAccount({
+    companyId: COMPANY_ID,
+    employeeId: employee.employeeId,
+    payoutMethod: "domestic_account",
+    accountHolderName: "Lova Vacationmetric",
+    clearingNumber: "5000",
+    accountNumber: "9876543210",
+    bankName: "Phase15 Vacation Bank",
+    primaryAccount: true,
+    actorId: "phase15-unit"
+  });
+  const paidType = platform.createBalanceType({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_PAID_DAYS",
+    label: "Vacation paid days",
+    unitCode: "days",
+    negativeAllowed: false,
+    carryForwardModeCode: "none",
+    expiryModeCode: "none",
+    actorId: "phase15-unit"
+  });
+  const savedType = platform.createBalanceType({
+    companyId: COMPANY_ID,
+    balanceTypeCode: "VACATION_SAVED_DAYS",
+    label: "Vacation saved days",
+    unitCode: "days",
+    negativeAllowed: false,
+    carryForwardModeCode: "none",
+    expiryModeCode: "fixed_date",
+    expiryMonthDay: "03-31",
+    expiryYearOffset: 5,
+    actorId: "phase15-unit"
+  });
+  platform.createVacationBalanceProfile({
+    companyId: COMPANY_ID,
+    vacationBalanceProfileCode: "SEMESTERLAGEN",
+    label: "Semesterlagen",
+    paidDaysBalanceTypeCode: paidType.balanceTypeCode,
+    savedDaysBalanceTypeCode: savedType.balanceTypeCode,
+    vacationYearStartMonthDay: "04-01",
+    minimumPaidDaysToRetain: 20,
+    maxSavedDaysPerYear: 5,
+    actorId: "phase15-unit"
+  });
+  const paidAccount = platform.openBalanceAccount({
+    companyId: COMPANY_ID,
+    balanceTypeCode: paidType.balanceTypeCode,
+    ownerTypeCode: "employment",
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    actorId: "phase15-unit"
+  });
+  platform.recordBalanceTransaction({
+    companyId: COMPANY_ID,
+    balanceAccountId: paidAccount.balanceAccountId,
+    effectiveDate: "2025-04-01",
+    transactionTypeCode: "baseline",
+    quantityDelta: 2,
+    sourceDomainCode: "PAYROLL_MIGRATION",
+    sourceObjectType: "migration_batch",
+    sourceObjectId: "phase15-vacation-paid-baseline",
     actorId: "phase15-unit"
   });
   return {

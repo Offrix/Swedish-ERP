@@ -96,6 +96,16 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
         signatoryRole: "ceo"
       }
     });
+    await requestJson(`${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/versions/${annualPackage.currentVersion.versionId}/signatories`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        companyUserId: DEMO_IDS.companyUserId,
+        signatoryRole: "board_member"
+      }
+    });
 
     const signed = await requestJson(`${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/versions/${annualPackage.currentVersion.versionId}/sign`, {
       method: "POST",
@@ -106,6 +116,14 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
       }
     });
     assert.equal(signed.status, "signed");
+    assert.equal(signed.currentVersion.packageStatus, "signed");
+    assert.equal(signed.signatories.length, 2);
+    assert.equal(signed.signatories.every((candidate) => candidate.status === "signed"), true);
+    assert.equal(
+      signed.signatories.map((candidate) => candidate.signatoryRole).sort().join(","),
+      "board_member,ceo"
+    );
+    assert.equal(signed.currentEvidencePack.signatureArchiveRefs.length, 2);
 
     platform.reopenAccountingPeriod({
       companyId: DEMO_IDS.companyId,
@@ -150,6 +168,57 @@ test("Phase 12.1 API creates annual report package, signs it and versions change
     });
     assert.equal(forbiddenList.status, 403);
     await forbiddenList.json();
+  } finally {
+    await stopServer(server);
+  }
+});
+
+test("Phase 12.4 API rejects incomplete K3 annual section sets", async () => {
+  const platform = createApiPlatform({
+    clock: () => new Date("2026-03-22T15:15:00Z")
+  });
+  const server = createApiServer({ platform });
+  await new Promise((resolve) => server.listen(0, resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const adminToken = await loginWithStrongAuth({
+      baseUrl,
+      platform,
+      companyId: DEMO_IDS.companyId,
+      email: DEMO_ADMIN_EMAIL
+    });
+    platform.installLedgerCatalog({
+      companyId: DEMO_IDS.companyId,
+      actorId: "phase12-4-api"
+    });
+    const period = platform.ensureAccountingYearPeriod({
+      companyId: DEMO_IDS.companyId,
+      fiscalYear: 2026,
+      actorId: "phase12-4-api"
+    });
+    postJournal(platform, "phase12-4-api-income-1", 5300);
+    hardCloseYear(platform, period.accountingPeriodId);
+
+    await requestJson(`${baseUrl}/v1/annual-reporting/packages`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        accountingPeriodId: period.accountingPeriodId,
+        profileCode: "k3",
+        textSections: {
+          management_report: "K3 annual report",
+          accounting_policies: "K3 policies"
+        },
+        noteSections: {
+          notes_bundle: "K3 notes"
+        }
+      }
+    }).then((payload) => {
+      assert.equal(payload.error, "annual_report_profile_sections_incomplete");
+    });
   } finally {
     await stopServer(server);
   }

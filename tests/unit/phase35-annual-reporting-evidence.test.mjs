@@ -58,7 +58,12 @@ test("Step 35 annual reporting emits evidence packs and opens explicit correctio
     profileCode: "k2",
     actorId: DEMO_IDS.userId,
     textSections: {
-      management_report: "Evidence baseline"
+      management_report: "Evidence baseline",
+      accounting_policies: "Evidence K2 policies"
+    },
+    noteSections: {
+      notes_bundle: "Evidence notes",
+      simplified_notes: "Evidence simplified notes"
     }
   });
   const evidencePacks = platform.listAnnualEvidencePacks({
@@ -70,7 +75,12 @@ test("Step 35 annual reporting emits evidence packs and opens explicit correctio
     packageId: annualPackage.packageId,
     actorId: DEMO_IDS.userId,
     textSections: {
-      management_report: "Evidence correction"
+      management_report: "Evidence correction",
+      accounting_policies: "Evidence correction policies"
+    },
+    noteSections: {
+      notes_bundle: "Evidence correction notes",
+      simplified_notes: "Evidence correction simplified notes"
     }
   });
 

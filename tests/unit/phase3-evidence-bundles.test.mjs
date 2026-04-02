@@ -67,7 +67,12 @@ test("Phase 3.2 central evidence bundles cover annual reporting and regulated su
     profileCode: "k2",
     actorId: DEMO_IDS.userId,
     textSections: {
-      management_report: "Phase 3.2 evidence baseline"
+      management_report: "Phase 3.2 evidence baseline",
+      accounting_policies: "Phase 3.2 K2 policies"
+    },
+    noteSections: {
+      notes_bundle: "Phase 3.2 notes",
+      simplified_notes: "Phase 3.2 simplified notes"
     }
   });
   const annualEvidence = platform.getEvidenceBundle({

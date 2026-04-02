@@ -215,6 +215,23 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
     assert.equal(typeof createdSubmission.currentVersion.providerBaselineRefs[0].providerBaselineId, "string");
     assert.equal(typeof createdSubmission.currentVersion.providerBaselineRefs[0].providerBaselineVersion, "string");
     assert.equal(typeof createdSubmission.currentVersion.providerBaselineRefs[0].providerBaselineChecksum, "string");
+    assert.equal(createdSubmission.currentVersion.evidenceBundleId != null, true);
+    assert.equal(
+      createdSubmission.currentVersion.payloadJson.employerTotals.field497SummaSkatteavdrag,
+      Math.trunc(
+        createdSubmission.currentVersion.payloadJson.totals.preliminaryTaxAmount
+          + createdSubmission.currentVersion.payloadJson.totals.sinkTaxAmount
+          + createdSubmission.currentVersion.payloadJson.totals.aSinkTaxAmount
+      )
+    );
+    assert.equal(
+      createdSubmission.currentVersion.payloadJson.employerTotals.field487SummaArbetsgivaravgifterOchSlf > 0,
+      true
+    );
+    const initialSpecificationNumbers = new Map(
+      createdSubmission.currentVersion.employees.map((employee) => [employee.employeeId, employee.payloadJson.specificationNumber])
+    );
+    assert.equal(new Set(initialSpecificationNumbers.values()).size, initialSpecificationNumbers.size);
 
     const validated = await requestJson(
       baseUrl,
@@ -228,6 +245,7 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
       }
     );
     assert.equal(validated.currentVersion.state, "validated");
+    assert.equal(validated.currentVersion.evidenceBundleId !== createdSubmission.currentVersion.evidenceBundleId, true);
 
     await requestJson(baseUrl, `/v1/payroll/agi-submissions/${createdSubmission.agiSubmissionId}/ready-for-sign`, {
       method: "POST",
@@ -256,6 +274,22 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
       }
     });
     assert.equal(accepted.currentVersion.state, "accepted");
+    assert.equal(typeof accepted.currentVersion.authoritySubmissionId, "string");
+    const bridgedSubmissions = await requestJson(
+      baseUrl,
+      `/v1/submissions?companyId=${COMPANY_ID}&submissionType=agi_monthly`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(bridgedSubmissions.items.length, 1);
+    assert.equal(bridgedSubmissions.items[0].submissionId, accepted.currentVersion.authoritySubmissionId);
+    assert.equal(bridgedSubmissions.items[0].sourceObjectType, "payroll_agi_submission_version");
+    assert.equal(bridgedSubmissions.items[0].sourceObjectId, accepted.currentVersion.agiSubmissionVersionId);
+    assert.deepEqual(
+      bridgedSubmissions.items[0].receipts.map((receipt) => receipt.receiptType),
+      ["technical_ack", "business_ack"]
+    );
 
     const leaveLocks = platform.listLeaveSignalLocks({
       companyId: COMPANY_ID,
@@ -310,6 +344,11 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
       }
     );
     assert.equal(correctionDraft.currentVersion.versionNo, 2);
+    assert.equal(correctionDraft.currentVersion.evidenceBundleId != null, true);
+    const correctionSpecificationNumbers = new Map(
+      correctionDraft.currentVersion.employees.map((employee) => [employee.employeeId, employee.payloadJson.specificationNumber])
+    );
+    assert.deepEqual(correctionSpecificationNumbers, initialSpecificationNumbers);
 
     await requestJson(baseUrl, `/v1/payroll/agi-submissions/${createdSubmission.agiSubmissionId}/validate`, {
       method: "POST",
@@ -345,6 +384,28 @@ test("Phase 8.2 API manages statutory profiles and AGI submissions with correcti
     );
     assert.equal(correctionSubmitted.currentVersion.state, "partially_rejected");
     assert.equal(correctionSubmitted.currentVersion.errors.length, 1);
+    assert.equal(typeof correctionSubmitted.currentVersion.authoritySubmissionId, "string");
+
+    const bridgedCorrections = await requestJson(
+      baseUrl,
+      `/v1/submissions?companyId=${COMPANY_ID}&submissionType=agi_monthly`,
+      {
+        token: sessionToken
+      }
+    );
+    assert.equal(bridgedCorrections.items.length, 2);
+    const bridgedAccepted = bridgedCorrections.items.find(
+      (candidate) => candidate.submissionId === accepted.currentVersion.authoritySubmissionId
+    );
+    const bridgedCorrection = bridgedCorrections.items.find(
+      (candidate) => candidate.submissionId === correctionSubmitted.currentVersion.authoritySubmissionId
+    );
+    assert.equal(bridgedAccepted.status, "superseded");
+    assert.equal(bridgedCorrection.correctionOfSubmissionId, bridgedAccepted.submissionId);
+    assert.deepEqual(
+      bridgedCorrection.receipts.map((receipt) => receipt.receiptType),
+      ["technical_ack", "business_nack"]
+    );
 
     const fetched = await requestJson(
       baseUrl,

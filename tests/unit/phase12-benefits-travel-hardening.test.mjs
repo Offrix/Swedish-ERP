@@ -4,11 +4,12 @@ import { createHrPlatform } from "../../packages/domain-hr/src/index.mjs";
 import { createTimePlatform } from "../../packages/domain-time/src/index.mjs";
 import { createBenefitsPlatform } from "../../packages/domain-benefits/src/index.mjs";
 import { createTravelPlatform } from "../../packages/domain-travel/src/index.mjs";
+import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Phase 12.4 payroll input snapshot carries benefit offset and travel expense-split review state", () => {
+test("Phase 11.3 payroll input snapshot carries benefit offsets and separates travel receipt VAT from reimbursement", () => {
   const fixedNow = new Date("2026-03-28T12:00:00Z");
   const hrPlatform = createHrPlatform({ clock: () => fixedNow });
   const timePlatform = createTimePlatform({
@@ -20,10 +21,14 @@ test("Phase 12.4 payroll input snapshot carries benefit offset and travel expens
     bootstrapScenarioCode: "test_default_demo",
     hrPlatform
   });
+  const vatPlatform = createVatPlatform({
+    clock: () => fixedNow
+  });
   const travelPlatform = createTravelPlatform({
     clock: () => fixedNow,
     bootstrapScenarioCode: "test_default_demo",
-    hrPlatform
+    hrPlatform,
+    vatPlatform
   });
   const payrollPlatform = createPayrollPlatform({
     clock: () => fixedNow,
@@ -102,7 +107,11 @@ test("Phase 12.4 payroll input snapshot carries benefit offset and travel expens
         expenseType: "parking",
         paymentMethod: "private_card",
         amount: 140,
-        currencyCode: "SEK"
+        currencyCode: "SEK",
+        sellerCountry: "SE",
+        goodsOrServices: "services",
+        amountExVat: 112,
+        vatRate: 25
       },
       {
         date: "2026-03-10",
@@ -131,6 +140,10 @@ test("Phase 12.4 payroll input snapshot carries benefit offset and travel expens
   const employmentSnapshot = snapshot.sourceSnapshot[employee.employment.employmentId];
   assert.equal(employmentSnapshot.benefitEvents[0].offsetBreakdown.totalOffsetValue, 500);
   assert.equal(employmentSnapshot.benefitEvents[0].reviewCodes.includes("benefit_mixed_offset_review"), true);
+  assert.equal(employmentSnapshot.travelClaims[0].expenseReimbursementAmount, 140);
+  assert.equal(employmentSnapshot.travelClaims[0].deductibleExpenseVatAmount, 28);
+  assert.equal(employmentSnapshot.travelClaims[0].expenseVatDecidedCount, 1);
+  assert.equal(employmentSnapshot.travelClaims[0].expenseVatNotClassifiedCount, 1);
   assert.equal(employmentSnapshot.travelClaims[0].expenseSplit.companyCardExpenseAmount, 600);
   assert.equal(employmentSnapshot.travelClaims[0].reviewCodes.includes("travel_expense_split_review"), true);
 });

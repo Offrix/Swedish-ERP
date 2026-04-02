@@ -58,7 +58,8 @@ export const POSTING_SOURCE_TYPES = Object.freeze([
   "YEAR_END_TRANSFER",
   "ROT_RUT_CLAIM",
   "PENSION_REPORT",
-  "PROJECT_WIP"
+  "PROJECT_WIP",
+  "OWNER_DISTRIBUTION"
 ]);
 export const POSTING_JOURNAL_TYPES = Object.freeze([
   "operational_posting",
@@ -307,6 +308,16 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultSignalCode: "accrual.booked"
   }),
   Object.freeze({
+    recipeCode: "HUS_CLAIM_SUBMITTED",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "B",
+    defaultSignalCode: "hus.claim.submitted"
+  }),
+  Object.freeze({
     recipeCode: "HUS_CLAIM_ACCEPTED",
     version: "2026.1",
     sourceDomain: "hus",
@@ -325,6 +336,36 @@ export const POSTING_RECIPE_DEFINITIONS = Object.freeze([
     defaultVoucherSeriesPurposeCode: null,
     fallbackVoucherSeriesCode: "B",
     defaultSignalCode: "hus.claim.partially_accepted"
+  }),
+  Object.freeze({
+    recipeCode: "HUS_CLAIM_DIFFERENCE_CUSTOMER_RECEIVABLE",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "V",
+    defaultSignalCode: "hus.claim.difference.customer_reinvoice"
+  }),
+  Object.freeze({
+    recipeCode: "HUS_CLAIM_DIFFERENCE_WRITEOFF",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "V",
+    defaultSignalCode: "hus.claim.difference.written_off"
+  }),
+  Object.freeze({
+    recipeCode: "HUS_PAYOUT_SETTLED",
+    version: "2026.1",
+    sourceDomain: "hus",
+    journalType: "settlement_posting",
+    allowedSourceTypes: Object.freeze(["ROT_RUT_CLAIM"]),
+    defaultVoucherSeriesPurposeCode: null,
+    fallbackVoucherSeriesCode: "B",
+    defaultSignalCode: "hus.payout.settled"
   }),
   Object.freeze({
     recipeCode: "HUS_RECOVERY_CONFIRMED",

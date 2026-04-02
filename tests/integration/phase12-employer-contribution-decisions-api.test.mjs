@@ -8,7 +8,7 @@ import { stopServer } from "../../scripts/lib/repo.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Phase 12.2 API manages employer contribution decisions and pay runs consume approved vaxa snapshots", async () => {
+test("Phase 11.2 API manages employer contribution decisions and pay runs consume official 2026 snapshots", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-28T10:15:00Z")
   });
@@ -32,6 +32,100 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
       })
     ).items[0];
 
+    const standardEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Frida",
+      familyName: "Fullapi",
+      identityValue: "19920303-1118",
+      dateOfBirth: "1992-03-03"
+    });
+    const standardRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [standardEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(standardRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "full");
+    assert.equal(standardRun.payslips[0].totals.employerContributionPreviewAmount, 9426);
+    assert.equal(standardRun.payslips[0].totals.employerContributionDecision.outputs.rulepackRef.rulepackId, "payroll-employer-contribution-se-2026.1");
+
+    const olderEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Algot",
+      familyName: "Alderapi",
+      identityValue: "19590203-1110",
+      dateOfBirth: "1959-02-03"
+    });
+    const olderRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [olderEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(olderRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "reduced_age_pension_only");
+    assert.equal(olderRun.payslips[0].totals.employerContributionPreviewAmount, 3063);
+
+    const youthEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Ylva",
+      familyName: "Youthapi",
+      identityValue: "20050512-2226",
+      dateOfBirth: "2005-05-12"
+    });
+    const youthRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202604",
+        employmentIds: [youthEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "temporary_youth_reduction");
+    assert.equal(youthRun.payslips[0].totals.employerContributionPreviewAmount, 6773.5);
+    assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.thresholds.baseLimitAmount, 25000);
+    assert.deepEqual(
+      youthRun.payslips[0].totals.employerContributionDecision.outputs.contributionComponents.map((component) => component.componentCode),
+      ["temporary_youth_reduction_band", "standard_overflow_band"]
+    );
+
+    const noContributionEmployee = await createMonthlyEmployee({
+      baseUrl,
+      token: sessionToken,
+      givenName: "Nils",
+      familyName: "Nollapi",
+      identityValue: "19370112-4442",
+      dateOfBirth: "1937-01-12"
+    });
+    const noContributionRun = await requestJson(baseUrl, "/v1/payroll/pay-runs", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        payCalendarId: payCalendar.payCalendarId,
+        reportingPeriod: "202603",
+        employmentIds: [noContributionEmployee.employment.employmentId]
+      }
+    });
+    assert.equal(noContributionRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "no_contribution");
+    assert.equal(noContributionRun.payslips[0].totals.employerContributionPreviewAmount, 0);
+
     const employee = await createMonthlyEmployee({
       baseUrl,
       token: sessionToken,
@@ -40,6 +134,48 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
       identityValue: "19900112-7779",
       dateOfBirth: "1990-01-12"
     });
+    const invalidVaxa = await requestJson(baseUrl, "/v1/payroll/employer-contribution-decisions", {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 400,
+      body: {
+        companyId: COMPANY_ID,
+        employmentId: employee.employment.employmentId,
+        decisionType: "vaxa",
+        ageBucket: "standard",
+        legalBasisCode: "se_vaxa_2026_refund_credit",
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        fullRate: 30,
+        thresholds: {
+          thresholdModeCode: "monthly_base_limit",
+          baseLimitAmount: 25000,
+          thresholdBasisCode: "employer_contribution_base",
+          periodCode: "month",
+          currencyCode: "SEK"
+        },
+        reducedComponents: [{
+          componentCode: "vaxa_reduced_band",
+          ratePercent: 10.21,
+          baseLimitAmount: 25000,
+          appliesToCode: "threshold_band",
+          refundProcessCode: "tax_account_credit_2026"
+        }],
+        vaxaEligibilityProfile: {
+          eligibilitySourceCode: "manual_review",
+          supportWindowMonths: 24,
+          supportEmployeeCountLimit: 2,
+          supportMode: "tax_account_credit",
+          refundProcessCode: "tax_account_credit_2026",
+          deMinimisAidTracked: true
+        },
+        decisionSource: "support_review",
+        decisionReference: "vaxa-api-2026-invalid-rate",
+        evidenceRef: "evidence-vaxa-api-2026-invalid-rate"
+      }
+    });
+    assert.equal(invalidVaxa.error, "employer_contribution_decision_snapshot_full_rate_mismatch");
+
     const vaxaDraft = await requestJson(baseUrl, "/v1/payroll/employer-contribution-decisions", {
       method: "POST",
       token: sessionToken,
@@ -49,16 +185,31 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
         employmentId: employee.employment.employmentId,
         decisionType: "vaxa",
         ageBucket: "standard",
-        legalBasisCode: "se_vaxa_2025_extended",
+        legalBasisCode: "se_vaxa_2026_refund_credit",
         validFrom: "2026-01-01",
         validTo: "2026-12-31",
-        baseLimit: 25000,
         fullRate: 31.42,
-        reducedRate: 10.21,
-        specialConditions: {
+        thresholds: {
+          thresholdModeCode: "monthly_base_limit",
+          baseLimitAmount: 25000,
+          thresholdBasisCode: "employer_contribution_base",
+          periodCode: "month",
+          currencyCode: "SEK"
+        },
+        reducedComponents: [{
+          componentCode: "vaxa_reduced_band",
+          ratePercent: 10.21,
+          baseLimitAmount: 25000,
+          appliesToCode: "threshold_band",
+          refundProcessCode: "tax_account_credit_2026"
+        }],
+        vaxaEligibilityProfile: {
+          eligibilitySourceCode: "manual_review",
           supportWindowMonths: 24,
           supportEmployeeCountLimit: 2,
-          supportMode: "tax_account_credit"
+          supportMode: "tax_account_credit",
+          refundProcessCode: "tax_account_credit_2026",
+          deMinimisAidTracked: true
         },
         decisionSource: "support_review",
         decisionReference: "vaxa-api-2026-001",
@@ -66,6 +217,11 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
       }
     });
     assert.equal(vaxaDraft.status, "draft");
+    assert.equal(vaxaDraft.baseLimit, 25000);
+    assert.equal(vaxaDraft.reducedRate, 10.21);
+    assert.equal(vaxaDraft.thresholds.baseLimitAmount, 25000);
+    assert.equal(vaxaDraft.vaxaEligibilityProfile.supportMode, "tax_account_credit");
+    assert.equal(vaxaDraft.rulepackRef.rulepackId, "payroll-employer-contribution-se-2026.1");
 
     const listed = await requestJson(
       baseUrl,
@@ -79,6 +235,7 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
       listed.items[0].employerContributionDecisionSnapshotId,
       vaxaDraft.employerContributionDecisionSnapshotId
     );
+    assert.equal(listed.items[0].reducedComponents[0].componentCode, "vaxa_reduced_band");
 
     const approveResponse = await fetch(
       `${baseUrl}/v1/payroll/employer-contribution-decisions/${vaxaDraft.employerContributionDecisionSnapshotId}/approve`,
@@ -117,6 +274,12 @@ test("Phase 12.2 API manages employer contribution decisions and pay runs consum
     assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "vaxa");
     assert.equal(payRun.payslips[0].totals.employerContributionPreviewAmount, 4123.5);
     assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.taxAccountReliefAmount, 5302.5);
+    assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.thresholds.baseLimitAmount, 25000);
+    assert.equal(
+      payRun.payslips[0].totals.employerContributionDecision.outputs.reducedComponents[0].refundProcessCode,
+      "tax_account_credit_2026"
+    );
+    assert.equal(payRun.payslips[0].totals.employerContributionDecision.outputs.rulepackRef.rulepackId, "payroll-employer-contribution-se-2026.1");
   } finally {
     await stopServer(server);
   }

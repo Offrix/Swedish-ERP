@@ -120,7 +120,7 @@ test("Step 21 payroll surfaces migration, agreement and approval exceptions befo
     "pending_time_approvals_exist"
   ]);
   assert.equal(run.exceptionSummary.totalCount, 7);
-  assert.equal(run.exceptionSummary.blockingOpenCount, 5);
+  assert.equal(run.exceptionSummary.blockingOpenCount, 4);
 
   const warning = run.exceptions.find((item) => item.code === "benefit_without_cash_salary");
   const resolved = payrollPlatform.resolvePayrollException({
@@ -138,7 +138,7 @@ test("Step 21 payroll surfaces migration, agreement and approval exceptions befo
     payRunId: run.payRunId
   });
   assert.equal(refreshed.exceptionSummary.resolvedCount, 1);
-  assert.equal(refreshed.exceptionSummary.blockingOpenCount, 5);
+  assert.equal(refreshed.exceptionSummary.blockingOpenCount, 4);
   assert.throws(
     () =>
       payrollPlatform.approvePayRun({

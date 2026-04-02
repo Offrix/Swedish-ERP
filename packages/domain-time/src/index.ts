@@ -3,6 +3,13 @@ export type TimeBalanceType = "flex_minutes" | "comp_minutes" | "overtime_minute
 export type TimeEntrySourceType = "manual" | "clock" | "import";
 export type TimeEntryStatus = "draft" | "submitted" | "approved" | "rejected";
 export type LeaveSignalType = "none" | "parental_benefit" | "temporary_parental_benefit";
+export type LeavePayrollTreatmentCode =
+  | "none"
+  | "sick_leave"
+  | "vacation"
+  | "care_of_child"
+  | "parental_leave"
+  | "leave_without_pay";
 export type LeaveEntryStatus = "draft" | "submitted" | "approved" | "rejected";
 export type LeaveSignalLockState = "ready_for_sign" | "signed" | "submitted";
 export type ApprovedTimeSetStatus = "approved" | "locked";
@@ -190,6 +197,7 @@ export interface LeaveType {
   readonly leaveTypeCode: string;
   readonly displayName: string;
   readonly signalType: LeaveSignalType;
+  readonly payrollTreatmentCode: LeavePayrollTreatmentCode;
   readonly requiresManagerApproval: boolean;
   readonly requiresSupportingDocument: boolean;
   readonly active: boolean;
@@ -245,6 +253,7 @@ export interface AbsenceDecision {
   readonly leaveEntryId: string;
   readonly leaveTypeId: string;
   readonly leaveTypeCode: string;
+  readonly payrollTreatmentCode: LeavePayrollTreatmentCode;
   readonly decisionStatus: "approved" | "rejected";
   readonly reportingPeriod: string | null;
   readonly signalType: LeaveSignalType;
@@ -266,6 +275,7 @@ export interface LeaveEntry {
   readonly employmentId: string;
   readonly leaveTypeId: string;
   readonly leaveTypeCode: string;
+  readonly payrollTreatmentCode: LeavePayrollTreatmentCode;
   readonly status: LeaveEntryStatus;
   readonly startDate: string;
   readonly endDate: string;

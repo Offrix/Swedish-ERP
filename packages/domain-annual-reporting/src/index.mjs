@@ -6,6 +6,8 @@ export const ANNUAL_REPORT_PROFILE_CODES = Object.freeze(["k1", "k2", "k3"]);
 export const ANNUAL_REPORT_PACKAGE_STATUSES = Object.freeze(["draft", "ready_for_signature", "signed", "submitted", "locked", "superseded"]);
 export const ANNUAL_REPORT_SIGNATORY_STATUSES = Object.freeze(["invited", "signed", "declined", "superseded"]);
 export const TAX_DECLARATION_PACKAGE_STATUSES = Object.freeze(["ready", "submitted", "accepted", "rejected", "superseded"]);
+export const CURRENT_TAX_COMPUTATION_STATUSES = Object.freeze(["prepared"]);
+export const CURRENT_TAX_DETERMINATION_STATUSES = Object.freeze(["computed", "not_applicable"]);
 export const ANNUAL_REPORT_SIGNATORY_ROLE_CODES = Object.freeze([
   "board_member",
   "ceo",
@@ -13,6 +15,10 @@ export const ANNUAL_REPORT_SIGNATORY_ROLE_CODES = Object.freeze([
   "owner_proprietor",
   "partner_signatory"
 ]);
+const CORPORATE_INCOME_TAX_RATE_PERCENT_2026 = 20.6;
+const CORPORATE_INCOME_TAX_RATE_DECIMAL_2026 = 0.206;
+const ENTITY_LEVEL_CURRENT_TAX_LEGAL_FORM_CODES = Object.freeze(["AKTIEBOLAG", "EKONOMISK_FORENING"]);
+const OWNER_TAXED_ENTITY_LEGAL_FORM_CODES = Object.freeze(["ENSKILD_NARINGSVERKSAMHET", "HANDELSBOLAG", "KOMMANDITBOLAG"]);
 export const ANNUAL_REPORTING_PROVIDER_BASELINES = Object.freeze([
   Object.freeze({
     providerBaselineId: "annual-declaration-json-se-2026.1",
@@ -100,6 +106,7 @@ export function createAnnualReportingEngine({
     evidencePacks: new Map(),
     signatories: new Map(),
     submissionEvents: new Map(),
+    currentTaxComputations: new Map(),
     taxPackages: new Map()
   };
 
@@ -161,6 +168,34 @@ export function createAnnualReportingEngine({
         },
         input
       ),
+    createCurrentTaxComputation: (input) =>
+      createCurrentTaxComputation(
+        {
+          state,
+          ledgerPlatform,
+          reportingPlatform,
+          orgAuthPlatform,
+          vatPlatform,
+          payrollPlatform,
+          husPlatform,
+          pensionPlatform,
+          clock
+        },
+        input
+      ),
+    listCurrentTaxComputations: ({ companyId, packageId = null } = {}) =>
+      [...state.currentTaxComputations.values()]
+        .filter((candidate) => candidate.companyId === text(companyId, "company_id_required"))
+        .filter((candidate) => (normalizeText(packageId) ? candidate.annualReportPackageId === packageId.trim() : true))
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        .map(clone),
+    getCurrentTaxComputation: ({ companyId, currentTaxComputationId } = {}) => {
+      const record = state.currentTaxComputations.get(text(currentTaxComputationId, "current_tax_computation_id_required"));
+      if (!record || record.companyId !== text(companyId, "company_id_required")) {
+        throw error(404, "current_tax_computation_not_found", "Current tax computation was not found.");
+      }
+      return clone(record);
+    },
     listTaxDeclarationPackages: ({ companyId, packageId = null } = {}) =>
       [...state.taxPackages.values()]
         .filter((candidate) => candidate.companyId === text(companyId, "company_id_required"))
@@ -197,6 +232,7 @@ export function createAnnualReportingEngine({
         evidencePacks: [...state.evidencePacks.values()],
         signatories: [...state.signatories.values()],
         submissionEvents: [...state.submissionEvents.values()],
+        currentTaxComputations: [...state.currentTaxComputations.values()],
         taxDeclarationPackages: [...state.taxPackages.values()],
         providerBaselines: providerBaselines.snapshotProviderBaselineRegistry()
       })
@@ -477,60 +513,86 @@ function signAnnualReportVersion({ state, orgAuthPlatform, integrationPlatform, 
   const signatories = [...state.signatories.values()].filter(
     (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
   );
-  const signatory = signatories.find((candidate) => candidate.userId === user.userId);
-  if (!signatory) {
+  const actorSignatories = signatories.filter((candidate) => candidate.userId === user.userId);
+  if (actorSignatories.length === 0) {
     throw error(403, "annual_report_signatory_not_found", "The actor is not invited to sign this annual-report version.");
   }
-  if (signatory.status === "signed") {
+  const pendingActorSignatories = actorSignatories.filter((candidate) => candidate.status !== "signed");
+  if (pendingActorSignatories.length === 0) {
     return materializePackage(state, annualPackage);
   }
   if (!["ready_for_signature", "signed"].includes(version.packageStatus)) {
     throw error(409, "annual_report_version_not_ready_for_sign", "The annual-report version is not ready for signing.");
   }
   const now = nowIso(clock);
-  signatory.status = "signed";
-  signatory.comment = normalizeText(input.comment);
-  signatory.signedAt = now;
-  const signatureArchive = integrationPlatform?.archiveSigningEvidence
-    ? integrationPlatform.archiveSigningEvidence({
-        companyId,
-        sourceObjectType: "annual_report_version",
-        sourceObjectId: version.versionId,
-        sourceObjectVersion: String(version.versionNo),
-        signerActorId: signatory.userId,
-        evidenceBundleId: version.evidencePackId,
-        signaturePayloadHash: hashPayload({
-          packageId: annualPackage.packageId,
-          versionId: version.versionId,
-          versionChecksum: version.checksum,
-          signatoryId: signatory.signatoryId,
-          comment: signatory.comment
-        }),
-        signoffHash: version.checksum,
-        metadata: {
-          packageId: annualPackage.packageId,
-          signatoryRole: signatory.signatoryRole
-        }
-      })
-    : null;
-  signatory.signatureReference = signatureArchive?.signatureReference || `annual-signature:${version.versionId}:${signatory.signatoryId}`;
-  signatory.signatureArchiveRef = signatureArchive?.signatureArchiveRef || null;
-  signatory.evidenceArchiveId = signatureArchive?.evidenceArchiveId || null;
-  signatory.signatureArchiveChecksum = signatureArchive?.archiveChecksum || null;
-  signatory.signatureProviderCode = signatureArchive?.providerCode || null;
-  signatory.signatureProviderBaselineRef = clone(signatureArchive?.providerBaselineRef || null);
-  signatory.updatedAt = now;
-  const currentSignatories = [...state.signatories.values()].filter(
-    (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
-  );
+  const normalizedComment = normalizeText(input.comment);
+  const signedNow = pendingActorSignatories
+    .slice()
+    .sort((left, right) => left.invitedAt.localeCompare(right.invitedAt) || left.signatoryRole.localeCompare(right.signatoryRole));
+  for (const signatory of signedNow) {
+    signatory.status = "signed";
+    signatory.comment = normalizedComment;
+    signatory.signedAt = now;
+    const signatureArchive = integrationPlatform?.archiveSigningEvidence
+      ? integrationPlatform.archiveSigningEvidence({
+          companyId,
+          sourceObjectType: "annual_report_version",
+          sourceObjectId: version.versionId,
+          sourceObjectVersion: String(version.versionNo),
+          signerActorId: signatory.userId,
+          evidenceBundleId: version.evidencePackId,
+          signaturePayloadHash: hashPayload({
+            packageId: annualPackage.packageId,
+            versionId: version.versionId,
+            versionChecksum: version.checksum,
+            signatoryId: signatory.signatoryId,
+            signatoryRole: signatory.signatoryRole,
+            comment: signatory.comment
+          }),
+          signoffHash: version.checksum,
+          metadata: {
+            packageId: annualPackage.packageId,
+            signatoryRole: signatory.signatoryRole
+          }
+        })
+      : null;
+    signatory.signatureReference = signatureArchive?.signatureReference || `annual-signature:${version.versionId}:${signatory.signatoryId}`;
+    signatory.signatureArchiveRef = signatureArchive?.signatureArchiveRef || null;
+    signatory.evidenceArchiveId = signatureArchive?.evidenceArchiveId || null;
+    signatory.signatureArchiveChecksum = signatureArchive?.archiveChecksum || null;
+    signatory.signatureProviderCode = signatureArchive?.providerCode || null;
+    signatory.signatureProviderBaselineRef = clone(signatureArchive?.providerBaselineRef || null);
+    signatory.updatedAt = now;
+    appendSubmissionEvent(
+      state,
+      annualPackage.packageId,
+      version.versionId,
+      "signatory_signed",
+      version.checksum,
+      {
+        signatoryId: signatory.signatoryId,
+        userId: signatory.userId,
+        signatoryRole: signatory.signatoryRole,
+        comment: signatory.comment,
+        signatureReference: signatory.signatureReference,
+        signatureArchiveRef: signatory.signatureArchiveRef,
+        evidenceArchiveId: signatory.evidenceArchiveId
+      },
+      clock,
+      signatory.signatureArchiveRef || signatory.signatureReference
+    );
+  }
   refreshAnnualEvidencePackAfterSignature({
     state,
     annualPackage,
     version,
     evidencePlatform,
     actorId: user.userId,
-    correlationId: `${annualPackage.packageId}:${version.versionId}:${signatory.signatoryId}`
+    correlationId: `${annualPackage.packageId}:${version.versionId}:${signedNow.map((candidate) => candidate.signatoryId).join(",")}`
   });
+  const currentSignatories = [...state.signatories.values()].filter(
+    (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
+  );
   const allSigned = currentSignatories.every((candidate) => candidate.status === "signed");
   if (allSigned && annualSignoffSatisfied({ annualPackage, signatories: currentSignatories })) {
     version.packageStatus = "signed";
@@ -541,23 +603,6 @@ function signAnnualReportVersion({ state, orgAuthPlatform, integrationPlatform, 
     annualPackage.status = "signed";
     annualPackage.updatedAt = now;
   }
-  appendSubmissionEvent(
-    state,
-    annualPackage.packageId,
-    version.versionId,
-    "signatory_signed",
-    version.checksum,
-    {
-      signatoryId: signatory.signatoryId,
-      userId: signatory.userId,
-      comment: signatory.comment,
-      signatureReference: signatory.signatureReference,
-      signatureArchiveRef: signatory.signatureArchiveRef,
-      evidenceArchiveId: signatory.evidenceArchiveId
-    },
-    clock,
-    signatory.signatureArchiveRef || signatory.signatureReference
-  );
   return materializePackage(state, annualPackage);
 }
 
@@ -633,6 +678,26 @@ function createTaxDeclarationPackage(context, input = {}) {
   ensureUserExists(orgAuthPlatform, actorId);
   assertAnnualVersionLockedForFiling({ state, annualPackage, version });
   const accountingPeriod = requireHardClosedPeriod(ledgerPlatform, companyId, annualPackage.accountingPeriodId);
+  const currentTaxComputation = createCurrentTaxComputation(
+    {
+      state,
+      ledgerPlatform,
+      reportingPlatform,
+      orgAuthPlatform,
+      vatPlatform,
+      payrollPlatform,
+      husPlatform,
+      pensionPlatform,
+      clock
+    },
+    {
+      companyId,
+      packageId: annualPackage.packageId,
+      versionId: version.versionId,
+      actorId,
+      adjustmentLines: input.adjustmentLines || []
+    }
+  );
   const model = buildTaxDeclarationPackageModel({
     orgAuthPlatform,
     reportingPlatform,
@@ -643,6 +708,7 @@ function createTaxDeclarationPackage(context, input = {}) {
     annualPackage,
     version,
     accountingPeriod,
+    currentTaxComputation,
     providerBaselineRegistry
   });
   const existing = [...state.taxPackages.values()].find(
@@ -674,6 +740,9 @@ function createTaxDeclarationPackage(context, input = {}) {
     annualReportVersionLockedAt: version.lockedAt,
     annualReportVersionSignoffHash: version.signoffHash,
     authorityOverview: model.authorityOverview,
+    currentTaxComputationId: currentTaxComputation.currentTaxComputationId,
+    currentTaxComputation,
+    closingJournalRefs: clone(currentTaxComputation.closingJournalRefs || []),
     evidencePackId: annualPackage.currentEvidencePackId,
     rulepackRefs: clone(model.rulepackRefs || version.rulepackRefs || annualPackage.rulepackRefs || []),
     providerBaselineRefs: model.providerBaselineRefs,
@@ -703,6 +772,108 @@ function createTaxDeclarationPackage(context, input = {}) {
   return clone(record);
 }
 
+function createCurrentTaxComputation(context, input = {}) {
+  const {
+    state,
+    ledgerPlatform,
+    reportingPlatform,
+    orgAuthPlatform,
+    vatPlatform,
+    payrollPlatform,
+    husPlatform,
+    pensionPlatform,
+    clock
+  } = context;
+  const companyId = text(input.companyId, "company_id_required");
+  const annualPackage = requirePackage(state, companyId, input.packageId);
+  const version = requireVersion(state, annualPackage.packageId, input.versionId || annualPackage.currentVersionId);
+  const actorId = text(input.actorId, "actor_id_required");
+  ensureUserExists(orgAuthPlatform, actorId);
+  assertAnnualVersionLockedForFiling({ state, annualPackage, version });
+  const accountingPeriod = requireHardClosedPeriod(ledgerPlatform, companyId, annualPackage.accountingPeriodId);
+  const company = requireCompany(orgAuthPlatform, annualPackage.companyId);
+  const balanceSheet = reportingPlatform.getReportSnapshot({ companyId, reportSnapshotId: version.balanceSheetReportSnapshotId });
+  const incomeStatement = reportingPlatform.getReportSnapshot({ companyId, reportSnapshotId: version.incomeStatementReportSnapshotId });
+  const authorityOverview = buildAuthorityOverview({
+    reportingPlatform,
+    vatPlatform,
+    payrollPlatform,
+    husPlatform,
+    pensionPlatform,
+    annualPackage,
+    version,
+    accountingPeriod,
+    company,
+    balanceSheet,
+    incomeStatement
+  });
+  const model = buildCurrentTaxComputationModel({
+    ledgerPlatform,
+    annualPackage,
+    version,
+    accountingPeriod,
+    company,
+    incomeStatement,
+    authorityOverview,
+    adjustmentLines: input.adjustmentLines || []
+  });
+  const existing = [...state.currentTaxComputations.values()].find(
+    (candidate) =>
+      candidate.companyId === companyId
+      && candidate.annualReportVersionId === version.versionId
+      && candidate.sourceFingerprint === model.sourceFingerprint
+  );
+  if (existing) {
+    return clone(existing);
+  }
+  const now = nowIso(clock);
+  const record = {
+    currentTaxComputationId: crypto.randomUUID(),
+    annualReportPackageId: annualPackage.packageId,
+    annualReportVersionId: version.versionId,
+    companyId,
+    fiscalYear: annualPackage.fiscalYear,
+    legalFormCode: annualPackage.legalFormCode,
+    declarationProfileCode: annualPackage.declarationProfileCode,
+    status: "prepared",
+    determinationStatus: model.determinationStatus,
+    determinationReasonCode: model.determinationReasonCode,
+    taxRatePercent: model.taxRatePercent,
+    taxRateDecimal: model.taxRateDecimal,
+    bookResultBeforeTaxAmount: model.bookResultBeforeTaxAmount,
+    taxAdjustmentAmount: model.taxAdjustmentAmount,
+    taxableResultAmount: model.taxableResultAmount,
+    taxableBaseAmount: model.taxableBaseAmount,
+    lossCarryforwardCandidateAmount: model.lossCarryforwardCandidateAmount,
+    currentTaxAmount: model.currentTaxAmount,
+    specialPayrollTaxReferenceAmount: model.specialPayrollTaxReferenceAmount,
+    closingJournalRefs: model.closingJournalRefs,
+    taxAdjustmentLines: model.taxAdjustmentLines,
+    sourceFingerprint: model.sourceFingerprint,
+    outputChecksum: model.outputChecksum,
+    createdByActorId: actorId,
+    createdAt: now,
+    updatedAt: now
+  };
+  state.currentTaxComputations.set(record.currentTaxComputationId, record);
+  appendSubmissionEvent(
+    state,
+    annualPackage.packageId,
+    version.versionId,
+    "current_tax_computation_prepared",
+    record.outputChecksum,
+    {
+      currentTaxComputationId: record.currentTaxComputationId,
+      determinationStatus: record.determinationStatus,
+      taxableResultAmount: record.taxableResultAmount,
+      currentTaxAmount: record.currentTaxAmount,
+      closingJournalRefs: record.closingJournalRefs
+    },
+    clock
+  );
+  return clone(record);
+}
+
 function buildTaxDeclarationPackageModel({
   orgAuthPlatform,
   reportingPlatform,
@@ -713,6 +884,7 @@ function buildTaxDeclarationPackageModel({
   annualPackage,
   version,
   accountingPeriod,
+  currentTaxComputation,
   providerBaselineRegistry
 }) {
   const company = requireCompany(orgAuthPlatform, annualPackage.companyId);
@@ -764,12 +936,13 @@ function buildTaxDeclarationPackageModel({
     company,
     balanceSheet: summarizedBalanceSheet,
     incomeStatement: summarizedIncomeStatement,
-    authorityOverview
+    authorityOverview,
+    currentTaxComputation
   });
   const sruRows = buildSruRows(balanceSheet, incomeStatement, authorityOverview.specialPayrollTax);
   const sruPayloadText = ["record_type;field_code;amount", ...sruRows.map((row) => `${row.recordType};${row.fieldCode};${formatMoney(row.amount)}`)].join("\n");
   const vatOverviewPayload = { exportCode: "vat_audit_overview_json", schemaVersion: "phase12.2", companyId: annualPackage.companyId, fiscalYear: annualPackage.fiscalYear, overview: authorityOverview.vat };
-  const agiOverviewPayload = { exportCode: "agi_audit_overview_json", schemaVersion: "phase12.2", companyId: annualPackage.companyId, fiscalYear: annualPackage.fiscalYear, overview: authorityOverview.agi };
+  const agiOverviewPayload = { exportCode: "agi_audit_overview_json", schemaVersion: "phase12.3", companyId: annualPackage.companyId, fiscalYear: annualPackage.fiscalYear, overview: authorityOverview.agi };
   const husOverviewPayload = { exportCode: "hus_summary_json", schemaVersion: "phase12.2", companyId: annualPackage.companyId, fiscalYear: annualPackage.fiscalYear, overview: authorityOverview.hus };
   const pensionOverviewPayload = { exportCode: "special_payroll_tax_json", schemaVersion: "phase12.2", companyId: annualPackage.companyId, fiscalYear: annualPackage.fiscalYear, overview: authorityOverview.specialPayrollTax };
   const exports = [
@@ -789,7 +962,8 @@ function buildTaxDeclarationPackageModel({
     ], authorityAuditBaselineRef),
     createJsonExportArtifact("agi_audit_overview_json", `AGI_${annualPackage.fiscalYear}.json`, agiOverviewPayload, [
       buildAmountCheck("agi_cash_compensation_amount", authorityOverview.agi.totalCashCompensationAmount, agiOverviewPayload.overview.totalCashCompensationAmount),
-      buildAmountCheck("agi_preliminary_tax_amount", authorityOverview.agi.totalPreliminaryTaxAmount, agiOverviewPayload.overview.totalPreliminaryTaxAmount)
+      buildAmountCheck("agi_preliminary_tax_amount", authorityOverview.agi.totalPreliminaryTaxAmount, agiOverviewPayload.overview.totalPreliminaryTaxAmount),
+      buildAmountCheck("agi_employer_contribution_amount", authorityOverview.agi.totalEmployerContributionAmount, agiOverviewPayload.overview.totalEmployerContributionAmount)
     ], authorityAuditBaselineRef),
     createJsonExportArtifact("hus_summary_json", `HUS_${annualPackage.fiscalYear}.json`, husOverviewPayload, [
       buildAmountCheck("hus_requested_amount", authorityOverview.hus.totalRequestedAmount, husOverviewPayload.overview.totalRequestedAmount),
@@ -815,6 +989,8 @@ function buildTaxDeclarationPackageModel({
       balanceSheetHash: balanceSheet.contentHash,
       incomeStatementReportSnapshotId: incomeStatement.reportSnapshotId,
       incomeStatementHash: incomeStatement.contentHash,
+      currentTaxComputationId: currentTaxComputation.currentTaxComputationId,
+      currentTaxComputationChecksum: currentTaxComputation.outputChecksum,
       declarationProfileCode: annualPackage.declarationProfileCode,
       filingProfileCode: annualPackage.filingProfileCode,
       signatoryClassCode: annualPackage.signatoryClassCode,
@@ -830,6 +1006,8 @@ function buildTaxDeclarationPackageModel({
         providerBaselineId: entry.providerBaselineId || null,
         checks: entry.checks.map((check) => ({ checkCode: check.checkCode, passed: check.passed }))
       })),
+      currentTaxComputationId: currentTaxComputation.currentTaxComputationId,
+      currentTaxComputationChecksum: currentTaxComputation.outputChecksum,
       rulepackRefs,
       providerBaselineRefs,
       authorityOverview
@@ -837,7 +1015,7 @@ function buildTaxDeclarationPackageModel({
   };
 }
 
-function buildDeclarationSupportPayload({ annualPackage, version, company, balanceSheet, incomeStatement, authorityOverview }) {
+function buildDeclarationSupportPayload({ annualPackage, version, company, balanceSheet, incomeStatement, authorityOverview, currentTaxComputation }) {
   const basePayload = {
     schemaVersion: "phase14.35",
     companyId: annualPackage.companyId,
@@ -855,6 +1033,7 @@ function buildDeclarationSupportPayload({ annualPackage, version, company, balan
     annualReportVersionSignoffHash: version.signoffHash,
     balanceSheet,
     incomeStatement,
+    currentTaxComputation,
     specialPayrollTaxSupport: authorityOverview.specialPayrollTax
   };
   switch (annualPackage.declarationProfileCode) {
@@ -1047,6 +1226,93 @@ function buildAuthorityOverview({ reportingPlatform, vatPlatform, payrollPlatfor
   };
 }
 
+function buildCurrentTaxComputationModel({
+  ledgerPlatform,
+  annualPackage,
+  version,
+  accountingPeriod,
+  company,
+  incomeStatement,
+  authorityOverview,
+  adjustmentLines = []
+}) {
+  const normalizedAdjustmentLines = normalizeTaxAdjustmentLines(adjustmentLines);
+  const bookResultBeforeTaxAmount = roundMoney(0 - Number(incomeStatement?.totals?.balanceAmount || 0));
+  const taxAdjustmentAmount = roundMoney(normalizedAdjustmentLines.reduce((sum, line) => sum + Number(line.amount || 0), 0));
+  const taxableResultAmount = roundMoney(bookResultBeforeTaxAmount + taxAdjustmentAmount);
+  const determination = resolveCurrentTaxDetermination({
+    legalFormCode: annualPackage.legalFormCode,
+    declarationProfileCode: annualPackage.declarationProfileCode
+  });
+  const taxableBaseAmount =
+    determination.determinationStatus === "computed"
+      ? roundMoney(Math.max(taxableResultAmount, 0))
+      : 0;
+  const currentTaxAmount =
+    determination.determinationStatus === "computed"
+      ? roundMoney(taxableBaseAmount * determination.taxRateDecimal)
+      : 0;
+  const lossCarryforwardCandidateAmount =
+    determination.determinationStatus === "computed" && taxableResultAmount < 0
+      ? roundMoney(0 - taxableResultAmount)
+      : 0;
+  const specialPayrollTaxReferenceAmount = roundMoney(authorityOverview.specialPayrollTax.specialPayrollTaxAmount || 0);
+  const closingJournalRefs = resolveCurrentTaxClosingJournalRefs({
+    ledgerPlatform,
+    annualPackage,
+    accountingPeriod,
+    determinationStatus: determination.determinationStatus
+  });
+  const sourceFingerprint = hashPayload({
+    annualReportPackageId: annualPackage.packageId,
+    annualReportVersionId: version.versionId,
+    annualReportVersionChecksum: version.checksum,
+    annualReportVersionLockedAt: version.lockedAt,
+    companyId: company.companyId,
+    orgNumber: company.orgNumber,
+    legalFormCode: annualPackage.legalFormCode,
+    declarationProfileCode: annualPackage.declarationProfileCode,
+    determination,
+    bookResultBeforeTaxAmount,
+    taxAdjustmentAmount,
+    taxableResultAmount,
+    taxableBaseAmount,
+    specialPayrollTaxReferenceAmount,
+    closingJournalRefs,
+    taxAdjustmentLines: normalizedAdjustmentLines
+  });
+  return {
+    determinationStatus: determination.determinationStatus,
+    determinationReasonCode: determination.reasonCode,
+    taxRatePercent: determination.taxRatePercent,
+    taxRateDecimal: determination.taxRateDecimal,
+    bookResultBeforeTaxAmount,
+    taxAdjustmentAmount,
+    taxableResultAmount,
+    taxableBaseAmount,
+    lossCarryforwardCandidateAmount,
+    currentTaxAmount,
+    specialPayrollTaxReferenceAmount,
+    closingJournalRefs,
+    taxAdjustmentLines: normalizedAdjustmentLines,
+    sourceFingerprint,
+    outputChecksum: hashPayload({
+      determinationStatus: determination.determinationStatus,
+      determinationReasonCode: determination.reasonCode,
+      taxRatePercent: determination.taxRatePercent,
+      bookResultBeforeTaxAmount,
+      taxAdjustmentAmount,
+      taxableResultAmount,
+      taxableBaseAmount,
+      lossCarryforwardCandidateAmount,
+      currentTaxAmount,
+      specialPayrollTaxReferenceAmount,
+      closingJournalRefs,
+      taxAdjustmentLines: normalizedAdjustmentLines
+    })
+  };
+}
+
 function materializeVersionPayload({ reportingPlatform, companyId, accountingPeriod, profileCode, annualContext, providerBaselineRefs = [], textSections, noteSections, includeEstablishmentCertificate, actorId }) {
   if (!reportingPlatform?.runReportSnapshot || !reportingPlatform?.getReportSnapshot) {
     throw error(500, "annual_reporting_reporting_platform_missing", "Reporting platform is required for annual reporting.");
@@ -1065,6 +1331,11 @@ function materializeVersionPayload({ reportingPlatform, companyId, accountingPer
   });
   const normalizedTextSections = normalizeSections(textSections);
   const normalizedNoteSections = normalizeSections(noteSections);
+  assertAnnualProfileSectionCompleteness({
+    profileCode,
+    textSections: normalizedTextSections,
+    noteSections: normalizedNoteSections
+  });
   const documents = [
     {
       documentCode: "balance_sheet",
@@ -1495,6 +1766,7 @@ function summarizeAgiSubmissions(agiSubmissions) {
     .map((submission) => {
       const version = submission.currentVersion || submission.versions?.at(-1) || null;
       const totals = clone(version?.payloadJson?.totals || {});
+      const employerTotals = clone(version?.payloadJson?.employerTotals || {});
       return {
         agiSubmissionId: submission.agiSubmissionId,
         reportingPeriod: submission.reportingPeriod,
@@ -1505,6 +1777,11 @@ function summarizeAgiSubmissions(agiSubmissions) {
           employeeCount: Number(totals.employeeCount || 0),
           cashCompensationAmount: roundMoney(totals.cashCompensationAmount || 0),
           taxableBenefitAmount: roundMoney(totals.taxableBenefitAmount || 0),
+          employerContributionAmount: roundMoney(
+            employerTotals.employerContributionAmount
+            ?? employerTotals.field487SummaArbetsgivaravgifterOchSlf
+            ?? 0
+          ),
           preliminaryTaxAmount: roundMoney(totals.preliminaryTaxAmount || 0),
           sinkTaxAmount: roundMoney(totals.sinkTaxAmount || 0)
         }
@@ -1513,6 +1790,7 @@ function summarizeAgiSubmissions(agiSubmissions) {
   return {
     submissionCount: items.length,
     totalCashCompensationAmount: roundMoney(items.reduce((sum, item) => sum + Number(item.totals.cashCompensationAmount || 0), 0)),
+    totalEmployerContributionAmount: roundMoney(items.reduce((sum, item) => sum + Number(item.totals.employerContributionAmount || 0), 0)),
     totalPreliminaryTaxAmount: roundMoney(items.reduce((sum, item) => sum + Number(item.totals.preliminaryTaxAmount || 0), 0)),
     totalSinkTaxAmount: roundMoney(items.reduce((sum, item) => sum + Number(item.totals.sinkTaxAmount || 0), 0)),
     submissions: items
@@ -1745,6 +2023,18 @@ function requireVersion(state, packageId, versionId) {
   return record;
 }
 
+function normalizeTaxAdjustmentLines(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((line, index) => ({
+      taxAdjustmentLineId: normalizeText(line?.taxAdjustmentLineId) || crypto.randomUUID(),
+      adjustmentCode: normalizeCode(line?.adjustmentCode || `TAX_ADJUSTMENT_${index + 1}`, "current_tax_adjustment_code_required"),
+      description: normalizeText(line?.description) || null,
+      amount: roundMoney(line?.amount || 0),
+      evidenceRef: normalizeText(line?.evidenceRef) || null
+    }))
+    .filter((line) => line.amount !== 0);
+}
+
 function assertAnnualVersionLockedForFiling({ state, annualPackage, version }) {
   const signatories = [...state.signatories.values()].filter(
     (candidate) => candidate.packageId === annualPackage.packageId && candidate.versionId === version.versionId && candidate.status !== "superseded"
@@ -1757,16 +2047,89 @@ function assertAnnualVersionLockedForFiling({ state, annualPackage, version }) {
   }
 }
 
+function resolveCurrentTaxDetermination({ legalFormCode, declarationProfileCode }) {
+  if (ENTITY_LEVEL_CURRENT_TAX_LEGAL_FORM_CODES.includes(legalFormCode)) {
+    return {
+      determinationStatus: "computed",
+      reasonCode: "entity_level_corporate_income_tax",
+      taxRatePercent: CORPORATE_INCOME_TAX_RATE_PERCENT_2026,
+      taxRateDecimal: CORPORATE_INCOME_TAX_RATE_DECIMAL_2026
+    };
+  }
+  if (OWNER_TAXED_ENTITY_LEGAL_FORM_CODES.includes(legalFormCode) || declarationProfileCode === "NE") {
+    return {
+      determinationStatus: "not_applicable",
+      reasonCode: "owner_taxed_entity",
+      taxRatePercent: 0,
+      taxRateDecimal: 0
+    };
+  }
+  return {
+    determinationStatus: "not_applicable",
+    reasonCode: "manual_corporate_tax_review_required",
+    taxRatePercent: 0,
+    taxRateDecimal: 0
+  };
+}
+
+function resolveCurrentTaxClosingJournalRefs({ ledgerPlatform, annualPackage, accountingPeriod, determinationStatus }) {
+  if (determinationStatus !== "computed") {
+    return [];
+  }
+  if (!ledgerPlatform?.listYearEndTransferBatches) {
+    throw error(500, "annual_reporting_ledger_runtime_missing", "Ledger runtime is required for current tax computations.");
+  }
+  const fiscalYearEndDate = accountingPeriod.endsOn || `${annualPackage.fiscalYear}-12-31`;
+  const resultTransfers = (ledgerPlatform.listYearEndTransferBatches({ companyId: annualPackage.companyId }) || [])
+    .filter((candidate) => candidate.transferKind === "RESULT_TRANSFER")
+    .filter((candidate) => candidate.status === "posted")
+    .filter((candidate) => {
+      if (annualPackage.fiscalYearId && candidate.fiscalYearId) {
+        return candidate.fiscalYearId === annualPackage.fiscalYearId;
+      }
+      return candidate.fiscalYearEndDate === fiscalYearEndDate;
+    })
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  if (resultTransfers.length === 0) {
+    throw error(
+      409,
+      "current_tax_closing_journal_missing",
+      "Current tax computation requires a posted result-transfer closing journal for the fiscal year."
+    );
+  }
+  return resultTransfers.map((batch) => ({
+    yearEndTransferBatchId: batch.yearEndTransferBatchId,
+    journalEntryId: batch.journalEntryId,
+    transferKind: batch.transferKind,
+    transferDate: batch.transferDate,
+    sourceCode: batch.sourceCode,
+    resultAccountNumber: batch.resultAccountNumber || null,
+    accountingPeriodId: batch.accountingPeriodId,
+    fiscalYearId: batch.fiscalYearId,
+    fiscalYearEndDate: batch.fiscalYearEndDate,
+    totals: clone(batch.totals || {})
+  }));
+}
+
 function annualSignoffSatisfied({ annualPackage, signatories }) {
-  const signedRoles = signatories.filter((candidate) => candidate.status === "signed").map((candidate) => candidate.signatoryRole);
-  if (signedRoles.length === 0) {
+  if (!Array.isArray(signatories) || signatories.length === 0) {
     return false;
   }
   const allowedRoles = allowedAnnualSignatoryRolesForClass(annualPackage.signatoryClassCode);
+  const requiredRoles = requiredAnnualSignatoryRolesForClass(annualPackage.signatoryClassCode);
   if (signatories.some((candidate) => !allowedRoles.includes(candidate.signatoryRole))) {
     return false;
   }
-  return signedRoles.some((roleCode) => allowedRoles.includes(roleCode));
+  const invitedRoles = [...new Set(signatories.map((candidate) => candidate.signatoryRole))];
+  const signedSignatories = signatories.filter((candidate) => candidate.status === "signed");
+  const signedRoles = [...new Set(signedSignatories.map((candidate) => candidate.signatoryRole))];
+  if (signedSignatories.length !== signatories.length) {
+    return false;
+  }
+  if (requiredRoles.some((roleCode) => !invitedRoles.includes(roleCode))) {
+    return false;
+  }
+  return requiredRoles.every((roleCode) => signedRoles.includes(roleCode));
 }
 
 function assertAnnualSignatoryRole({ signatoryRole, signatoryClassCode }) {
@@ -1793,6 +2156,63 @@ function allowedAnnualSignatoryRolesForClass(signatoryClassCode) {
       return Object.freeze(["partner_signatory"]);
     default:
       throw error(409, "annual_report_signatory_class_unsupported", "Unsupported annual-report signatory class.");
+  }
+}
+
+function requiredAnnualSignatoryRolesForClass(signatoryClassCode) {
+  switch (signatoryClassCode) {
+    case "BOARD_OR_CEO":
+      return Object.freeze(["board_member", "ceo"]);
+    case "ASSOCIATION_SIGNATORY":
+      return Object.freeze(["association_signatory"]);
+    case "OWNER_PROPRIETOR":
+      return Object.freeze(["owner_proprietor"]);
+    case "PARTNER_SIGNATORY":
+      return Object.freeze(["partner_signatory"]);
+    default:
+      throw error(409, "annual_report_signatory_class_unsupported", "Unsupported annual-report signatory class.");
+  }
+}
+
+function assertAnnualProfileSectionCompleteness({ profileCode, textSections = {}, noteSections = {} } = {}) {
+  const requirements = annualProfileSectionRequirements(profileCode);
+  const missingSections = [
+    ...requirements.requiredTextSections
+      .filter((sectionCode) => !normalizeText(textSections?.[sectionCode]))
+      .map((sectionCode) => `text:${sectionCode}`),
+    ...requirements.requiredNoteSections
+      .filter((sectionCode) => !normalizeText(noteSections?.[sectionCode]))
+      .map((sectionCode) => `note:${sectionCode}`)
+  ];
+  if (missingSections.length > 0) {
+    throw error(
+      409,
+      "annual_report_profile_sections_incomplete",
+      `Annual-report profile ${profileCode} requires sections ${missingSections.join(", ")}.`
+    );
+  }
+}
+
+function annualProfileSectionRequirements(profileCode) {
+  const normalizedProfileCode = requireProfileCode(profileCode);
+  switch (normalizedProfileCode) {
+    case "k1":
+      return {
+        requiredTextSections: Object.freeze(["management_report", "accounting_policies"]),
+        requiredNoteSections: Object.freeze(["notes_bundle"])
+      };
+    case "k2":
+      return {
+        requiredTextSections: Object.freeze(["management_report", "accounting_policies"]),
+        requiredNoteSections: Object.freeze(["notes_bundle", "simplified_notes"])
+      };
+    case "k3":
+      return {
+        requiredTextSections: Object.freeze(["management_report", "accounting_policies", "material_events"]),
+        requiredNoteSections: Object.freeze(["notes_bundle", "cash_flow_commentary", "related_party_commentary"])
+      };
+    default:
+      throw error(409, "annual_report_profile_code_unsupported", "Unsupported annual-report profile.");
   }
 }
 

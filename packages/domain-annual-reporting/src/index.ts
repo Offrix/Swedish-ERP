@@ -2,6 +2,8 @@ export type AnnualReportProfileCode = "k1" | "k2" | "k3";
 export type AnnualReportPackageStatus = "draft" | "ready_for_signature" | "signed" | "submitted" | "locked" | "superseded";
 export type AnnualReportSignatoryStatus = "invited" | "signed" | "declined" | "superseded";
 export type TaxDeclarationPackageStatus = "ready" | "submitted" | "accepted" | "rejected" | "superseded";
+export type CurrentTaxComputationStatus = "prepared";
+export type CurrentTaxDeterminationStatus = "computed" | "not_applicable";
 
 export interface AnnualReportVersionRef {
   readonly packageId: string;
@@ -60,6 +62,39 @@ export interface AnnualEvidencePackRef {
   readonly signoffRefs?: readonly Record<string, unknown>[];
 }
 
+export interface TaxAdjustmentLineRef {
+  readonly taxAdjustmentLineId: string;
+  readonly adjustmentCode: string;
+  readonly description?: string | null;
+  readonly amount: number;
+  readonly evidenceRef?: string | null;
+}
+
+export interface CurrentTaxComputationRef {
+  readonly currentTaxComputationId: string;
+  readonly annualReportPackageId: string;
+  readonly annualReportVersionId: string;
+  readonly companyId: string;
+  readonly fiscalYear: string;
+  readonly legalFormCode: string;
+  readonly declarationProfileCode: string;
+  readonly status: CurrentTaxComputationStatus;
+  readonly determinationStatus: CurrentTaxDeterminationStatus;
+  readonly determinationReasonCode: string;
+  readonly taxRatePercent: number;
+  readonly taxRateDecimal: number;
+  readonly bookResultBeforeTaxAmount: number;
+  readonly taxAdjustmentAmount: number;
+  readonly taxableResultAmount: number;
+  readonly taxableBaseAmount: number;
+  readonly lossCarryforwardCandidateAmount: number;
+  readonly currentTaxAmount: number;
+  readonly specialPayrollTaxReferenceAmount: number;
+  readonly closingJournalRefs?: readonly Record<string, unknown>[];
+  readonly taxAdjustmentLines?: readonly TaxAdjustmentLineRef[];
+  readonly outputChecksum: string;
+}
+
 export interface TaxDeclarationPackageRef {
   readonly taxDeclarationPackageId: string;
   readonly annualReportPackageId: string;
@@ -76,4 +111,7 @@ export interface TaxDeclarationPackageRef {
   readonly annualReportVersionChecksum?: string;
   readonly annualReportVersionLockedAt?: string | null;
   readonly annualReportVersionSignoffHash?: string | null;
+  readonly currentTaxComputationId?: string;
+  readonly currentTaxComputation?: CurrentTaxComputationRef;
+  readonly closingJournalRefs?: readonly Record<string, unknown>[];
 }

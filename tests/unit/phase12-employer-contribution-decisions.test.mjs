@@ -6,7 +6,7 @@ import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.m
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 
-test("Phase 12.2 employer contribution decisions handle age buckets, threshold splits and vaxa tax-account relief", () => {
+test("Phase 11.2 employer contribution decisions handle full rate, age buckets, threshold splits and vaxa tax-account relief", () => {
   const fixedNow = new Date("2026-03-28T09:45:00Z");
   const hrPlatform = createHrPlatform({ clock: () => fixedNow });
   const timePlatform = createTimePlatform({
@@ -21,6 +21,27 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
   });
 
   const payCalendar = payrollPlatform.listPayCalendars({ companyId: COMPANY_ID })[0];
+
+  const standardEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Frida",
+    familyName: "Fullavgift",
+    monthlySalary: 30000,
+    identityValue: "19920303-1118",
+    dateOfBirth: "1992-03-03"
+  });
+  const standardRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [standardEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(standardRun.payslips[0].totals.employerContributionPreviewAmount, 9426);
+  assert.equal(standardRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "full");
+  assert.equal(standardRun.payslips[0].totals.employerContributionDecision.outputs.thresholds.thresholdModeCode, "none");
+  assert.deepEqual(standardRun.payslips[0].totals.employerContributionDecision.outputs.reducedComponents, []);
+  assert.equal(standardRun.payslips[0].totals.employerContributionDecision.outputs.rulepackRef.rulepackId, "payroll-employer-contribution-se-2026.1");
 
   const olderEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -40,6 +61,10 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
   assert.equal(olderRun.payslips[0].totals.employerContributionPreviewAmount, 3063);
   assert.equal(olderRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "reduced_age_pension_only");
   assert.equal(olderRun.payslips[0].totals.employerContributionDecision.outputs.ageBucket, "year_start_67_plus");
+  assert.equal(
+    olderRun.payslips[0].totals.employerContributionDecision.outputs.reducedComponents[0].componentCode,
+    "age_pension_only"
+  );
   assert.equal(olderRun.payslips[0].totals.employerContributionDecision.rule_pack_id, "payroll-employer-contribution-se-2026.1");
   assert.equal(olderRun.payslips[0].totals.employerContributionDecision.rule_pack_checksum, "phase8-payroll-employer-contribution-se-2026-1");
 
@@ -67,9 +92,38 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     youthRun.payslips[0].totals.employerContributionDecision.outputs.contributionComponents.map((component) => component.componentCode),
     ["temporary_youth_reduction_band", "standard_overflow_band"]
   );
+  assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.thresholds.baseLimitAmount, 25000);
+  assert.equal(
+    youthRun.payslips[0].totals.employerContributionDecision.outputs.reducedComponents[0].componentCode,
+    "temporary_youth_reduction_band"
+  );
   assert.equal(youthRun.payslips[0].totals.employerContributionDecision.outputs.referenceFullContributionAmount, 9426);
   assert.equal(youthRun.payslips[0].totals.employerContributionDecision.rule_pack_id, "payroll-employer-contribution-se-2026.2");
   assert.equal(youthRun.payslips[0].totals.employerContributionDecision.rule_pack_checksum, "phase8-payroll-employer-contribution-se-2026-2");
+
+  const noContributionEmployee = createMonthlyEmployee({
+    hrPlatform,
+    givenName: "Nils",
+    familyName: "Nollavgift",
+    monthlySalary: 30000,
+    identityValue: "19370112-4442",
+    dateOfBirth: "1937-01-12"
+  });
+  const noContributionRun = payrollPlatform.createPayRun({
+    companyId: COMPANY_ID,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [noContributionEmployee.employment.employmentId],
+    actorId: "unit-test"
+  });
+  assert.equal(noContributionRun.payslips[0].totals.employerContributionPreviewAmount, 0);
+  assert.equal(noContributionRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "no_contribution");
+  assert.equal(noContributionRun.payslips[0].totals.employerContributionDecision.outputs.fullRatePercent, 31.42);
+  assert.equal(noContributionRun.payslips[0].totals.employerContributionDecision.outputs.reducedRatePercent, 0);
+  assert.equal(
+    noContributionRun.payslips[0].totals.employerContributionDecision.outputs.reducedComponents[0].componentCode,
+    "no_contribution"
+  );
 
   const vaxaEmployee = createMonthlyEmployee({
     hrPlatform,
@@ -79,21 +133,76 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     identityValue: "19900112-3331",
     dateOfBirth: "1990-01-12"
   });
+  assert.throws(
+    () =>
+      payrollPlatform.createEmployerContributionDecisionSnapshot({
+        companyId: COMPANY_ID,
+        employmentId: vaxaEmployee.employment.employmentId,
+        decisionType: "vaxa",
+        ageBucket: "standard",
+        legalBasisCode: "se_vaxa_2026_refund_credit",
+        validFrom: "2026-01-01",
+        validTo: "2026-12-31",
+        fullRate: 30,
+        thresholds: {
+          thresholdModeCode: "monthly_base_limit",
+          baseLimitAmount: 25000,
+          thresholdBasisCode: "employer_contribution_base",
+          periodCode: "month",
+          currencyCode: "SEK"
+        },
+        reducedComponents: [{
+          componentCode: "vaxa_reduced_band",
+          ratePercent: 10.21,
+          baseLimitAmount: 25000,
+          appliesToCode: "threshold_band",
+          refundProcessCode: "tax_account_credit_2026"
+        }],
+        vaxaEligibilityProfile: {
+          eligibilitySourceCode: "manual_review",
+          supportWindowMonths: 24,
+          supportEmployeeCountLimit: 2,
+          supportMode: "tax_account_credit",
+          refundProcessCode: "tax_account_credit_2026",
+          deMinimisAidTracked: true
+        },
+        decisionSource: "support_review",
+        decisionReference: "vaxa-2026-invalid-rate",
+        evidenceRef: "evidence-vaxa-2026-invalid-rate",
+        actorId: "payroll-agent-1"
+      }),
+    (error) => error?.code === "employer_contribution_decision_snapshot_full_rate_mismatch"
+  );
   const vaxaDraft = payrollPlatform.createEmployerContributionDecisionSnapshot({
     companyId: COMPANY_ID,
     employmentId: vaxaEmployee.employment.employmentId,
     decisionType: "vaxa",
     ageBucket: "standard",
-    legalBasisCode: "se_vaxa_2025_extended",
+    legalBasisCode: "se_vaxa_2026_refund_credit",
     validFrom: "2026-01-01",
     validTo: "2026-12-31",
-    baseLimit: 25000,
     fullRate: 31.42,
-    reducedRate: 10.21,
-    specialConditions: {
+    thresholds: {
+      thresholdModeCode: "monthly_base_limit",
+      baseLimitAmount: 25000,
+      thresholdBasisCode: "employer_contribution_base",
+      periodCode: "month",
+      currencyCode: "SEK"
+    },
+    reducedComponents: [{
+      componentCode: "vaxa_reduced_band",
+      ratePercent: 10.21,
+      baseLimitAmount: 25000,
+      appliesToCode: "threshold_band",
+      refundProcessCode: "tax_account_credit_2026"
+    }],
+    vaxaEligibilityProfile: {
+      eligibilitySourceCode: "manual_review",
       supportWindowMonths: 24,
       supportEmployeeCountLimit: 2,
-      supportMode: "tax_account_credit"
+      supportMode: "tax_account_credit",
+      refundProcessCode: "tax_account_credit_2026",
+      deMinimisAidTracked: true
     },
     decisionSource: "support_review",
     decisionReference: "vaxa-2026-001",
@@ -101,6 +210,12 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
     actorId: "payroll-agent-1"
   });
   assert.equal(vaxaDraft.status, "draft");
+  assert.equal(vaxaDraft.baseLimit, 25000);
+  assert.equal(vaxaDraft.reducedRate, 10.21);
+  assert.equal(vaxaDraft.thresholds.baseLimitAmount, 25000);
+  assert.equal(vaxaDraft.reducedComponents[0].componentCode, "vaxa_reduced_band");
+  assert.equal(vaxaDraft.vaxaEligibilityProfile.supportMode, "tax_account_credit");
+  assert.equal(vaxaDraft.rulepackRef.rulepackId, "payroll-employer-contribution-se-2026.1");
   assert.throws(
     () =>
       payrollPlatform.approveEmployerContributionDecisionSnapshot({
@@ -127,6 +242,12 @@ test("Phase 12.2 employer contribution decisions handle age buckets, threshold s
   assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.outputs.decisionType, "vaxa");
   assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.outputs.referenceFullContributionAmount, 9426);
   assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.outputs.taxAccountReliefAmount, 5302.5);
+  assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.outputs.thresholds.baseLimitAmount, 25000);
+  assert.equal(
+    vaxaRun.payslips[0].totals.employerContributionDecision.outputs.reducedComponents[0].refundProcessCode,
+    "tax_account_credit_2026"
+  );
+  assert.equal(vaxaRun.payslips[0].totals.employerContributionDecision.outputs.rulepackRef.rulepackId, "payroll-employer-contribution-se-2026.1");
   assert.equal(
     vaxaRun.payslips[0].totals.employerContributionDecision.outputs.taxAccountConsequence.creditAmount,
     5302.5

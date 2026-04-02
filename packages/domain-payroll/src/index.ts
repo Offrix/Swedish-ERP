@@ -195,6 +195,7 @@ export interface AgiEmployeePayload {
   readonly agiSubmissionVersionId: string;
   readonly companyId: string;
   readonly employeeId: string | null;
+  readonly specificationNumber: number;
   readonly personIdentifierType: string;
   readonly personIdentifier: string | null;
   readonly protectedIdentity: boolean;
@@ -221,6 +222,7 @@ export interface AgiSubmissionVersion {
   readonly executionBoundary: Record<string, unknown> | null;
   readonly trialGuard: Record<string, unknown> | null;
   readonly evidenceBundleId: string | null;
+  readonly authoritySubmissionId: string | null;
   readonly changedEmployeeIds: readonly string[];
   readonly lockEmploymentIds: readonly string[];
   readonly validationErrors: readonly Record<string, unknown>[];
@@ -372,8 +374,37 @@ export interface EmployerContributionDecisionSnapshot {
   readonly validFrom: string;
   readonly validTo: string | null;
   readonly baseLimit: number | null;
-  readonly fullRate: number;
+  readonly fullRate: number | null;
   readonly reducedRate: number | null;
+  readonly reducedComponents: readonly {
+    readonly componentCode: string;
+    readonly ratePercent: number;
+    readonly baseLimitAmount: number | null;
+    readonly appliesToCode: string | null;
+    readonly refundProcessCode: string | null;
+  }[];
+  readonly thresholds: {
+    readonly thresholdModeCode: string;
+    readonly baseLimitAmount: number | null;
+    readonly thresholdBasisCode: string | null;
+    readonly periodCode: string | null;
+    readonly currencyCode: string | null;
+  };
+  readonly vaxaEligibilityProfile: {
+    readonly eligibilitySourceCode: string;
+    readonly supportWindowMonths: number | null;
+    readonly supportEmployeeCountLimit: number | null;
+    readonly supportMode: string;
+    readonly refundProcessCode: string;
+    readonly deMinimisAidTracked: boolean;
+  } | null;
+  readonly rulepackRef: {
+    readonly rulepackId: string;
+    readonly rulepackCode: string;
+    readonly rulepackVersion: string;
+    readonly rulepackChecksum: string;
+    readonly effectiveDate: string | null;
+  } | null;
   readonly specialConditions: Record<string, unknown>;
   readonly decisionSource: string;
   readonly decisionReference: string;
@@ -472,6 +503,93 @@ export interface RemittanceInstruction {
   readonly decisionSnapshot: GarnishmentDecisionSnapshot | null;
 }
 
+export interface ReceivableSettlementPlan {
+  readonly receivableSettlementPlanId: string;
+  readonly companyId: string;
+  readonly employeeReceivableId: string;
+  readonly employmentId: string;
+  readonly employeeId: string;
+  readonly sourcePayRunId: string | null;
+  readonly sourceReportingPeriod: string;
+  readonly status: string;
+  readonly installments: readonly Record<string, unknown>[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly cancelledAt: string | null;
+  readonly currentOutstandingAmount: number | null;
+}
+
+export interface ReceivableOffsetDecision {
+  readonly receivableOffsetDecisionId: string;
+  readonly companyId: string;
+  readonly employeeReceivableId: string;
+  readonly employmentId: string;
+  readonly employeeId: string;
+  readonly reportingPeriod: string;
+  readonly requestedAmount: number;
+  readonly executedAmount: number;
+  readonly status: string;
+  readonly note: string | null;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly executedAt: string | null;
+  readonly executedByActorId: string | null;
+  readonly executedPayRunId: string | null;
+  readonly executedPayRunLineId: string | null;
+}
+
+export interface ReceivableWriteOffDecision {
+  readonly receivableWriteOffDecisionId: string;
+  readonly companyId: string;
+  readonly employeeReceivableId: string;
+  readonly employmentId: string;
+  readonly employeeId: string;
+  readonly amount: number;
+  readonly reasonCode: string;
+  readonly note: string | null;
+  readonly status: string;
+  readonly requiresDualReview: boolean;
+  readonly postingIntentPreview: Record<string, unknown>;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly approvedAt: string | null;
+  readonly approvedByActorId: string | null;
+  readonly supersededAt: string | null;
+}
+
+export interface EmployeeReceivable {
+  readonly employeeReceivableId: string;
+  readonly companyId: string;
+  readonly employmentId: string;
+  readonly employeeId: string;
+  readonly sourcePayRunId: string;
+  readonly sourcePayslipId: string | null;
+  readonly sourceReportingPeriod: string;
+  readonly sourcePayDate: string;
+  readonly amount: number;
+  readonly settledAmount: number;
+  readonly writtenOffAmount: number;
+  readonly outstandingAmount: number;
+  readonly currencyCode: string;
+  readonly receivableAccountNumber: string;
+  readonly settlementPlanId: string | null;
+  readonly status: "open" | "scheduled_offset" | "partially_settled" | "settled" | "written_off";
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly settledAt: string | null;
+  readonly settledByActorId: string | null;
+  readonly writtenOffAt: string | null;
+  readonly writtenOffByActorId: string | null;
+  readonly settlementPlan: ReceivableSettlementPlan | null;
+  readonly offsetDecisions: readonly ReceivableOffsetDecision[];
+  readonly writeOffDecisions: readonly ReceivableWriteOffDecision[];
+}
+
 export interface DocumentClassificationPayrollConsumption {
   readonly documentClassificationPayrollConsumptionId: string;
   readonly documentClassificationPayrollPayloadId: string;
@@ -564,6 +682,10 @@ export interface PayRunRef {
   readonly exceptionSummary: Record<string, number>;
   readonly calculationSteps: readonly PayrollStepSummary[];
   readonly exceptions: readonly PayrollException[];
+  readonly employeeReceivables: readonly EmployeeReceivable[];
+  readonly employeeReceivableSummary: Record<string, number>;
+  readonly receivableSettlementPlans: readonly ReceivableSettlementPlan[];
+  readonly receivableOffsetDecisions: readonly ReceivableOffsetDecision[];
   readonly lines: readonly PayRunLine[];
   readonly remittanceInstructions: readonly RemittanceInstruction[];
   readonly remittanceSummary: Record<string, number>;

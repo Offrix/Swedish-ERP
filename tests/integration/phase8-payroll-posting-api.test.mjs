@@ -233,7 +233,11 @@ test("Phase 8.3 API creates payroll postings, payout batches and vacation snapsh
         reportingPeriod: "202603"
       }
     });
-    assert.equal(snapshot.totals.liabilityAmount > 0, true);
+    assert.equal(snapshot.employeeSnapshots.length, 1);
+    assert.equal(snapshot.employeeSnapshots[0].remainingDays, 0);
+    assert.equal(snapshot.totals.liabilityAmount, 0);
+    assert.equal(snapshot.totals.employerContributionLiabilityAmount, 0);
+    assert.equal(snapshot.totals.totalLiabilityAmount, 0);
 
     const listedSnapshots = await requestJson(
       baseUrl,

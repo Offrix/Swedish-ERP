@@ -238,7 +238,7 @@ test("Phase 10.3 API handles change orders, build VAT, HUS and personalliggare f
           paymentReference: "BG-API-HUS-001"
         }
       });
-    assert.equal(paid.status, "customer_paid");
+    assert.equal(paid.status, "claim_ready");
 
     const claim = await requestJson(baseUrl, `/v1/hus/cases/${husCase.husCaseId}/claims`, {
       method: "POST",

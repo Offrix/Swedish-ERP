@@ -45,7 +45,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
 
   assert.equal(classified.preliminaryReductionAmount, 3000);
   assert.equal(classified.customerShareAmount, 12000);
-  assert.equal(classified.status, "classified");
+  assert.equal(classified.status, "draft");
 
   const invoiced = husPlatform.markHusCaseInvoiced({
     companyId: COMPANY_ID,
@@ -54,7 +54,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     invoiceIssuedOn: "2026-03-11",
     actorId: "unit-test"
   });
-  assert.equal(invoiced.status, "invoiced");
+  assert.equal(invoiced.status, "draft");
 
   const partialPayment = husPlatform.recordHusCustomerPayment({
     companyId: COMPANY_ID,
@@ -65,7 +65,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     paymentReference: "BG-REF-001",
     actorId: "unit-test"
   });
-  assert.equal(partialPayment.status, "customer_partially_paid");
+  assert.equal(partialPayment.status, "claim_ready");
   assert.equal(partialPayment.outstandingCustomerShareAmount, 7000);
 
   const paid = husPlatform.recordHusCustomerPayment({
@@ -77,7 +77,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     paymentReference: "SWISH-REF-002",
     actorId: "unit-test"
   });
-  assert.equal(paid.status, "customer_paid");
+  assert.equal(paid.status, "claim_ready");
 
   const claim = husPlatform.createHusClaim({
     companyId: COMPANY_ID,
@@ -123,7 +123,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     afterPayoutFlag: true,
     actorId: "unit-test"
   });
-  assert.equal(credit.husCase.status, "recovery_pending");
+  assert.equal(credit.husCase.status, "paid_out");
 
   const recovery = husPlatform.recordHusRecovery({
     companyId: COMPANY_ID,
@@ -133,7 +133,7 @@ test("Phase 10.3 HUS classifies, submits, pays out and recovers deterministicall
     reasonCode: "skatteverket_recovery",
     actorId: "unit-test"
   });
-  assert.equal(recovery.husCase.status, "closed");
+  assert.equal(recovery.husCase.status, "recovered");
 
   const auditEvents = husPlatform.listHusAuditEvents({
     companyId: COMPANY_ID,

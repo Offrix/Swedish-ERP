@@ -82,7 +82,12 @@ test("Step 48 public production flow exposes annual packages, tax-account reconc
         accountingPeriodId: period.accountingPeriodId,
         profileCode: "k2",
         textSections: {
-          management_report: "Phase 48 public annual package"
+          management_report: "Phase 48 public annual package",
+          accounting_policies: "Phase 48 K2 policies"
+        },
+        noteSections: {
+          notes_bundle: "Phase 48 notes",
+          simplified_notes: "Phase 48 simplified notes"
         }
       }
     });

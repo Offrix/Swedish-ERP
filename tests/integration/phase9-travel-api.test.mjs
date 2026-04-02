@@ -32,7 +32,7 @@ test("Phase 9.2 migration and seeds add travel claims, foreign allowances and pa
   }
 });
 
-test("Phase 9.2 API manages travel claims and carries them into payroll, posting and AGI", async () => {
+test("Phase 11.3 API keeps travel receipt VAT separate while carrying travel claims into payroll, posting and AGI", async () => {
   const platform = createApiPlatform({
     clock: () => new Date("2026-03-22T10:20:00Z")
   });
@@ -124,7 +124,11 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
             expenseType: "parking",
             paymentMethod: "private_card",
             amount: 140,
-            currencyCode: "SEK"
+            currencyCode: "SEK",
+            sellerCountry: "SE",
+            goodsOrServices: "services",
+            amountExVat: 112,
+            vatRate: 25
           },
           {
             date: "2026-03-10",
@@ -144,6 +148,9 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
     });
     assert.equal(claim.valuation.taxFreeTravelAllowance, 645);
     assert.equal(claim.valuation.taxableTravelAllowance, 55);
+    assert.equal(claim.valuation.deductibleExpenseVatAmount, 28);
+    assert.equal(claim.valuation.expenseVatDecidedCount, 1);
+    assert.equal(claim.valuation.expenseVatNotClassifiedCount, 1);
     assert.equal(claim.valuation.expenseSplit.companyCardExpenseAmount, 600);
     assert.equal(claim.valuation.expenseSplit.mixedFundingSources, true);
     assert.equal(claim.valuation.reviewCodes.includes("travel_expense_split_review"), true);
@@ -201,14 +208,26 @@ test("Phase 9.2 API manages travel claims and carries them into payroll, posting
     assert.equal(expenseReimbursementLine.taxTreatmentCode, "non_taxable");
     assert.equal(expenseReimbursementLine.employerContributionTreatmentCode, "excluded");
     assert.equal(expenseReimbursementLine.agiMappingCode, "not_reported");
+    assert.equal(
+      payRun.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].travelClaims[0].deductibleExpenseVatAmount,
+      28
+    );
+    assert.equal(
+      payRun.payrollInputSnapshot.sourceSnapshot[employee.employment.employmentId].travelClaims[0].expenseReimbursementAmount,
+      140
+    );
 
-    await requestJson(baseUrl, `/v1/payroll/pay-runs/${payRun.payRunId}/approve`, {
+    const approvedRun = await requestJson(baseUrl, `/v1/payroll/pay-runs/${payRun.payRunId}/approve`, {
       method: "POST",
       token: sessionToken,
       body: {
         companyId: COMPANY_ID
       }
     });
+    assert.equal(approvedRun.payslips[0].totals.expenseReimbursementAmount, 140);
+    assert.equal(approvedRun.payslips[0].totals.travelDeductibleExpenseVatAmount, 28);
+    assert.equal(approvedRun.payslips[0].totals.travelExpenseVatDecidedCount, 1);
+    assert.equal(approvedRun.payslips[0].totals.travelExpenseVatNotClassifiedCount, 1);
 
     const posting = await requestJson(baseUrl, "/v1/payroll/postings", {
       method: "POST",

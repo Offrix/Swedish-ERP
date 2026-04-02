@@ -114,7 +114,7 @@ test("Phase 13.1 posts accepted HUS claims into the ledger with canonical recipe
     journal.lines.map(({ accountNumber, debitAmount, creditAmount }) => ({ accountNumber, debitAmount, creditAmount })),
     [
       { accountNumber: "1180", debitAmount: 3000, creditAmount: 0 },
-      { accountNumber: "2560", debitAmount: 0, creditAmount: 3000 }
+      { accountNumber: "1590", debitAmount: 0, creditAmount: 3000 }
     ]
   );
 });

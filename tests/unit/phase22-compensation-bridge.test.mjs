@@ -6,6 +6,7 @@ import { createLedgerPlatform } from "../../packages/domain-ledger/src/index.mjs
 import { createBenefitsPlatform } from "../../packages/domain-benefits/src/index.mjs";
 import { createTravelPlatform } from "../../packages/domain-travel/src/index.mjs";
 import { createPensionPlatform } from "../../packages/domain-pension/src/index.mjs";
+import { createVatPlatform } from "../../packages/domain-vat/src/index.mjs";
 import { createPayrollPlatform } from "../../packages/domain-payroll/src/index.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -74,7 +75,11 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
         expenseType: "parking",
         paymentMethod: "private_card",
         amount: 100,
-        currencyCode: "SEK"
+        currencyCode: "SEK",
+        sellerCountry: "SE",
+        goodsOrServices: "services",
+        amountExVat: 80,
+        vatRate: 25
       }
     ],
     travelAdvances: [
@@ -147,6 +152,12 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
   assert.equal(approved.payslips[0].totals.taxableBenefitAmount, 600);
   assert.equal(approved.payslips[0].totals.taxFreeAllowanceAmount, 645);
   assert.equal(approved.payslips[0].totals.expenseReimbursementAmount, 100);
+  assert.equal(approved.payslips[0].totals.travelDeductibleExpenseVatAmount, 20);
+  assert.equal(approved.payslips[0].totals.travelExpenseVatDecidedCount, 1);
+  assert.equal(approved.payslips[0].totals.travelExpenseVatReviewCount, 0);
+  assert.equal(approved.payslips[0].totals.travelExpenseVatNotClassifiedCount, 0);
+  assert.equal(approved.payslips[0].totals.taxableBase, 62949);
+  assert.equal(approved.payslips[0].totals.employerContributionBase, 62949);
   assert.equal(approved.payslips[0].totals.salaryExchangeGrossDeductionAmount, 3000);
   assert.equal(approved.payslips[0].totals.pensionPremiumAmount, 7599);
 
@@ -163,6 +174,8 @@ test("Step 22 bridges benefits, travel and pension payloads into one payroll run
     employmentId: employment.employmentId,
     reportingPeriod: "202603"
   })[0];
+  assert.equal(travelClaim.valuation.deductibleExpenseVatAmount, 20);
+  assert.equal(travelClaim.valuation.expenseVatDecidedCount, 1);
   assert.equal(travelClaim.payrollDispatchStatus.approvedCount, 5);
   assert.equal(travelClaim.payrollConsumptions.every((consumption) => consumption.payRunId === payRun.payRunId), true);
 
@@ -191,6 +204,9 @@ function createCompensationBridgeFixture() {
     clock: () => fixedNow,
     hrPlatform
   });
+  const vatPlatform = createVatPlatform({
+    clock: () => fixedNow
+  });
   const benefitsPlatform = createBenefitsPlatform({
     clock: () => fixedNow,
     bootstrapScenarioCode: "test_default_demo",
@@ -198,7 +214,8 @@ function createCompensationBridgeFixture() {
   });
   const travelPlatform = createTravelPlatform({
     clock: () => fixedNow,
-    hrPlatform
+    hrPlatform,
+    vatPlatform
   });
   const pensionPlatform = createPensionPlatform({
     clock: () => fixedNow,

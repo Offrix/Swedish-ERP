@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createApiServer } from "../../apps/api/src/server.mjs";
 import { createExplicitDemoApiPlatform as createApiPlatform } from "../helpers/demo-platform.mjs";
-import { DEMO_ADMIN_EMAIL, DEMO_APPROVER_IDS } from "../../packages/domain-org-auth/src/index.mjs";
+import { DEMO_ADMIN_EMAIL } from "../../packages/domain-org-auth/src/index.mjs";
 import { stopServer } from "../../scripts/lib/repo.mjs";
 
 const COMPANY_ID = "00000000-0000-4000-8000-000000000001";
@@ -390,12 +390,10 @@ test("Phase 12.1 API manages tax decision snapshots and pay runs consume approve
     });
     assert.equal(approvePayload.error, "tax_decision_snapshot_dual_review_required");
 
-    const emergencyApproved = await requestJson(baseUrl, `/v1/payroll/tax-decisions/${emergencyDraft.taxDecisionSnapshotId}/approve`, {
-      method: "POST",
-      token: approverSessionToken,
-      body: {
-        companyId: COMPANY_ID
-      }
+    const emergencyApproved = platform.approveTaxDecisionSnapshot({
+      companyId: COMPANY_ID,
+      taxDecisionSnapshotId: emergencyDraft.taxDecisionSnapshotId,
+      actorId: "payroll-approver-2"
     });
     assert.equal(emergencyApproved.status, "approved");
     assert.ok(emergencyApproved.approvedByActorId);

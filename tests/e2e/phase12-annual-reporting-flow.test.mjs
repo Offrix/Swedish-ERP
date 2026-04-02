@@ -99,6 +99,16 @@ test("Phase 12.1 end-to-end flow exposes annual reporting routes and signs a pac
         signatoryRole: "ceo"
       }
     });
+    await requestJson(baseUrl, `/v1/annual-reporting/packages/${annualPackage.packageId}/versions/${annualPackage.currentVersion.versionId}/signatories`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 201,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        companyUserId: DEMO_IDS.companyUserId,
+        signatoryRole: "board_member"
+      }
+    });
 
     const signed = await requestJson(baseUrl, `/v1/annual-reporting/packages/${annualPackage.packageId}/versions/${annualPackage.currentVersion.versionId}/sign`, {
       method: "POST",
@@ -110,6 +120,7 @@ test("Phase 12.1 end-to-end flow exposes annual reporting routes and signs a pac
     });
     assert.equal(signed.status, "signed");
     assert.equal(signed.currentVersion.packageStatus, "signed");
+    assert.equal(signed.signatories.length, 2);
   } finally {
     await stopServer(server);
   }

@@ -677,6 +677,21 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/annual-reporting/packages/:packageId/authority-overview",
               "/v1/annual-reporting/packages/:packageId/tax-declarations",
               "/v1/annual-reporting/packages/:packageId/tax-declarations/:taxDeclarationPackageId",
+              "/v1/owner-distributions/share-classes",
+              "/v1/owner-distributions/shareholder-holdings",
+              "/v1/owner-distributions/free-equity-snapshots",
+              "/v1/owner-distributions/decisions",
+              "/v1/owner-distributions/decisions/:decisionId",
+              "/v1/owner-distributions/decisions/:decisionId/review",
+              "/v1/owner-distributions/decisions/:decisionId/stamma-ready",
+              "/v1/owner-distributions/decisions/:decisionId/resolve",
+              "/v1/owner-distributions/decisions/:decisionId/payouts",
+              "/v1/owner-distributions/decisions/:decisionId/payouts/record",
+              "/v1/owner-distributions/decisions/:decisionId/payouts/reverse",
+              "/v1/owner-distributions/decisions/:decisionId/ku31",
+              "/v1/owner-distributions/ku31-drafts",
+              "/v1/owner-distributions/kupongskatt-records",
+              "/v1/owner-distributions/audit-events",
               "/v1/submissions",
               "/v1/submissions/:submissionId",
               "/v1/submissions/:submissionId/sign",
@@ -1003,6 +1018,12 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/payroll/garnishment-remittances/:remittanceInstructionId/settle",
               "/v1/payroll/garnishment-remittances/:remittanceInstructionId/return",
               "/v1/payroll/garnishment-remittances/:remittanceInstructionId/correct",
+              "/v1/payroll/receivables",
+              "/v1/payroll/receivables/:employeeReceivableId",
+              "/v1/payroll/receivable-settlement-plans",
+              "/v1/payroll/receivable-offset-decisions",
+              "/v1/payroll/receivable-write-offs",
+              "/v1/payroll/receivable-write-offs/:receivableWriteOffDecisionId/approve",
               "/v1/payroll/pay-runs",
               "/v1/payroll/pay-runs/:payRunId",
               "/v1/payroll/pay-runs/:payRunId/exceptions",
@@ -7886,6 +7907,477 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     return;
   }
 
+  if (req.method === "GET" && path === "/v1/owner-distributions/share-classes") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listShareClasses({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/owner-distributions/share-classes") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 201, platform.createShareClass({
+      companyId,
+      actorId: principal.userId,
+      name: body.name,
+      votesPerShare: body.votesPerShare,
+      dividendPriorityCode: body.dividendPriorityCode
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/owner-distributions/shareholder-holdings") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listShareholderHoldingSnapshots({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/owner-distributions/shareholder-holdings") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 201, platform.createShareholderHoldingSnapshot({
+      companyId,
+      actorId: principal.userId,
+      effectiveDate: body.effectiveDate,
+      evidenceRef: body.evidenceRef,
+      holders: body.holders || []
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/owner-distributions/free-equity-snapshots") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listFreeEquitySnapshots({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/owner-distributions/free-equity-snapshots") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 201, platform.createFreeEquitySnapshot({
+      companyId,
+      actorId: principal.userId,
+      proofSourceType: body.proofSourceType,
+      effectiveDate: body.effectiveDate,
+      freeEquityAmount: body.freeEquityAmount,
+      annualReportPackageId: body.annualReportPackageId,
+      annualReportVersionId: body.annualReportVersionId,
+      evidenceRef: body.evidenceRef,
+      approvedByActorId: body.approvedByActorId,
+      approvedByRoleCode: body.approvedByRoleCode,
+      approvedAt: body.approvedAt
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/owner-distributions/decisions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listDividendDecisions({ companyId })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/owner-distributions/decisions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 201, platform.proposeDividendDecision({
+      companyId,
+      actorId: principal.userId,
+      decisionDate: body.decisionDate,
+      holdingSnapshotId: body.holdingSnapshotId,
+      freeEquitySnapshotId: body.freeEquitySnapshotId,
+      boardEvidenceRef: body.boardEvidenceRef,
+      prudenceAssessmentText: body.prudenceAssessmentText,
+      liquidityAssessmentText: body.liquidityAssessmentText,
+      journalPlan: body.journalPlan || {},
+      perShareAmount: body.perShareAmount,
+      shareClassAmounts: body.shareClassAmounts || null,
+      comment: body.comment || null
+    }));
+    return;
+  }
+
+  const ownerDistributionDecisionMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId");
+  if (ownerDistributionDecisionMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.getDividendDecision({
+      companyId,
+      decisionId: ownerDistributionDecisionMatch.decisionId
+    }));
+    return;
+  }
+
+  const ownerDistributionReviewMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/review");
+  if (ownerDistributionReviewMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.submitDividendDecisionForReview({
+      companyId,
+      decisionId: ownerDistributionReviewMatch.decisionId,
+      actorId: principal.userId,
+      reviewEvidenceRef: body.reviewEvidenceRef,
+      comment: body.comment || null
+    }));
+    return;
+  }
+
+  const ownerDistributionStammaReadyMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/stamma-ready");
+  if (ownerDistributionStammaReadyMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.markDividendDecisionStammaReady({
+      companyId,
+      decisionId: ownerDistributionStammaReadyMatch.decisionId,
+      actorId: principal.userId,
+      stammaNoticeEvidenceRef: body.stammaNoticeEvidenceRef,
+      comment: body.comment || null
+    }));
+    return;
+  }
+
+  const ownerDistributionResolveMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/resolve");
+  if (ownerDistributionResolveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.resolveDividendAtStamma({
+      companyId,
+      decisionId: ownerDistributionResolveMatch.decisionId,
+      actorId: principal.userId,
+      approvedByActorId: body.approvedByActorId,
+      approvedByRoleCode: body.approvedByRoleCode,
+      resolutionDate: body.resolutionDate,
+      evidenceRef: body.evidenceRef
+    }));
+    return;
+  }
+
+  const ownerDistributionPayoutsMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/payouts");
+  if (ownerDistributionPayoutsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listDividendPaymentInstructions({
+        companyId,
+        decisionId: ownerDistributionPayoutsMatch.decisionId
+      })
+    });
+    return;
+  }
+
+  if (ownerDistributionPayoutsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.scheduleDividendPayout({
+      companyId,
+      decisionId: ownerDistributionPayoutsMatch.decisionId,
+      actorId: principal.userId,
+      approvedByActorId: body.approvedByActorId,
+      approvedByRoleCode: body.approvedByRoleCode,
+      paymentDate: body.paymentDate,
+      recipientOverrides: body.recipientOverrides || []
+    }));
+    return;
+  }
+
+  const ownerDistributionPayoutRecordMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/payouts/record");
+  if (ownerDistributionPayoutRecordMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.recordDividendPayout({
+      companyId,
+      decisionId: ownerDistributionPayoutRecordMatch.decisionId,
+      actorId: principal.userId,
+      approvedByActorId: body.approvedByActorId,
+      approvedByRoleCode: body.approvedByRoleCode,
+      payoutDate: body.payoutDate,
+      payouts: body.payouts || []
+    }));
+    return;
+  }
+
+  const ownerDistributionPayoutReverseMatch = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/payouts/reverse");
+  if (ownerDistributionPayoutReverseMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, platform.reverseDividendPayout({
+      companyId,
+      decisionId: ownerDistributionPayoutReverseMatch.decisionId,
+      actorId: principal.userId,
+      approvedByActorId: body.approvedByActorId,
+      approvedByRoleCode: body.approvedByRoleCode,
+      payoutRunId: body.payoutRunId,
+      reversalDate: body.reversalDate
+    }));
+    return;
+  }
+
+  const ownerDistributionKu31Match = matchPath(path, "/v1/owner-distributions/decisions/:decisionId/ku31");
+  if (ownerDistributionKu31Match && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 201, platform.buildKu31Draft({
+      companyId,
+      decisionId: ownerDistributionKu31Match.decisionId,
+      actorId: principal.userId
+    }));
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/owner-distributions/ku31-drafts") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listKu31Drafts({
+        companyId,
+        decisionId: url.searchParams.get("decisionId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/owner-distributions/kupongskatt-records") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "CompanyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listKupongskattRecords({
+        companyId,
+        decisionId: url.searchParams.get("decisionId") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/owner-distributions/audit-events") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "owner_distribution",
+      scopeCode: "annual_reporting"
+    });
+    assertAnnualOperationsAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listOwnerDistributionAuditEvents({
+        companyId,
+        resourceId: url.searchParams.get("resourceId") || null
+      })
+    });
+    return;
+  }
+  
   if (req.method === "GET" && path === "/v1/ar/invoice-series") {
     const companyId = requireText(
       url.searchParams.get("companyId"),
@@ -10278,6 +10770,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         leaveTypeCode: body.leaveTypeCode || null,
         displayName: body.displayName,
         signalType: body.signalType || "none",
+        payrollTreatmentCode: body.payrollTreatmentCode || "none",
         requiresManagerApproval: body.requiresManagerApproval !== false,
         requiresSupportingDocument: body.requiresSupportingDocument === true,
         active: body.active !== false,
@@ -11451,6 +11944,10 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         baseLimit: body.baseLimit ?? null,
         fullRate: body.fullRate,
         reducedRate: body.reducedRate ?? null,
+        reducedComponents: body.reducedComponents ?? null,
+        thresholds: body.thresholds ?? null,
+        vaxaEligibilityProfile: body.vaxaEligibilityProfile ?? null,
+        rulepackRef: body.rulepackRef ?? null,
         specialConditions: body.specialConditions ?? {},
         decisionSource: body.decisionSource,
         decisionReference: body.decisionReference,
@@ -11733,6 +12230,231 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         remittanceInstructionId: remittanceCorrectMatch.remittanceInstructionId,
         correctedAmount: body.correctedAmount,
         correctionReasonCode: body.correctionReasonCode,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/receivables") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listEmployeeReceivables({
+        companyId,
+        employmentId: url.searchParams.get("employmentId") || null,
+        status: url.searchParams.get("status") || null,
+        sourcePayRunId: url.searchParams.get("sourcePayRunId") || null
+      })
+    });
+    return;
+  }
+
+  const employeeReceivableMatch = matchPath(path, "/v1/payroll/receivables/:employeeReceivableId");
+  if (employeeReceivableMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.getEmployeeReceivable({
+        companyId,
+        employeeReceivableId: employeeReceivableMatch.employeeReceivableId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/receivable-settlement-plans") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listReceivableSettlementPlans({
+        companyId,
+        employeeReceivableId: url.searchParams.get("employeeReceivableId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/receivable-settlement-plans") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createReceivableSettlementPlan({
+        companyId,
+        employeeReceivableId: body.employeeReceivableId,
+        firstScheduledReportingPeriod: body.firstScheduledReportingPeriod ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/receivable-offset-decisions") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listReceivableOffsetDecisions({
+        companyId,
+        employeeReceivableId: url.searchParams.get("employeeReceivableId") || null,
+        employmentId: url.searchParams.get("employmentId") || null,
+        reportingPeriod: url.searchParams.get("reportingPeriod") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/receivable-offset-decisions") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createReceivableOffsetDecision({
+        companyId,
+        employeeReceivableId: body.employeeReceivableId,
+        reportingPeriod: body.reportingPeriod,
+        amount: body.amount,
+        note: body.note ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/payroll/receivable-write-offs") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(res, 200, {
+      items: platform.listReceivableWriteOffDecisions({
+        companyId,
+        employeeReceivableId: url.searchParams.get("employeeReceivableId") || null,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/payroll/receivable-write-offs") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createReceivableWriteOffDecision({
+        companyId,
+        employeeReceivableId: body.employeeReceivableId,
+        amount: body.amount ?? null,
+        reasonCode: body.reasonCode,
+        note: body.note ?? null,
+        actorId: principal.userId
+      })
+    );
+    return;
+  }
+
+  const receivableWriteOffApproveMatch = matchPath(path, "/v1/payroll/receivable-write-offs/:receivableWriteOffDecisionId/approve");
+  if (receivableWriteOffApproveMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "payroll",
+      scopeCode: "payroll"
+    });
+    writeJson(
+      res,
+      200,
+      platform.approveReceivableWriteOffDecision({
+        companyId,
+        receivableWriteOffDecisionId: receivableWriteOffApproveMatch.receivableWriteOffDecisionId,
         actorId: principal.userId
       })
     );
@@ -15054,6 +15776,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         companyId,
         husCaseId: husCaseClaimsMatch.husCaseId,
         requestedAmount: body.requestedAmount ?? null,
+        claimRulepackId: body.claimRulepackId ?? null,
         transportType: body.transportType ?? "json",
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
@@ -15217,6 +15940,8 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         husClaimId: husClaimPayoutsMatch.husClaimId,
         payoutAmount: body.payoutAmount,
         payoutDate: body.payoutDate,
+        settlementModelCode: body.settlementModelCode ?? "bank_account",
+        settlementAccountNumber: body.settlementAccountNumber ?? null,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()
       })

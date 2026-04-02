@@ -30,6 +30,7 @@ test("Phase 12.2 end-to-end flow exposes declaration and submission routes and d
     });
 
     const annualPackage = prepareAnnualPackage(platform);
+    postResultTransfer(platform, "phase12-2-e2e");
     const taxPackage = await requestJson(baseUrl, `/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations`, {
       method: "POST",
       token: adminToken,
@@ -222,12 +223,31 @@ function prepareAnnualPackage(platform) {
     companyUserId: DEMO_IDS.companyUserId,
     signatoryRole: "ceo"
   });
+  platform.inviteAnnualReportSignatory({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "board_member"
+  });
   return platform.signAnnualReportVersion({
     companyId: DEMO_IDS.companyId,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
     actorId: DEMO_IDS.userId,
     comment: "Signed annual package for E2E flow."
+  });
+}
+
+function postResultTransfer(platform, actorId) {
+  const fiscalYearId = platform.listFiscalYears({ companyId: DEMO_IDS.companyId }).find((candidate) => candidate.startDate === "2026-01-01")?.fiscalYearId;
+  return platform.createYearEndTransferBatch({
+    companyId: DEMO_IDS.companyId,
+    fiscalYearId,
+    transferKind: "RESULT_TRANSFER",
+    sourceCode: "ANNUAL_REPORTING_CLOSE",
+    actorId,
+    idempotencyKey: `result-transfer:${DEMO_IDS.companyId}:2026:e2e`
   });
 }
 

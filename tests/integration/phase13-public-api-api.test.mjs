@@ -256,10 +256,12 @@ test("Phase 13.1 API enforces OAuth scopes, exposes sandbox data and keeps webho
         accountingPeriodId: period.accountingPeriodId,
         profileCode: "k2",
         textSections: {
-          management_report: "Phase 47 annual report"
+          management_report: "Phase 47 annual report",
+          accounting_policies: "Phase 47 K2 policies"
         },
         noteSections: {
-          notes_bundle: "Phase 47 notes"
+          notes_bundle: "Phase 47 notes",
+          simplified_notes: "Phase 47 simplified notes"
         }
       }
     });

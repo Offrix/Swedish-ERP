@@ -57,6 +57,7 @@ import {
   verifyRuntimeCanonicalRepositorySchemaContract as verifyRuntimeCanonicalRepositorySchemaContractBinding
 } from "../../../packages/domain-core/src/index.mjs";
 import { createAnnualReportingPlatform, ANNUAL_REPORTING_PROVIDER_BASELINES } from "../../../packages/domain-annual-reporting/src/index.mjs";
+import { createOwnerDistributionsPlatform } from "../../../packages/domain-owner-distributions/src/index.mjs";
 import {
   createAutomationAiEngine,
   createProviderBaselineRegistry,
@@ -155,7 +156,8 @@ export const API_PLATFORM_BUILD_ORDER = Object.freeze([
   "id06",
   "field",
   "egenkontroll",
-  "annualReporting"
+  "annualReporting",
+  "ownerDistributions"
 ]);
 
 export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
@@ -174,6 +176,7 @@ export const API_PLATFORM_FLAT_MERGE_ORDER = Object.freeze([
   "automation",
   "core",
   "annualReporting",
+  "ownerDistributions",
   "vat",
   "integrations",
   "ar",
@@ -538,7 +541,8 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         bankingPlatform: dependencies.banking,
         tenantControlPlatform: dependencies.tenantControl,
         evidencePlatform: dependencies.evidence,
-        getCorePlatform: () => getDomain("core")
+        getCorePlatform: () => getDomain("core"),
+        getRegulatedSubmissionsPlatform: () => getDomain("integrations")
       })
   }),
   createDomainDefinition({
@@ -736,11 +740,11 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         fieldPlatform: dependencies.field
       })
   }),
-  createDomainDefinition({
-    key: "annualReporting",
-    label: "Annual reporting",
-    packageName: "@swedish-erp/domain-annual-reporting",
-    dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations", "evidence"],
+    createDomainDefinition({
+      key: "annualReporting",
+      label: "Annual reporting",
+      packageName: "@swedish-erp/domain-annual-reporting",
+      dependsOn: ["ledger", "reporting", "orgAuth", "vat", "payroll", "hus", "pension", "fiscalYear", "legalForm", "integrations", "evidence"],
     create: ({ options, dependencies }) =>
       createAnnualReportingPlatform({
         ...options,
@@ -754,10 +758,24 @@ const API_DOMAIN_DEFINITIONS = Object.freeze([
         fiscalYearPlatform: dependencies.fiscalYear,
         legalFormPlatform: dependencies.legalForm,
         integrationPlatform: dependencies.integrations,
-        evidencePlatform: dependencies.evidence
-      })
-  })
-]);
+          evidencePlatform: dependencies.evidence
+        })
+    }),
+    createDomainDefinition({
+      key: "ownerDistributions",
+      label: "Owner distributions",
+      packageName: "@swedish-erp/domain-owner-distributions",
+      dependsOn: ["ledger", "annualReporting", "legalForm", "orgAuth"],
+      create: ({ options, dependencies }) =>
+        createOwnerDistributionsPlatform({
+          ...options,
+          ledgerPlatform: dependencies.ledger,
+          annualReportingPlatform: dependencies.annualReporting,
+          legalFormPlatform: dependencies.legalForm,
+          orgAuthPlatform: dependencies.orgAuth
+        })
+    })
+  ]);
 
 function requireRegisteredDomain(domains, domainKey, consumerKey) {
   const domain = domains[domainKey];
@@ -1460,6 +1478,7 @@ const CRITICAL_DOMAIN_SNAPSHOT_CLASS_MASK_OVERRIDES = Object.freeze({
   payroll: Object.freeze(["S3"]),
   taxAccount: Object.freeze(["S3"]),
   annualReporting: Object.freeze(["S3"]),
+  ownerDistributions: Object.freeze(["S3"]),
   hus: Object.freeze(["S3"]),
   banking: Object.freeze(["S3"]),
   ledger: Object.freeze(["S3"]),

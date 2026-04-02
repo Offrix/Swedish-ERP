@@ -248,7 +248,7 @@ test("Step 28 API exposes readiness, decision difference and recovery candidate 
         reasonCode: "skatteverket_recovery"
       }
     });
-    assert.equal(recovery.husCase.status, "closed");
+    assert.equal(recovery.husCase.status, "recovered");
     assert.equal(recovery.husRecoveryCandidate.status, "recovered");
 
     const forbiddenDifferences = await fetch(`${baseUrl}/v1/hus/decision-differences?companyId=${COMPANY_ID}`, {

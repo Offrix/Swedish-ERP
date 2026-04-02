@@ -46,7 +46,7 @@ test("Phase 11.5 payroll API exposes locked input snapshot and pay run fingerpri
         companyId: COMPANY_ID,
         employmentTypeCode: "permanent",
         jobTitle: "Snapshot API tester",
-        payModelCode: "monthly_salary",
+        payModelCode: "hourly_salary",
         startDate: "2025-01-01"
       }
     });
@@ -58,8 +58,8 @@ test("Phase 11.5 payroll API exposes locked input snapshot and pay run fingerpri
         companyId: COMPANY_ID,
         employmentId: employment.employmentId,
         validFrom: "2025-01-01",
-        salaryModelCode: "monthly_salary",
-        monthlySalary: 43000
+        salaryModelCode: "hourly_salary",
+        hourlyRate: 200
       }
     });
     await requestJson(baseUrl, `/v1/hr/employees/${employee.employeeId}/bank-accounts`, {
@@ -90,6 +90,48 @@ test("Phase 11.5 payroll API exposes locked input snapshot and pay run fingerpri
       employmentId: employment.employmentId,
       workDate: "2026-03-18",
       workedMinutes: 480,
+      overtimeMinutes: 60,
+      allocationRefs: [
+        {
+          projectId: "project-api-alpha",
+          activityCode: "installation",
+          allocationMinutes: 360
+        },
+        {
+          projectId: "project-api-beta",
+          activityCode: "service",
+          allocationMinutes: 120
+        }
+      ],
+      actorId: "integration-test"
+    });
+    platform.approveTimeSet({
+      companyId: COMPANY_ID,
+      employmentId: employment.employmentId,
+      startsOn: "2026-03-01",
+      endsOn: "2026-03-31",
+      actorId: "integration-test"
+    });
+    const benefitEvent = platform.createBenefitEvent({
+      companyId: COMPANY_ID,
+      employeeId: employee.employeeId,
+      employmentId: employment.employmentId,
+      benefitCode: "HEALTH_INSURANCE",
+      reportingPeriod: "202603",
+      occurredOn: "2026-03-12",
+      sourceId: "phase117-api-benefit",
+      sourcePayload: {
+        insurancePremium: 1000
+      },
+      dimensionJson: {
+        projectId: "project-api-benefit",
+        costCenterCode: "CC-API-BEN"
+      },
+      actorId: "integration-test"
+    });
+    platform.approveBenefitEvent({
+      companyId: COMPANY_ID,
+      benefitEventId: benefitEvent.benefitEventId,
       actorId: "integration-test"
     });
 
@@ -135,6 +177,27 @@ test("Phase 11.5 payroll API exposes locked input snapshot and pay run fingerpri
     assert.equal(run.payrollInputSnapshot.payrollInputSnapshotId, run.payrollInputSnapshotId);
     assert.equal(run.payrollInputSnapshot.inputFingerprint, run.payrollInputFingerprint);
     assert.equal(run.payrollInputSnapshot.sourceSnapshot.manualInputs[0].dimensionJson.projectId, "project-api-snapshot");
+    assert.equal(run.payrollInputSnapshot.sourceSnapshot[employment.employmentId].timeEntries[0].allocationRefs.length, 2);
+    assert.equal(
+      run.payrollInputSnapshot.sourceSnapshot[employment.employmentId].benefitEvents[0].dimensionJson.projectId,
+      "project-api-benefit"
+    );
+    assert.equal(
+      run.payrollInputSnapshot.sourceSnapshot[employment.employmentId].benefitPayrollPayloads[0].dimensionJson.costCenterCode,
+      "CC-API-BEN"
+    );
+    assert.equal(
+      run.lines.some(
+        (line) => line.payItemCode === "HOURLY_SALARY" && line.dimensionJson.projectId === "project-api-alpha" && line.amount === 1050
+      ),
+      true
+    );
+    assert.equal(
+      run.lines.some(
+        (line) => line.payItemCode === "HOURLY_SALARY" && line.dimensionJson.projectId === "project-api-beta" && line.amount === 350
+      ),
+      true
+    );
     assert.equal(rereadRun.payrollInputSnapshotId, run.payrollInputSnapshotId);
     assert.equal(rereadRun.payrollInputFingerprint, run.payrollInputFingerprint);
     assert.equal(rereadRun.payRunFingerprint, run.payRunFingerprint);
@@ -157,7 +220,8 @@ function enabledFlags() {
     phase7HrEnabled: true,
     phase7TimeEnabled: true,
     phase7AbsenceEnabled: true,
-    phase8PayrollEnabled: true
+    phase8PayrollEnabled: true,
+    phase9BenefitsEnabled: true
   };
 }
 

@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createApiPlatform } from "../../apps/api/src/platform.mjs";
+import { createExplicitDemoApiPlatform } from "../helpers/demo-platform.mjs";
+import { DEMO_IDS } from "../../packages/domain-org-auth/src/index.mjs";
 
 test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions changed books", () => {
   const platform = createApiPlatform({
@@ -129,20 +131,46 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
   });
   assert.equal(signatory.status, "invited");
 
-  const signed = platform.signAnnualReportVersion({
+  const partiallySigned = platform.signAnnualReportVersion({
     companyId: company.companyId,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
     actorId: adminUser.userId,
     comment: "Signed annual report."
   });
+  assert.equal(partiallySigned.status, "ready_for_signature");
+  assert.equal(partiallySigned.currentVersion.packageStatus, "ready_for_signature");
+  assert.equal(partiallySigned.currentVersion.lockedAt, null);
+  assert.equal(partiallySigned.currentEvidencePack.signatureArchiveRefs.length, 1);
+
+  const boardSignatory = platform.inviteAnnualReportSignatory({
+    companyId: company.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: adminCompanyUser.companyUserId,
+    signatoryRole: "board_member"
+  });
+  assert.equal(boardSignatory.status, "invited");
+
+  const signed = platform.signAnnualReportVersion({
+    companyId: company.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    actorId: adminUser.userId,
+    comment: "Completed annual signatory chain."
+  });
   assert.equal(signed.status, "signed");
   assert.equal(signed.currentVersion.packageStatus, "signed");
   assert.equal(typeof signed.currentVersion.lockedAt, "string");
   assert.equal(signed.currentVersion.signoffHash, signed.currentVersion.checksum);
-  assert.equal(signed.signatories[0].signatureReference.startsWith("signature:"), true);
-  assert.equal(typeof signed.signatories[0].signatureArchiveRef, "string");
-  assert.equal(signed.currentEvidencePack.signatureArchiveRefs.length, 1);
+  assert.equal(signed.signatories.every((candidate) => candidate.status === "signed"), true);
+  assert.equal(
+    signed.signatories.map((candidate) => candidate.signatoryRole).sort().join(","),
+    "board_member,ceo"
+  );
+  assert.equal(signed.signatories.every((candidate) => candidate.signatureReference.startsWith("signature:")), true);
+  assert.equal(signed.signatories.every((candidate) => typeof candidate.signatureArchiveRef === "string"), true);
+  assert.equal(signed.currentEvidencePack.signatureArchiveRefs.length, 2);
 
   platform.reopenAccountingPeriod({
     companyId: company.companyId,
@@ -178,6 +206,41 @@ test("Phase 12.1 creates K2/K3 annual packages, tracks signatories and versions 
     rightVersionId: revised.currentVersion.versionId
   });
   assert.equal(diff.changes.length > 0, true);
+});
+
+test("Phase 12.4 annual reporting rejects incomplete K3 section sets", () => {
+  const platform = createExplicitDemoApiPlatform({
+    clock: () => new Date("2026-03-22T15:05:00Z")
+  });
+  platform.installLedgerCatalog({
+    companyId: DEMO_IDS.companyId,
+    actorId: "phase12-4-unit"
+  });
+  const period = platform.ensureAccountingYearPeriod({
+    companyId: DEMO_IDS.companyId,
+    fiscalYear: 2026,
+    actorId: "phase12-4-unit"
+  });
+  postJournal(platform, DEMO_IDS.companyId, "phase12-4-unit-income-1", 4800);
+  hardCloseYear(platform, DEMO_IDS.companyId, period.accountingPeriodId);
+
+  assert.throws(
+    () =>
+      platform.createAnnualReportPackage({
+        companyId: DEMO_IDS.companyId,
+        accountingPeriodId: period.accountingPeriodId,
+        profileCode: "k3",
+        actorId: DEMO_IDS.userId,
+        textSections: {
+          management_report: "K3 annual report",
+          accounting_policies: "K3 policies"
+        },
+        noteSections: {
+          notes_bundle: "K3 notes"
+        }
+      }),
+    (error) => error?.code === "annual_report_profile_sections_incomplete"
+  );
 });
 
 function postJournal(platform, companyId, sourceId, amount) {

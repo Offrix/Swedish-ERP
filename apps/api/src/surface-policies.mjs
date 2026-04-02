@@ -204,7 +204,7 @@ const POLICY_REGISTRY = Object.freeze(
 
 const READ_PATH_MATCHERS = Object.freeze([
   createMatcher("backoffice", (path) => path.startsWith("/v1/backoffice") || path.startsWith("/v1/ops") || path.startsWith("/v1/security/classes")),
-  createMatcher("annual_operations", (path) => path.startsWith("/v1/annual-reporting")),
+  createMatcher("annual_operations", (path) => path.startsWith("/v1/annual-reporting") || path.startsWith("/v1/owner-distributions")),
   createMatcher("review_center", (path) => path.startsWith("/v1/review-center") || path.includes("/classification-cases")),
   createMatcher("activity_feed", (path) => path.startsWith("/v1/activity")),
   createMatcher("personalliggare_control", (path) => path.startsWith("/v1/personalliggare")),

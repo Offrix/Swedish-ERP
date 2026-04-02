@@ -26,7 +26,8 @@ export type PostingSourceType =
   | "YEAR_END_TRANSFER"
   | "ROT_RUT_CLAIM"
   | "PENSION_REPORT"
-  | "PROJECT_WIP";
+  | "PROJECT_WIP"
+  | "OWNER_DISTRIBUTION";
 
 export interface PostingIntent {
   readonly intentId: string;

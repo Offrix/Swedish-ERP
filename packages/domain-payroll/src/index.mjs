@@ -58,6 +58,22 @@ export const PAYROLL_GARNISHMENT_REMITTANCE_STATUSES = Object.freeze([
   "returned",
   "corrected"
 ]);
+export const EMPLOYEE_RECEIVABLE_STATUSES = Object.freeze([
+  "open",
+  "scheduled_offset",
+  "partially_settled",
+  "settled",
+  "written_off"
+]);
+const RECEIVABLE_SETTLEMENT_PLAN_STATUSES = Object.freeze(["scheduled", "completed", "cancelled"]);
+const RECEIVABLE_SETTLEMENT_INSTALLMENT_STATUSES = Object.freeze([
+  "planned",
+  "partially_executed",
+  "executed",
+  "cancelled"
+]);
+const RECEIVABLE_OFFSET_DECISION_STATUSES = Object.freeze(["pending_execution", "executed", "cancelled"]);
+const RECEIVABLE_WRITE_OFF_DECISION_STATUSES = Object.freeze(["draft", "approved", "superseded"]);
 export const AGI_SUBMISSION_STATES = Object.freeze([
   "draft",
   "validated",
@@ -73,6 +89,8 @@ export const PAYROLL_PAYOUT_BATCH_STATUSES = Object.freeze(["exported", "matched
 const PAYROLL_EXTERNAL_CONSUMPTION_STAGES = Object.freeze(["calculated", "approved"]);
 const PAYROLL_EMERGENCY_OVERRIDE_DECISION_TYPES = Object.freeze(["emergency_manual"]);
 const PAYROLL_DUAL_REVIEW_EMPLOYER_CONTRIBUTION_DECISION_TYPES = Object.freeze(["vaxa", "emergency_manual"]);
+const PAYROLL_EMPLOYEE_RECEIVABLE_ACCOUNT = "1300";
+const PAYROLL_EMPLOYEE_WRITE_OFF_EXPENSE_ACCOUNT = "7790";
 
 function isJamkningDecisionType(decisionType) {
   return decisionType === "jamkning" || decisionType === "jamkning_fast" || decisionType === "jamkning_procent";
@@ -159,7 +177,7 @@ const PAYROLL_EXCEPTION_RULES = Object.freeze({
   collective_agreement_resolution_failed: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
   collective_agreement_no_active_assignment: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "fix_source" }),
   collective_agreement_missing: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
-  negative_net_pay: Object.freeze({ severity: "error", blocking: true, resolutionPolicy: "recalculate" }),
+  negative_net_pay: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "recalculate" }),
   benefit_without_cash_salary: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
   travel_preapproval_required: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
   travel_allowance_excess_taxable: Object.freeze({ severity: "warning", blocking: false, resolutionPolicy: "manual_review" }),
@@ -219,6 +237,15 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       contributionClasses: {
         full: { ratePercent: 31.42 },
         reduced_age_pension_only: { ratePercent: 10.21 },
+        vaxa: {
+          reducedRatePercent: 10.21,
+          standardRatePercent: 31.42,
+          thresholdAmount: 25000,
+          availabilityFrom: "2026-01-01",
+          refundProcessCode: "tax_account_credit_2026",
+          supportWindowMonths: 24,
+          supportEmployeeCountLimit: 2
+        },
         no_contribution: {
           ratePercent: 0,
           eligibilityBirthYearOnOrBefore: 1937
@@ -227,9 +254,15 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     },
     humanReadableExplanation: [
       "Employer contribution outcome is driven by rule pack, payout date and the resolved statutory profile.",
-      "Reduced-rate eligibility remains explicit so the platform stays deterministic and auditable."
+      "Reduced-rate eligibility remains explicit so the platform stays deterministic and auditable.",
+      "Vaxa support is modelled as a pinned refund exposure against the tax account instead of a hidden inline reduction."
     ],
-    testVectors: [{ vectorId: "payroll-full-2026" }, { vectorId: "payroll-reduced-2026" }, { vectorId: "payroll-none-2026" }],
+    testVectors: [
+      { vectorId: "payroll-full-2026" },
+      { vectorId: "payroll-reduced-2026" },
+      { vectorId: "payroll-none-2026" },
+      { vectorId: "payroll-vaxa-refund-2026" }
+    ],
     migrationNotes: ["Phase 8.2 adds AGI submissions and SINK support on top of this contribution pack."]
   },
   {
@@ -247,6 +280,15 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
       contributionClasses: {
         full: { ratePercent: 31.42 },
         reduced_age_pension_only: { ratePercent: 10.21 },
+        vaxa: {
+          reducedRatePercent: 10.21,
+          standardRatePercent: 31.42,
+          thresholdAmount: 25000,
+          availabilityFrom: "2026-01-01",
+          refundProcessCode: "tax_account_credit_2026",
+          supportWindowMonths: 24,
+          supportEmployeeCountLimit: 2
+        },
         no_contribution: {
           ratePercent: 0,
           eligibilityBirthYearOnOrBefore: 1937
@@ -263,13 +305,15 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
     },
     humanReadableExplanation: [
       "Employer contribution outcome is driven by rule pack, payout date and the resolved statutory profile.",
-      "For pay dates from 1 April 2026 through 30 September 2027 the platform auto-applies the temporary youth reduction for employees who are 19-23 during the payout year, up to SEK 25,000 per month."
+      "For pay dates from 1 April 2026 through 30 September 2027 the platform auto-applies the temporary youth reduction for employees who are 19-23 during the payout year, up to SEK 25,000 per month.",
+      "Vaxa support remains a separate refund exposure against the tax account with the underlying 31.42/10.21 reference rates pinned in the rule pack."
     ],
     testVectors: [
       { vectorId: "payroll-full-2026" },
       { vectorId: "payroll-reduced-2026" },
       { vectorId: "payroll-none-2026" },
-      { vectorId: "payroll-youth-threshold-2026" }
+      { vectorId: "payroll-youth-threshold-2026" },
+      { vectorId: "payroll-vaxa-refund-2026" }
     ],
     migrationNotes: ["Phase 8.2 adds the temporary youth reduction from 1 April 2026 without mutating the pre-April historical pack."]
   },
@@ -369,16 +413,17 @@ const EMPLOYER_CONTRIBUTION_RULE_PACKS = Object.freeze([
 const PAY_ITEM_TEMPLATES = Object.freeze([
   createPayItemTemplate("MONTHLY_SALARY", "monthly_salary", "Manadslon", "contract_monthly_salary", "month", "gross_addition", true, true),
   createPayItemTemplate("HOURLY_SALARY", "hourly_salary", "Timlon", "contract_hourly_rate", "hour", "gross_addition", true, true),
-  createPayItemTemplate("OVERTIME", "overtime", "Overtid", "contract_hourly_rate", "hour", "gross_addition", false, true),
-  createPayItemTemplate("ADDITIONAL_TIME", "additional_time", "Mertid", "contract_hourly_rate", "hour", "gross_addition", false, true),
-  createPayItemTemplate("OB", "ob", "OB", "configured_unit_rate", "hour", "gross_addition", false, true),
-  createPayItemTemplate("JOUR", "jour", "Jour", "configured_unit_rate", "hour", "gross_addition", false, true),
-  createPayItemTemplate("STANDBY", "standby", "Beredskap", "configured_unit_rate", "hour", "gross_addition", false, true),
-  createPayItemTemplate("BONUS", "bonus", "Bonus", "manual_amount", "amount", "gross_addition", false, true),
-  createPayItemTemplate("COMMISSION", "commission", "Provision", "manual_amount", "amount", "gross_addition", false, true),
+  createPayItemTemplate("OVERTIME", "overtime", "Overtid", "contract_hourly_rate", "hour", "gross_addition", true, true),
+  createPayItemTemplate("ADDITIONAL_TIME", "additional_time", "Mertid", "contract_hourly_rate", "hour", "gross_addition", true, true),
+  createPayItemTemplate("OB", "ob", "OB", "configured_unit_rate", "hour", "gross_addition", true, true),
+  createPayItemTemplate("JOUR", "jour", "Jour", "configured_unit_rate", "hour", "gross_addition", true, true),
+  createPayItemTemplate("STANDBY", "standby", "Beredskap", "configured_unit_rate", "hour", "gross_addition", true, true),
+  createPayItemTemplate("BONUS", "bonus", "Bonus", "manual_amount", "amount", "gross_addition", true, true),
+  createPayItemTemplate("COMMISSION", "commission", "Provision", "manual_amount", "amount", "gross_addition", true, true),
   createPayItemTemplate("VACATION_PAY", "vacation_pay", "Semesterlon", "configured_unit_rate", "day", "gross_addition", false, true),
   createPayItemTemplate("VACATION_SUPPLEMENT", "vacation_supplement", "Semestertillagg", "configured_unit_rate", "day", "gross_addition", false, true),
   createPayItemTemplate("VACATION_DEDUCTION", "vacation_deduction", "Semesteravdrag", "configured_unit_rate", "day", "gross_deduction", false, false),
+  createPayItemTemplate("SICK_ABSENCE_DEDUCTION", "sick_absence_deduction", "Sjukavdrag", "configured_unit_rate", "day", "gross_deduction", false, false),
   createPayItemTemplate("SICK_PAY", "sick_pay", "Sjuklon", "configured_unit_rate", "day", "gross_addition", false, true),
   createPayItemTemplate("QUALIFYING_DEDUCTION", "qualifying_deduction", "Karens", "configured_unit_rate", "day", "gross_deduction", false, false),
   createPayItemTemplate("CARE_OF_CHILD", "care_of_child", "VAB", "configured_unit_rate", "day", "gross_deduction", false, false),
@@ -432,6 +477,7 @@ export function createPayrollEngine({
   ruleRegistry = null,
   providerBaselineRegistry = null,
   getCorePlatform = null,
+  getRegulatedSubmissionsPlatform = null,
   secretStore = null,
   secretSealKey = null
 } = {}) {
@@ -475,6 +521,20 @@ export function createPayrollEngine({
     remittanceInstructionIdsByCompany: new Map(),
     remittanceInstructionIdsByRun: new Map(),
     remittanceInstructionIdsByEmployment: new Map(),
+    employeeReceivables: new Map(),
+    employeeReceivableIdsByCompany: new Map(),
+    employeeReceivableIdsByEmployment: new Map(),
+    employeeReceivableIdsByRun: new Map(),
+    receivableSettlementPlans: new Map(),
+    receivableSettlementPlanIdsByCompany: new Map(),
+    receivableSettlementPlanIdByReceivable: new Map(),
+    receivableOffsetDecisions: new Map(),
+    receivableOffsetDecisionIdsByCompany: new Map(),
+    receivableOffsetDecisionIdsByReceivable: new Map(),
+    receivableOffsetDecisionIdsByEmploymentPeriod: new Map(),
+    receivableWriteOffDecisions: new Map(),
+    receivableWriteOffDecisionIdsByCompany: new Map(),
+    receivableWriteOffDecisionIdsByReceivable: new Map(),
     payRunEvents: new Map(),
     payRunEventIdsByRun: new Map(),
     payrollExceptions: new Map(),
@@ -564,6 +624,15 @@ export function createPayrollEngine({
     settleRemittanceInstruction,
     returnRemittanceInstruction,
     correctRemittanceInstruction,
+    listEmployeeReceivables,
+    getEmployeeReceivable,
+    listReceivableSettlementPlans,
+    createReceivableSettlementPlan,
+    listReceivableOffsetDecisions,
+    createReceivableOffsetDecision,
+    listReceivableWriteOffDecisions,
+    createReceivableWriteOffDecision,
+    approveReceivableWriteOffDecision,
     listEmploymentStatutoryProfiles,
     upsertEmploymentStatutoryProfile,
     listPayRuns,
@@ -1009,8 +1078,12 @@ export function createPayrollEngine({
     validFrom,
     validTo = null,
     baseLimit = null,
-    fullRate,
+    fullRate = null,
     reducedRate = null,
+    reducedComponents = null,
+    thresholds = null,
+    vaxaEligibilityProfile = null,
+    rulepackRef = null,
     specialConditions = {},
     decisionSource,
     decisionReference,
@@ -1043,6 +1116,10 @@ export function createPayrollEngine({
       baseLimit,
       fullRate,
       reducedRate,
+      reducedComponents,
+      thresholds,
+      vaxaEligibilityProfile,
+      rulepackRef,
       specialConditions,
       decisionSource,
       decisionReference,
@@ -1051,19 +1128,28 @@ export function createPayrollEngine({
       overrideEndsOn,
       rollbackPlanRef
     });
+    const resolvedRulePack = resolveEmployerContributionRulePackForSnapshot({
+      validFrom: normalized.validFrom,
+      fallbackRulepackRef: normalized.rulepackRef,
+      rules
+    });
+    const normalizedWithRulePack = applyEmployerContributionDecisionRulePackDefaults({
+      normalized,
+      rulePack: resolvedRulePack
+    });
     const requiresDualReview = normalized.decisionType === "vaxa" || normalized.decisionType === "emergency_manual";
     const status = requiresDualReview ? "draft" : "approved";
     const now = nowIso(clock);
     const record = {
       employerContributionDecisionSnapshotId: crypto.randomUUID(),
       companyId: resolvedCompanyId,
-      ...normalized,
+      ...normalizedWithRulePack,
       status,
       requiresDualReview,
       approvedAt: status === "approved" ? now : null,
       approvedByActorId: status === "approved" ? requireText(actorId, "actor_id_required") : null,
-      overrideEndsOn: normalized.overrideEndsOn,
-      rollbackPlanRef: normalized.rollbackPlanRef,
+      overrideEndsOn: normalizedWithRulePack.overrideEndsOn,
+      rollbackPlanRef: normalizedWithRulePack.rollbackPlanRef,
       supersededAt: null,
       supersededBySnapshotId: null,
       createdByActorId: requireText(actorId, "actor_id_required"),
@@ -1376,6 +1462,295 @@ export function createPayrollEngine({
     return presentRemittanceInstruction(state, record);
   }
 
+  function listEmployeeReceivables({ companyId, employmentId = null, status = null, sourcePayRunId = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, EMPLOYEE_RECEIVABLE_STATUSES, "employee_receivable_status_invalid")
+      : null;
+    let ids = state.employeeReceivableIdsByCompany.get(resolvedCompanyId) || [];
+    if (employmentId) {
+      ids = state.employeeReceivableIdsByEmployment.get(
+        buildPayrollEmploymentKey(resolvedCompanyId, requireText(employmentId, "employment_id_required"))
+      ) || [];
+    }
+    if (sourcePayRunId) {
+      const scopedIds = new Set(state.employeeReceivableIdsByRun.get(requireText(sourcePayRunId, "pay_run_id_required")) || []);
+      ids = ids.filter((employeeReceivableId) => scopedIds.has(employeeReceivableId));
+    }
+    return ids
+      .map((employeeReceivableId) => state.employeeReceivables.get(employeeReceivableId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.employmentId.localeCompare(right.employmentId))
+      .map((record) => presentEmployeeReceivable(state, record));
+  }
+
+  function getEmployeeReceivable({ companyId, employeeReceivableId } = {}) {
+    return presentEmployeeReceivable(state, requireEmployeeReceivable(state, companyId, employeeReceivableId));
+  }
+
+  function listReceivableSettlementPlans({ companyId, employeeReceivableId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, RECEIVABLE_SETTLEMENT_PLAN_STATUSES, "receivable_settlement_plan_status_invalid")
+      : null;
+    let ids = state.receivableSettlementPlanIdsByCompany.get(resolvedCompanyId) || [];
+    if (employeeReceivableId) {
+      const scopedId = state.receivableSettlementPlanIdByReceivable.get(
+        requireText(employeeReceivableId, "employee_receivable_id_required")
+      );
+      ids = scopedId ? [scopedId] : [];
+    }
+    return ids
+      .map((receivableSettlementPlanId) => state.receivableSettlementPlans.get(receivableSettlementPlanId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map((record) => presentReceivableSettlementPlan(state, record));
+  }
+
+  function createReceivableSettlementPlan({
+    companyId,
+    employeeReceivableId,
+    firstScheduledReportingPeriod = null,
+    actorId = "system"
+  } = {}) {
+    const receivable = requireEmployeeReceivable(state, companyId, employeeReceivableId);
+    assertEmployeeReceivableOffsetable(receivable);
+    const existingPlanId = state.receivableSettlementPlanIdByReceivable.get(receivable.employeeReceivableId) || null;
+    if (existingPlanId) {
+      const existingPlan = state.receivableSettlementPlans.get(existingPlanId) || null;
+      if (existingPlan && existingPlan.status !== "cancelled") {
+        return presentReceivableSettlementPlan(state, existingPlan);
+      }
+    }
+    const record = createReceivableSettlementPlanRecord({
+      state,
+      receivable,
+      firstScheduledReportingPeriod,
+      actorId,
+      clock
+    });
+    return presentReceivableSettlementPlan(state, record);
+  }
+
+  function listReceivableOffsetDecisions({
+    companyId,
+    employeeReceivableId = null,
+    employmentId = null,
+    reportingPeriod = null,
+    status = null
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, RECEIVABLE_OFFSET_DECISION_STATUSES, "receivable_offset_decision_status_invalid")
+      : null;
+    let ids = state.receivableOffsetDecisionIdsByCompany.get(resolvedCompanyId) || [];
+    if (employeeReceivableId) {
+      ids = state.receivableOffsetDecisionIdsByReceivable.get(
+        requireText(employeeReceivableId, "employee_receivable_id_required")
+      ) || [];
+    }
+    if (employmentId && reportingPeriod) {
+      ids = state.receivableOffsetDecisionIdsByEmploymentPeriod.get(
+        buildReceivableEmploymentPeriodKey({
+          companyId: resolvedCompanyId,
+          employmentId: requireText(employmentId, "employment_id_required"),
+          reportingPeriod
+        })
+      ) || [];
+    }
+    return ids
+      .map((receivableOffsetDecisionId) => state.receivableOffsetDecisions.get(receivableOffsetDecisionId))
+      .filter(Boolean)
+      .filter((candidate) => (employmentId ? candidate.employmentId === employmentId : true))
+      .filter((candidate) => (reportingPeriod ? candidate.reportingPeriod === normalizeReportingPeriod(reportingPeriod, "reporting_period_invalid") : true))
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createReceivableOffsetDecision({
+    companyId,
+    employeeReceivableId,
+    reportingPeriod,
+    amount,
+    note = null,
+    actorId = "system"
+  } = {}) {
+    const receivable = requireEmployeeReceivable(state, companyId, employeeReceivableId);
+    assertEmployeeReceivableOffsetable(receivable);
+    const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "receivable_offset_reporting_period_required");
+    const requestedAmount = normalizeRequiredMoney(amount, "receivable_offset_amount_required");
+    if (requestedAmount <= 0) {
+      throw createError(400, "receivable_offset_amount_invalid", "Receivable offset amount must be greater than zero.");
+    }
+    const openAmount = calculateEmployeeReceivableOpenAmount(receivable);
+    if (requestedAmount > openAmount) {
+      throw createError(
+        409,
+        "receivable_offset_exceeds_outstanding_amount",
+        "Receivable offset amount may not exceed the outstanding employee receivable amount."
+      );
+    }
+    const record = {
+      receivableOffsetDecisionId: crypto.randomUUID(),
+      companyId: receivable.companyId,
+      employeeReceivableId: receivable.employeeReceivableId,
+      employmentId: receivable.employmentId,
+      employeeId: receivable.employeeId,
+      reportingPeriod: resolvedReportingPeriod,
+      requestedAmount,
+      executedAmount: 0,
+      status: "pending_execution",
+      note: normalizeOptionalText(note),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock),
+      executedAt: null,
+      executedByActorId: null,
+      executedPayRunId: null,
+      executedPayRunLineId: null
+    };
+    state.receivableOffsetDecisions.set(record.receivableOffsetDecisionId, record);
+    appendToIndex(state.receivableOffsetDecisionIdsByCompany, record.companyId, record.receivableOffsetDecisionId);
+    appendToIndex(state.receivableOffsetDecisionIdsByReceivable, record.employeeReceivableId, record.receivableOffsetDecisionId);
+    appendToIndex(
+      state.receivableOffsetDecisionIdsByEmploymentPeriod,
+      buildReceivableEmploymentPeriodKey(record),
+      record.receivableOffsetDecisionId
+    );
+    receivable.updatedAt = record.updatedAt;
+    if (receivable.status === "open") {
+      receivable.status = "scheduled_offset";
+    }
+    appendEmployeeReceivableEvent(state, {
+      companyId: record.companyId,
+      employeeReceivableId: record.employeeReceivableId,
+      eventType: "employee_receivable_offset_decision_created",
+      actorId,
+      note: `Created employee receivable offset decision ${record.receivableOffsetDecisionId}.`,
+      recordedAt: record.createdAt
+    });
+    return copy(record);
+  }
+
+  function listReceivableWriteOffDecisions({ companyId, employeeReceivableId = null, status = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedStatus = status
+      ? assertAllowed(status, RECEIVABLE_WRITE_OFF_DECISION_STATUSES, "receivable_write_off_decision_status_invalid")
+      : null;
+    let ids = state.receivableWriteOffDecisionIdsByCompany.get(resolvedCompanyId) || [];
+    if (employeeReceivableId) {
+      ids = state.receivableWriteOffDecisionIdsByReceivable.get(
+        requireText(employeeReceivableId, "employee_receivable_id_required")
+      ) || [];
+    }
+    return ids
+      .map((receivableWriteOffDecisionId) => state.receivableWriteOffDecisions.get(receivableWriteOffDecisionId))
+      .filter(Boolean)
+      .filter((candidate) => (resolvedStatus ? candidate.status === resolvedStatus : true))
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function createReceivableWriteOffDecision({
+    companyId,
+    employeeReceivableId,
+    amount = null,
+    reasonCode,
+    note = null,
+    actorId = "system"
+  } = {}) {
+    const receivable = requireEmployeeReceivable(state, companyId, employeeReceivableId);
+    assertEmployeeReceivableOffsetable(receivable);
+    const openAmount = calculateEmployeeReceivableOpenAmount(receivable);
+    const requestedAmount = amount == null
+      ? openAmount
+      : normalizeRequiredMoney(amount, "receivable_write_off_amount_required");
+    if (requestedAmount <= 0) {
+      throw createError(400, "receivable_write_off_amount_invalid", "Receivable write-off amount must be greater than zero.");
+    }
+    if (requestedAmount !== openAmount) {
+      throw createError(
+        409,
+        "receivable_write_off_full_amount_required",
+        "Receivable write-off must cover the full outstanding amount."
+      );
+    }
+    const record = {
+      receivableWriteOffDecisionId: crypto.randomUUID(),
+      companyId: receivable.companyId,
+      employeeReceivableId: receivable.employeeReceivableId,
+      employmentId: receivable.employmentId,
+      employeeId: receivable.employeeId,
+      amount: requestedAmount,
+      reasonCode: requireText(reasonCode, "receivable_write_off_reason_code_required"),
+      note: normalizeOptionalText(note),
+      status: "draft",
+      requiresDualReview: true,
+      postingIntentPreview: buildReceivableWriteOffPostingIntentPreview({
+        receivable,
+        amount: requestedAmount
+      }),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock),
+      approvedAt: null,
+      approvedByActorId: null,
+      supersededAt: null
+    };
+    state.receivableWriteOffDecisions.set(record.receivableWriteOffDecisionId, record);
+    appendToIndex(state.receivableWriteOffDecisionIdsByCompany, record.companyId, record.receivableWriteOffDecisionId);
+    appendToIndex(state.receivableWriteOffDecisionIdsByReceivable, record.employeeReceivableId, record.receivableWriteOffDecisionId);
+    appendEmployeeReceivableEvent(state, {
+      companyId: record.companyId,
+      employeeReceivableId: record.employeeReceivableId,
+      eventType: "employee_receivable_write_off_decision_created",
+      actorId,
+      note: `Created employee receivable write-off decision ${record.receivableWriteOffDecisionId}.`,
+      recordedAt: record.createdAt
+    });
+    return copy(record);
+  }
+
+  function approveReceivableWriteOffDecision({ companyId, receivableWriteOffDecisionId, actorId = "system" } = {}) {
+    const record = requireReceivableWriteOffDecision(state, companyId, receivableWriteOffDecisionId);
+    if (record.status === "approved") {
+      return copy(record);
+    }
+    const resolvedActorId = requireText(actorId, "actor_id_required");
+    if (record.requiresDualReview === true && record.createdByActorId === resolvedActorId) {
+      throw createError(
+        409,
+        "receivable_write_off_dual_review_required",
+        "Employee receivable write-off approval requires a different actor."
+      );
+    }
+    const receivable = requireEmployeeReceivable(state, companyId, record.employeeReceivableId);
+    assertEmployeeReceivableOffsetable(receivable);
+    receivable.writtenOffAmount = roundMoney(Number(receivable.writtenOffAmount || 0) + Number(record.amount || 0));
+    receivable.outstandingAmount = 0;
+    receivable.status = "written_off";
+    receivable.writtenOffAt = nowIso(clock);
+    receivable.writtenOffByActorId = resolvedActorId;
+    receivable.updatedAt = receivable.writtenOffAt;
+    record.status = "approved";
+    record.approvedAt = receivable.writtenOffAt;
+    record.approvedByActorId = resolvedActorId;
+    record.updatedAt = record.approvedAt;
+    cancelPendingReceivableSettlementArtifacts(state, receivable.employeeReceivableId, record.approvedAt);
+    appendEmployeeReceivableEvent(state, {
+      companyId: receivable.companyId,
+      employeeReceivableId: receivable.employeeReceivableId,
+      eventType: "employee_receivable_written_off",
+      actorId,
+      note: `Approved employee receivable write-off ${record.receivableWriteOffDecisionId}.`,
+      recordedAt: record.approvedAt
+    });
+    return copy(record);
+  }
+
   function listEmploymentStatutoryProfiles({ companyId, employmentId = null } = {}) {
     const resolvedCompanyId = requireText(companyId, "company_id_required");
     const ids = employmentId
@@ -1568,6 +1943,30 @@ export function createPayrollEngine({
         "Payroll run has unresolved blocking exceptions and cannot be approved."
       );
     }
+    applyApprovedVacationBalanceConsumptions({
+      state,
+      payRun,
+      actorId,
+      balancesPlatform
+    });
+    executeApprovedReceivableOffsetDecisionsForPayRun({
+      state,
+      payRun,
+      actorId,
+      clock
+    });
+    registerApprovedEmployeeReceivablesForPayRun({
+      state,
+      payRun,
+      actorId,
+      clock
+    });
+    autoResolveNegativeNetPayExceptionsForPayRun({
+      state,
+      payRun,
+      actorId,
+      clock
+    });
     payRun.status = "approved";
     payRun.approvedAt = nowIso(clock);
     payRun.updatedAt = payRun.approvedAt;
@@ -1800,6 +2199,7 @@ export function createPayrollEngine({
       const result = calculateEmploymentRun({
         state,
         rules,
+        payRunId: run.payRunId,
         employment,
         period,
         runType: run.runType,
@@ -2046,6 +2446,13 @@ export function createPayrollEngine({
     submission.decisionSnapshotRefs = copy(materialized.version.decisionSnapshotRefs || []);
     submission.status = materialized.version.state;
     submission.updatedAt = nowIso(clock);
+    syncAgiVersionEvidenceBundle({
+      state,
+      submission,
+      version: state.agiSubmissionVersions.get(materialized.version.agiSubmissionVersionId),
+      actorId,
+      evidencePlatform
+    });
     return getAgiSubmission({
       companyId: resolvedCompanyId,
       agiSubmissionId: submission.agiSubmissionId
@@ -2071,6 +2478,13 @@ export function createPayrollEngine({
     version.updatedAt = version.validatedAt;
     submission.status = version.state;
     submission.updatedAt = version.validatedAt;
+    syncAgiVersionEvidenceBundle({
+      state,
+      submission,
+      version,
+      actorId: "system",
+      evidencePlatform
+    });
     return enrichAgiSubmission(state, submission);
   }
 
@@ -2098,6 +2512,13 @@ export function createPayrollEngine({
     });
     submission.status = version.state;
     submission.updatedAt = version.readyForSignAt;
+    syncAgiVersionEvidenceBundle({
+      state,
+      submission,
+      version,
+      actorId,
+      evidencePlatform
+    });
     return enrichAgiSubmission(state, submission);
   }
 
@@ -2160,6 +2581,18 @@ export function createPayrollEngine({
     submission.status = version.state;
     submission.updatedAt = version.submittedAt;
 
+    syncAgiAuthoritySubmissionBridge({
+      state,
+      submission,
+      version,
+      actorId,
+      mode,
+      simulatedOutcome: resolvedSimulatedOutcome,
+      receiptMessage,
+      receiptErrors,
+      getCorePlatform
+    });
+
     lockAgiLeaveSignals({
       version,
       timePlatform,
@@ -2196,59 +2629,190 @@ export function createPayrollEngine({
       previousVersion.supersededAt = version.updatedAt;
       previousVersion.updatedAt = version.updatedAt;
     }
-    version.evidenceBundleId = registerPayrollEvidenceBundle({
-      evidencePlatform,
-      executionBoundary,
-      companyId: version.companyId,
-      bundleType: "payroll_trial_submission",
-      sourceObjectType: "payroll_agi_submission",
-      sourceObjectId: version.agiSubmissionId,
-      sourceObjectVersion: version.payloadHash,
-      title: `Payroll AGI submission ${version.reportingPeriod}`,
-      actorId,
-      metadata: {
-        submissionMode: version.submissionMode,
-        receiptStatus: receipt.receiptStatus,
-        legalEffect: executionBoundary.supportsLegalEffect === true,
-        watermarkCode: executionBoundary.watermarkCode || null
-      },
-      artifactRefs: [
-        {
-          artifactType: "agi_payload",
-          artifactRef: `payload:${version.agiSubmissionVersionId}`,
-          checksum: version.payloadHash,
-          roleCode: "submission_payload",
-          metadata: {
-            payloadVersion: version.adapterPayloadJson?.payloadVersion || "agi-json-v1"
-          }
-        },
-        {
-          artifactType: "agi_receipt",
-          artifactRef: `receipt:${receipt.agiReceiptId}`,
-          checksum: buildSnapshotHash(receipt.payloadJson || {}),
-          roleCode: "submission_receipt",
-          metadata: {
-            receiptStatus: receipt.receiptStatus,
-            receiptCode: receipt.receiptCode
-          }
-        }
-      ],
-      sourceRefs: [
-        {
-          sourceType: "agi_submission_version",
-          sourceId: version.agiSubmissionVersionId
-        }
-      ],
-      relatedObjectRefs: [
-        {
-          objectType: "agi_receipt",
-          objectId: receipt.agiReceiptId
-        }
-      ]
-    });
     version.updatedAt = nowIso(clock);
     submission.updatedAt = version.updatedAt;
+    syncAgiVersionEvidenceBundle({
+      state,
+      submission,
+      version,
+      actorId,
+      evidencePlatform
+    });
     return enrichAgiSubmission(state, submission);
+  }
+
+  function syncAgiAuthoritySubmissionBridge({
+    submission,
+    version,
+    actorId,
+    mode,
+    simulatedOutcome,
+    receiptMessage = null,
+    receiptErrors = []
+  } = {}) {
+    const regulatedSubmissionsPlatform = resolvePayrollRegulatedSubmissionsPlatform({
+      getRegulatedSubmissionsPlatform,
+      getCorePlatform
+    });
+    if (!regulatedSubmissionsPlatform || !submission || !version) {
+      return null;
+    }
+    const bridgedSubmission = ensureAgiAuthoritySubmissionDraft({
+      regulatedSubmissionsPlatform,
+      submission,
+      version,
+      actorId
+    });
+    if (!bridgedSubmission) {
+      return null;
+    }
+    const resolvedMode = normalizeOptionalText(mode || version.submissionMode) || "test";
+    const bridgedTransport = regulatedSubmissionsPlatform.executeAuthoritySubmissionTransport({
+      companyId: submission.companyId,
+      submissionId: bridgedSubmission.submissionId,
+      actorId,
+      mode: resolvedMode,
+      transportScenarioCode: resolvedMode === "trial" ? null : "technical_ack",
+      message: normalizeOptionalText(receiptMessage)
+    });
+    if (resolvedMode === "trial") {
+      return regulatedSubmissionsPlatform.executeSubmissionReceiptCollection({
+        companyId: submission.companyId,
+        submissionId: bridgedTransport.submissionId,
+        actorId,
+        triggerCode: "initial_dispatch"
+      });
+    }
+    return regulatedSubmissionsPlatform.registerSubmissionReceipt({
+      companyId: submission.companyId,
+      submissionId: bridgedTransport.submissionId,
+      receiptType: simulatedOutcome === "accepted" ? "business_ack" : "business_nack",
+      providerStatus: `agi_${normalizeOptionalText(simulatedOutcome) || "accepted"}`,
+      message:
+        normalizeOptionalText(receiptMessage)
+        || `AGI ${normalizeOptionalText(simulatedOutcome) || "accepted"} receipt mirrored into regulated submissions.`,
+      requiredInput: buildAgiSubmissionRequiredInputCodes(receiptErrors),
+      actorId,
+      mode: resolvedMode,
+      legalEffect: false
+    });
+  }
+
+  function ensureAgiAuthoritySubmissionDraft({ regulatedSubmissionsPlatform, submission, version, actorId } = {}) {
+    const existingAuthoritySubmissionId = normalizeOptionalText(version?.authoritySubmissionId);
+    if (existingAuthoritySubmissionId) {
+      try {
+        return regulatedSubmissionsPlatform.getAuthoritySubmission({
+          companyId: submission.companyId,
+          submissionId: existingAuthoritySubmissionId
+        });
+      } catch {}
+    }
+    const payloadVersion = requireText(
+      version?.adapterPayloadJson?.payloadVersion || "agi-json-v1",
+      "agi_submission_payload_version_required"
+    );
+    const latestPayrollSignatureReference = resolveLatestAgiSignatureReference(version);
+    const payload = buildAgiAuthoritySubmissionPayload({
+      submission,
+      version,
+      payloadVersion,
+      payrollSignatureReference: latestPayrollSignatureReference
+    });
+    const previousVersion = version?.previousSubmittedVersionId
+      ? requireAgiSubmissionVersion(state, version.previousSubmittedVersionId)
+      : null;
+    const previousAuthoritySubmissionId = normalizeOptionalText(previousVersion?.authoritySubmissionId);
+    const prepared =
+      previousAuthoritySubmissionId
+        ? regulatedSubmissionsPlatform.openSubmissionCorrection({
+            companyId: submission.companyId,
+            submissionId: previousAuthoritySubmissionId,
+            actorId,
+            reasonCode: version.correctionReason || "agi_correction_version",
+            sourceObjectType: "payroll_agi_submission_version",
+            sourceObjectId: version.agiSubmissionVersionId,
+            sourceObjectVersion: version.agiSubmissionVersionId,
+            payload,
+            payloadVersion,
+            providerKey: PAYROLL_AGI_PROVIDER_CODE,
+            recipientId: "skatteverket:agi",
+            submissionFamilyCode: "agi_monthly",
+            evidencePackId: version.evidenceBundleId,
+            signedState: "not_required",
+            retryClass: "manual_only",
+            correlationId: submission.agiSubmissionId
+          }).submission
+        : regulatedSubmissionsPlatform.prepareAuthoritySubmission({
+            companyId: submission.companyId,
+            submissionType: "agi_monthly",
+            submissionFamilyCode: "agi_monthly",
+            periodId: submission.reportingPeriod,
+            sourceObjectType: "payroll_agi_submission_version",
+            sourceObjectId: version.agiSubmissionVersionId,
+            sourceObjectVersion: version.agiSubmissionVersionId,
+            payloadVersion,
+            providerKey: PAYROLL_AGI_PROVIDER_CODE,
+            recipientId: "skatteverket:agi",
+            payload,
+            signedState: "not_required",
+            evidencePackId: version.evidenceBundleId,
+            retryClass: "manual_only",
+            rulepackRefs: version.rulepackRefs || [],
+            providerBaselineRefs: version.providerBaselineRefs || [],
+            decisionSnapshotRefs: version.decisionSnapshotRefs || [],
+            actorId,
+            idempotencyKey: buildAgiAuthoritySubmissionIdempotencyKey({ submission, version }),
+            correlationId: submission.agiSubmissionId
+          });
+    version.authoritySubmissionId = prepared.submissionId;
+    return prepared;
+  }
+
+  function buildAgiAuthoritySubmissionPayload({ submission, version, payloadVersion, payrollSignatureReference = null } = {}) {
+    return {
+      sourceObjectVersion: version.agiSubmissionVersionId,
+      currentVersionId: version.agiSubmissionVersionId,
+      agiSubmissionId: submission.agiSubmissionId,
+      agiSubmissionVersionId: version.agiSubmissionVersionId,
+      reportingPeriod: submission.reportingPeriod,
+      evidencePackId: version.evidenceBundleId,
+      executionBoundary: copy(version.executionBoundary || {}),
+      payloadVersion,
+      payrollSignatureReference: normalizeOptionalText(payrollSignatureReference),
+      declarationEnvelope: copy(version.adapterPayloadJson?.declarationEnvelope || {}),
+      totals: copy(version.payloadJson?.totals || {}),
+      employerTotals: copy(version.payloadJson?.employerTotals || {})
+    };
+  }
+
+  function buildAgiAuthoritySubmissionIdempotencyKey({ submission, version } = {}) {
+    return buildSnapshotHash({
+      submissionType: "agi_monthly",
+      companyId: submission?.companyId,
+      reportingPeriod: submission?.reportingPeriod,
+      agiSubmissionId: submission?.agiSubmissionId,
+      agiSubmissionVersionId: version?.agiSubmissionVersionId,
+      payloadHash: version?.payloadHash
+    });
+  }
+
+  function resolveLatestAgiSignatureReference(version) {
+    const signatureIds = state.agiSignatureIdsByVersion.get(version?.agiSubmissionVersionId) || [];
+    const latestSignatureId = signatureIds[signatureIds.length - 1] || null;
+    const latestSignature = latestSignatureId ? state.agiSignatures.get(latestSignatureId) : null;
+    return normalizeOptionalText(latestSignature?.signatureReference);
+  }
+
+  function buildAgiSubmissionRequiredInputCodes(receiptErrors) {
+    if (!Array.isArray(receiptErrors) || receiptErrors.length === 0) {
+      return [];
+    }
+    return [...new Set(
+      receiptErrors
+        .map((error) => normalizeOptionalText(error?.errorCode || error?.code))
+        .filter(Boolean)
+    )];
   }
 
   function createAgiCorrectionVersion({ companyId, agiSubmissionId, correctionReason, actorId = "system" } = {}) {
@@ -2282,6 +2846,13 @@ export function createPayrollEngine({
     submission.decisionSnapshotRefs = copy(materialized.version.decisionSnapshotRefs || []);
     submission.status = materialized.version.state;
     submission.updatedAt = nowIso(clock);
+    syncAgiVersionEvidenceBundle({
+      state,
+      submission,
+      version: state.agiSubmissionVersions.get(materialized.version.agiSubmissionVersionId),
+      actorId,
+      evidencePlatform
+    });
     return enrichAgiSubmission(state, submission);
   }
 
@@ -2312,7 +2883,9 @@ export function createPayrollEngine({
     const postingModel = buildPayrollPostingModel({
       state,
       payRun,
-      ledgerPlatform
+      ledgerPlatform,
+      hrPlatform,
+      rules
     });
 
     const posted = ledgerPlatform.applyPostingIntent({
@@ -2629,7 +3202,9 @@ export function createPayrollEngine({
       state,
       companyId,
       reportingPeriod,
-      clock
+      clock,
+      hrPlatform,
+      rules
     });
     const existing = listVacationLiabilitySnapshots({ companyId, reportingPeriod: model.reportingPeriod })
       .find((candidate) => candidate.snapshotHash === model.snapshotHash);
@@ -2899,7 +3474,7 @@ function resolvePayrollSettlementRail({ companyId, bankAccountId = null, banking
   });
 }
 
-function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
+function buildPayrollPostingModel({ state, payRun, ledgerPlatform, hrPlatform = null, rules = null }) {
   const lines = (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
     .map((payRunLineId) => state.payRunLines.get(payRunLineId))
     .filter(Boolean);
@@ -2963,8 +3538,14 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
   const employerContributionAmount = roundMoney(
     payslips.reduce((sum, payslip) => sum + Number(payslip.totals.employerContributionPreviewAmount || 0), 0)
   );
-  const netPayAmount = roundMoney(
-    payslips.reduce((sum, payslip) => sum + Math.max(0, Number(payslip.totals.netPay || 0)), 0)
+  const cashNetPayAmount = roundMoney(
+    payslips.reduce((sum, payslip) => sum + Number(payslip.totals.cashNetPayAmount ?? Math.max(0, Number(payslip.totals.netPay || 0))), 0)
+  );
+  const employeeReceivableAmount = roundMoney(
+    payslips.reduce(
+      (sum, payslip) => sum + Number(payslip.totals.employeeReceivableAmount ?? Math.max(0, -Number(payslip.totals.netPay || 0))),
+      0
+    )
   );
 
   if (preliminaryTaxAmount > 0) {
@@ -2994,11 +3575,17 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
     state,
     companyId: payRun.companyId,
     reportingPeriod: payRun.reportingPeriod,
-    clock: { now: payRun.payDate }
+    clock: { now: payRun.payDate },
+    hrPlatform,
+    rules
   });
   const previousVacationSnapshot = findLatestVacationLiabilitySnapshotBeforePeriod(state, payRun.companyId, payRun.reportingPeriod);
   const vacationLiabilityDeltaAmount = roundMoney(
     Number(currentVacationSnapshot.totals.liabilityAmount || 0) - Number(previousVacationSnapshot?.totals?.liabilityAmount || 0)
+  );
+  const vacationEmployerContributionLiabilityDeltaAmount = roundMoney(
+    Number(currentVacationSnapshot.totals.employerContributionLiabilityAmount || 0)
+      - Number(previousVacationSnapshot?.totals?.employerContributionLiabilityAmount || 0)
   );
   if (vacationLiabilityDeltaAmount !== 0) {
     if (vacationLiabilityDeltaAmount > 0) {
@@ -3029,12 +3616,49 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
       });
     }
   }
+  if (vacationEmployerContributionLiabilityDeltaAmount !== 0) {
+    if (vacationEmployerContributionLiabilityDeltaAmount > 0) {
+      journalLines.push({
+        accountNumber: "7110",
+        debitAmount: vacationEmployerContributionLiabilityDeltaAmount,
+        creditAmount: 0,
+        dimensionJson: {}
+      });
+      journalLines.push({
+        accountNumber: "2540",
+        debitAmount: 0,
+        creditAmount: vacationEmployerContributionLiabilityDeltaAmount,
+        dimensionJson: {}
+      });
+    } else {
+      journalLines.push({
+        accountNumber: "2540",
+        debitAmount: Math.abs(vacationEmployerContributionLiabilityDeltaAmount),
+        creditAmount: 0,
+        dimensionJson: {}
+      });
+      journalLines.push({
+        accountNumber: "7110",
+        debitAmount: 0,
+        creditAmount: Math.abs(vacationEmployerContributionLiabilityDeltaAmount),
+        dimensionJson: {}
+      });
+    }
+  }
 
-  if (netPayAmount > 0) {
+  if (cashNetPayAmount > 0) {
     journalLines.push({
       accountNumber: "2790",
       debitAmount: 0,
-      creditAmount: netPayAmount,
+      creditAmount: cashNetPayAmount,
+      dimensionJson: {}
+    });
+  }
+  if (employeeReceivableAmount > 0) {
+    journalLines.push({
+      accountNumber: PAYROLL_EMPLOYEE_RECEIVABLE_ACCOUNT,
+      debitAmount: employeeReceivableAmount,
+      creditAmount: 0,
       dimensionJson: {}
     });
   }
@@ -3053,9 +3677,12 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
     journalLines: mergedLines,
     preliminaryTaxAmount,
     employerContributionAmount,
-    netPayAmount,
+    cashNetPayAmount,
+    employeeReceivableAmount,
     vacationLiabilityAmount: currentVacationSnapshot.totals.liabilityAmount,
-    vacationLiabilityDeltaAmount
+    vacationLiabilityDeltaAmount,
+    vacationEmployerContributionLiabilityAmount: currentVacationSnapshot.totals.employerContributionLiabilityAmount,
+    vacationEmployerContributionLiabilityDeltaAmount
   });
   return {
     sourceSnapshotHash: buildSnapshotHash({
@@ -3068,9 +3695,13 @@ function buildPayrollPostingModel({ state, payRun, ledgerPlatform }) {
     totals: {
       preliminaryTaxAmount,
       employerContributionAmount,
-      netPayAmount,
+      netPayAmount: cashNetPayAmount,
+      cashNetPayAmount,
+      employeeReceivableAmount,
       vacationLiabilityAmount: currentVacationSnapshot.totals.liabilityAmount,
-      vacationLiabilityDeltaAmount
+      vacationLiabilityDeltaAmount,
+      vacationEmployerContributionLiabilityAmount: currentVacationSnapshot.totals.employerContributionLiabilityAmount,
+      vacationEmployerContributionLiabilityDeltaAmount
     }
   };
 }
@@ -3083,8 +3714,8 @@ function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPla
     .map(enrichPayslip);
   const lines = payslips
     .map((payslip) => {
-      const netPayAmount = roundMoney(Math.max(0, Number(payslip.totals.netPay || 0)));
-      if (!netPayAmount) {
+      const cashNetPayAmount = roundMoney(Number(payslip.totals.cashNetPayAmount ?? Math.max(0, Number(payslip.totals.netPay || 0))));
+      if (!cashNetPayAmount) {
         return null;
       }
       const bankAccount =
@@ -3118,7 +3749,7 @@ function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPla
         payoutMethod: trialGuardActive ? "trial_non_live_rail" : bankAccount?.payoutMethod || null,
         accountTarget,
         employeeBankAccountId: trialGuardActive ? null : bankAccount?.employeeBankAccountId || null,
-        amount: netPayAmount,
+        amount: cashNetPayAmount,
         currencyCode: "SEK",
         paymentReference: `LON ${payRun.reportingPeriod} ${payslip.employee.employeeNumber || payslip.employee.employeeId.slice(0, 8)}`,
         bankRailMode: trialGuardActive ? "trial_non_live" : "standard",
@@ -3144,6 +3775,493 @@ function buildPayrollPayoutBatchModel({ state, payRun, companyBankAccount, hrPla
       exportPayload
     })
   };
+}
+
+function presentEmployeeReceivable(state, record) {
+  const settlementPlanId = record?.settlementPlanId || state.receivableSettlementPlanIdByReceivable.get(record?.employeeReceivableId) || null;
+  const settlementPlan = settlementPlanId ? state.receivableSettlementPlans.get(settlementPlanId) || null : null;
+  const offsetDecisions = (state.receivableOffsetDecisionIdsByReceivable.get(record.employeeReceivableId) || [])
+    .map((receivableOffsetDecisionId) => state.receivableOffsetDecisions.get(receivableOffsetDecisionId))
+    .filter(Boolean)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map(copy);
+  const writeOffDecisions = (state.receivableWriteOffDecisionIdsByReceivable.get(record.employeeReceivableId) || [])
+    .map((receivableWriteOffDecisionId) => state.receivableWriteOffDecisions.get(receivableWriteOffDecisionId))
+    .filter(Boolean)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map(copy);
+  return {
+    ...copy(record),
+    settlementPlan: settlementPlan ? presentReceivableSettlementPlan(state, settlementPlan) : null,
+    offsetDecisions,
+    writeOffDecisions
+  };
+}
+
+function presentReceivableSettlementPlan(state, record) {
+  const receivable = state.employeeReceivables.get(record.employeeReceivableId) || null;
+  return {
+    ...copy(record),
+    currentOutstandingAmount: receivable ? roundMoney(Number(receivable.outstandingAmount || 0)) : null
+  };
+}
+
+function summarizeEmployeeReceivables(receivables) {
+  const items = Array.isArray(receivables) ? receivables : [];
+  return {
+    totalCount: items.length,
+    openCount: items.filter((item) => item.status === "open").length,
+    scheduledOffsetCount: items.filter((item) => item.status === "scheduled_offset").length,
+    partiallySettledCount: items.filter((item) => item.status === "partially_settled").length,
+    settledCount: items.filter((item) => item.status === "settled").length,
+    writtenOffCount: items.filter((item) => item.status === "written_off").length,
+    outstandingAmount: roundMoney(items.reduce((sum, item) => sum + Number(item.outstandingAmount || 0), 0))
+  };
+}
+
+function buildReceivableEmploymentPeriodKey({ companyId, employmentId, reportingPeriod }) {
+  return `${requireText(companyId, "company_id_required")}:${requireText(employmentId, "employment_id_required")}:${normalizeReportingPeriod(reportingPeriod, "reporting_period_required")}`;
+}
+
+function buildNextReportingPeriod(reportingPeriod) {
+  const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "reporting_period_required");
+  const year = Number(resolvedReportingPeriod.slice(0, 4));
+  const month = Number(resolvedReportingPeriod.slice(4, 6));
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+  return `${String(nextYear).padStart(4, "0")}${String(nextMonth).padStart(2, "0")}`;
+}
+
+function calculateEmployeeReceivableOpenAmount(receivable) {
+  return roundMoney(
+    Number(receivable.amount || 0) - Number(receivable.settledAmount || 0) - Number(receivable.writtenOffAmount || 0)
+  );
+}
+
+function assertEmployeeReceivableOffsetable(receivable) {
+  if (!receivable) {
+    throw createError(404, "employee_receivable_not_found", "Employee receivable was not found.");
+  }
+  if (["settled", "written_off"].includes(receivable.status)) {
+    throw createError(
+      409,
+      "employee_receivable_not_open",
+      "Employee receivable is no longer open for offset or write-off decisions."
+    );
+  }
+}
+
+function buildReceivableWriteOffPostingIntentPreview({ receivable, amount }) {
+  const resolvedAmount = normalizeRequiredMoney(amount, "receivable_write_off_amount_required");
+  const journalLines = mergePayrollJournalLines([
+    {
+      accountNumber: PAYROLL_EMPLOYEE_WRITE_OFF_EXPENSE_ACCOUNT,
+      debitAmount: resolvedAmount,
+      creditAmount: 0,
+      dimensionJson: {}
+    },
+    {
+      accountNumber: PAYROLL_EMPLOYEE_RECEIVABLE_ACCOUNT,
+      debitAmount: 0,
+      creditAmount: resolvedAmount,
+      dimensionJson: {}
+    }
+  ]);
+  return {
+    payloadHash: buildSnapshotHash({
+      employeeReceivableId: receivable.employeeReceivableId,
+      amount: resolvedAmount,
+      journalLines
+    }),
+    journalLines
+  };
+}
+
+function appendEmployeeReceivableEvent(state, { companyId, employeeReceivableId, eventType, actorId, note, recordedAt }) {
+  const receivable = state.employeeReceivables.get(requireText(employeeReceivableId, "employee_receivable_id_required")) || null;
+  if (!receivable?.sourcePayRunId) {
+    return;
+  }
+  appendRunEvent(state, {
+    payRunId: receivable.sourcePayRunId,
+    companyId: requireText(companyId, "company_id_required"),
+    eventType,
+    actorId,
+    note,
+    recordedAt
+  });
+}
+
+function createReceivableSettlementInstallment({
+  reportingPeriod,
+  plannedAmount,
+  status = "planned",
+  executedAmount = 0,
+  executedAt = null,
+  executedPayRunId = null,
+  executedPayRunLineId = null
+}) {
+  return {
+    installmentId: crypto.randomUUID(),
+    reportingPeriod: normalizeReportingPeriod(reportingPeriod, "reporting_period_required"),
+    plannedAmount: normalizeRequiredMoney(plannedAmount, "receivable_settlement_planned_amount_required"),
+    executedAmount: roundMoney(executedAmount || 0),
+    status: assertAllowed(status, RECEIVABLE_SETTLEMENT_INSTALLMENT_STATUSES, "receivable_settlement_installment_status_invalid"),
+    executedAt: normalizeOptionalIsoTimestamp(executedAt, "receivable_settlement_installment_executed_at_invalid"),
+    executedPayRunId: normalizeOptionalText(executedPayRunId),
+    executedPayRunLineId: normalizeOptionalText(executedPayRunLineId)
+  };
+}
+
+function createReceivableSettlementPlanRecord({
+  state,
+  receivable,
+  firstScheduledReportingPeriod = null,
+  actorId = "system",
+  clock,
+  timestamp = null
+}) {
+  const createdAt = normalizeOptionalIsoTimestamp(timestamp, "receivable_settlement_plan_timestamp_invalid") || nowIso(clock);
+  const plannedReportingPeriod = firstScheduledReportingPeriod
+    ? normalizeReportingPeriod(firstScheduledReportingPeriod, "receivable_settlement_reporting_period_invalid")
+    : buildNextReportingPeriod(receivable.sourceReportingPeriod);
+  const record = {
+    receivableSettlementPlanId: crypto.randomUUID(),
+    companyId: receivable.companyId,
+    employeeReceivableId: receivable.employeeReceivableId,
+    employmentId: receivable.employmentId,
+    employeeId: receivable.employeeId,
+    sourcePayRunId: receivable.sourcePayRunId,
+    sourceReportingPeriod: receivable.sourceReportingPeriod,
+    status: "scheduled",
+    installments: [
+      createReceivableSettlementInstallment({
+        reportingPeriod: plannedReportingPeriod,
+        plannedAmount: calculateEmployeeReceivableOpenAmount(receivable)
+      })
+    ],
+    createdByActorId: requireText(actorId, "actor_id_required"),
+    createdAt,
+    updatedAt: createdAt,
+    completedAt: null,
+    cancelledAt: null
+  };
+  state.receivableSettlementPlans.set(record.receivableSettlementPlanId, record);
+  appendToIndex(state.receivableSettlementPlanIdsByCompany, record.companyId, record.receivableSettlementPlanId);
+  state.receivableSettlementPlanIdByReceivable.set(record.employeeReceivableId, record.receivableSettlementPlanId);
+  receivable.settlementPlanId = record.receivableSettlementPlanId;
+  receivable.status = "scheduled_offset";
+  receivable.updatedAt = record.updatedAt;
+  appendEmployeeReceivableEvent(state, {
+    companyId: receivable.companyId,
+    employeeReceivableId: receivable.employeeReceivableId,
+    eventType: "employee_receivable_settlement_plan_created",
+    actorId,
+    note: `Created employee receivable settlement plan ${record.receivableSettlementPlanId}.`,
+    recordedAt: record.createdAt
+  });
+  return record;
+}
+
+function createReceivableOffsetLines({ state, payRunId = null, employment, reportingPeriod }) {
+  const decisions = (state.receivableOffsetDecisionIdsByEmploymentPeriod.get(
+    buildReceivableEmploymentPeriodKey({
+      companyId: employment.companyId,
+      employmentId: employment.employmentId,
+      reportingPeriod
+    })
+  ) || [])
+    .map((receivableOffsetDecisionId) => state.receivableOffsetDecisions.get(receivableOffsetDecisionId))
+    .filter(Boolean)
+    .filter((decision) => decision.status === "pending_execution");
+  if (decisions.length === 0) {
+    return {
+      lines: [],
+      decisionPreviews: []
+    };
+  }
+  const payItem = requirePayItemByCode(state, employment.companyId, "RECLAIM");
+  const lines = [];
+  const decisionPreviews = [];
+  for (const decision of decisions) {
+    const receivable = state.employeeReceivables.get(decision.employeeReceivableId) || null;
+    if (!receivable || ["settled", "written_off"].includes(receivable.status)) {
+      continue;
+    }
+    const openAmount = calculateEmployeeReceivableOpenAmount(receivable);
+    const lineAmount = roundMoney(Math.min(Number(decision.requestedAmount || 0), openAmount));
+    if (lineAmount <= 0) {
+      continue;
+    }
+    lines.push(
+      createPayLine({
+        payItem,
+        employment,
+        amount: lineAmount,
+        sourceType: "employee_receivable_offset_decision",
+        sourceId: decision.receivableOffsetDecisionId,
+        note: decision.note || `Employee receivable offset ${decision.receivableOffsetDecisionId}.`,
+        processingStep: 13,
+        overrides: {
+          ledgerAccountCode: PAYROLL_EMPLOYEE_RECEIVABLE_ACCOUNT
+        }
+      })
+    );
+    decisionPreviews.push({
+      receivableOffsetDecisionId: decision.receivableOffsetDecisionId,
+      employeeReceivableId: decision.employeeReceivableId,
+      requestedAmount: decision.requestedAmount,
+      plannedAmount: lineAmount,
+      openAmount,
+      reportingPeriod: decision.reportingPeriod,
+      payRunId: normalizeOptionalText(payRunId)
+    });
+  }
+  return {
+    lines,
+    decisionPreviews
+  };
+}
+
+function executeApprovedReceivableOffsetDecisionsForPayRun({ state, payRun, actorId = "system", clock }) {
+  const storedLines = (state.payRunLineIdsByRun.get(payRun.payRunId) || [])
+    .map((payRunLineId) => state.payRunLines.get(payRunLineId))
+    .filter(Boolean)
+    .filter((line) => line.sourceType === "employee_receivable_offset_decision");
+  for (const line of storedLines) {
+    const decision = state.receivableOffsetDecisions.get(requireText(line.sourceId, "receivable_offset_decision_id_required")) || null;
+    if (!decision) {
+      throw createError(409, "receivable_offset_decision_not_found", "Employee receivable offset decision was not found.");
+    }
+    if (decision.status !== "pending_execution") {
+      continue;
+    }
+    const receivable = requireEmployeeReceivable(state, payRun.companyId, decision.employeeReceivableId);
+    const openAmount = calculateEmployeeReceivableOpenAmount(receivable);
+    const lineAmount = roundMoney(Math.abs(directionalAmount(line)));
+    if (lineAmount > openAmount) {
+      throw createError(
+        409,
+        "receivable_offset_pay_run_stale",
+        "Employee receivable changed after payroll calculation. Recalculate the pay run before approval."
+      );
+    }
+    decision.executedAmount = lineAmount;
+    decision.status = "executed";
+    decision.executedAt = nowIso(clock);
+    decision.executedByActorId = requireText(actorId, "actor_id_required");
+    decision.executedPayRunId = payRun.payRunId;
+    decision.executedPayRunLineId = line.payRunLineId;
+    decision.updatedAt = decision.executedAt;
+    receivable.settledAmount = roundMoney(Number(receivable.settledAmount || 0) + lineAmount);
+    receivable.outstandingAmount = calculateEmployeeReceivableOpenAmount(receivable);
+    receivable.status = receivable.outstandingAmount > 0 ? "partially_settled" : "settled";
+    receivable.updatedAt = decision.executedAt;
+    if (receivable.outstandingAmount <= 0) {
+      receivable.settledAt = decision.executedAt;
+      receivable.settledByActorId = requireText(actorId, "actor_id_required");
+    }
+    syncReceivableSettlementPlanForExecution({
+      state,
+      receivable,
+      decision,
+      payRun,
+      line,
+      executedAt: decision.executedAt
+    });
+    appendRunEvent(state, {
+      payRunId: payRun.payRunId,
+      companyId: payRun.companyId,
+      eventType: "employee_receivable_offset_executed",
+      actorId,
+      note: `Executed employee receivable offset ${decision.receivableOffsetDecisionId}.`,
+      recordedAt: decision.executedAt
+    });
+  }
+}
+
+function syncReceivableSettlementPlanForExecution({ state, receivable, decision, payRun, line, executedAt }) {
+  const existingPlanId = state.receivableSettlementPlanIdByReceivable.get(receivable.employeeReceivableId) || null;
+  const plan = existingPlanId
+    ? state.receivableSettlementPlans.get(existingPlanId) || null
+    : createReceivableSettlementPlanRecord({
+      state,
+      receivable,
+      firstScheduledReportingPeriod: decision.reportingPeriod,
+      actorId: decision.createdByActorId,
+      clock: () => new Date(executedAt),
+      timestamp: executedAt
+    });
+  let installment = (plan.installments || []).find((candidate) => candidate.reportingPeriod === decision.reportingPeriod) || null;
+  if (!installment) {
+    installment = createReceivableSettlementInstallment({
+      reportingPeriod: decision.reportingPeriod,
+      plannedAmount: decision.executedAmount
+    });
+    plan.installments.push(installment);
+  }
+  installment.executedAmount = roundMoney(Number(installment.executedAmount || 0) + Number(decision.executedAmount || 0));
+  installment.executedAt = executedAt;
+  installment.executedPayRunId = payRun.payRunId;
+  installment.executedPayRunLineId = line.payRunLineId;
+  installment.status =
+    installment.executedAmount >= installment.plannedAmount
+      ? "executed"
+      : installment.executedAmount > 0
+        ? "partially_executed"
+        : installment.status;
+  if (receivable.outstandingAmount <= 0) {
+    plan.status = "completed";
+    plan.completedAt = executedAt;
+    for (const candidate of plan.installments || []) {
+      if (candidate.status === "planned") {
+        candidate.status = "cancelled";
+      }
+    }
+  } else {
+    plan.status = "scheduled";
+    const hasFutureInstallment = (plan.installments || []).some(
+      (candidate) =>
+        candidate.reportingPeriod > payRun.reportingPeriod
+        && ["planned", "partially_executed"].includes(candidate.status)
+    );
+    if (!hasFutureInstallment) {
+      plan.installments.push(
+        createReceivableSettlementInstallment({
+          reportingPeriod: buildNextReportingPeriod(payRun.reportingPeriod),
+          plannedAmount: receivable.outstandingAmount
+        })
+      );
+    }
+  }
+  plan.updatedAt = executedAt;
+}
+
+function registerApprovedEmployeeReceivablesForPayRun({ state, payRun, actorId = "system", clock }) {
+  const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
+    .map((payslipId) => state.payslips.get(payslipId))
+    .filter(Boolean);
+  for (const payslip of payslips) {
+    const receivableAmount = roundMoney(
+      Number(payslip.renderPayload?.totals?.employeeReceivableAmount ?? Math.max(0, -Number(payslip.renderPayload?.totals?.netPay || 0)))
+    );
+    if (receivableAmount <= 0) {
+      continue;
+    }
+    const existing = (state.employeeReceivableIdsByRun.get(payRun.payRunId) || [])
+      .map((employeeReceivableId) => state.employeeReceivables.get(employeeReceivableId))
+      .find((candidate) => candidate?.employmentId === payslip.employmentId);
+    if (existing) {
+      updateStoredPayslipReceivableState(state, payslip, existing);
+      continue;
+    }
+    const createdAt = nowIso(clock);
+    const receivable = {
+      employeeReceivableId: crypto.randomUUID(),
+      companyId: payRun.companyId,
+      employmentId: payslip.employmentId,
+      employeeId: payslip.employeeId,
+      sourcePayRunId: payRun.payRunId,
+      sourcePayslipId: payslip.payslipId,
+      sourceReportingPeriod: payRun.reportingPeriod,
+      sourcePayDate: payRun.payDate,
+      amount: receivableAmount,
+      settledAmount: 0,
+      writtenOffAmount: 0,
+      outstandingAmount: receivableAmount,
+      currencyCode: "SEK",
+      receivableAccountNumber: PAYROLL_EMPLOYEE_RECEIVABLE_ACCOUNT,
+      settlementPlanId: null,
+      status: "open",
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt,
+      updatedAt: createdAt,
+      settledAt: null,
+      settledByActorId: null,
+      writtenOffAt: null,
+      writtenOffByActorId: null
+    };
+    state.employeeReceivables.set(receivable.employeeReceivableId, receivable);
+    appendToIndex(state.employeeReceivableIdsByCompany, receivable.companyId, receivable.employeeReceivableId);
+    appendToIndex(
+      state.employeeReceivableIdsByEmployment,
+      buildPayrollEmploymentKey(receivable.companyId, receivable.employmentId),
+      receivable.employeeReceivableId
+    );
+    appendToIndex(state.employeeReceivableIdsByRun, receivable.sourcePayRunId, receivable.employeeReceivableId);
+    createReceivableSettlementPlanRecord({
+      state,
+      receivable,
+      firstScheduledReportingPeriod: buildNextReportingPeriod(payRun.reportingPeriod),
+      actorId,
+      clock
+    });
+    updateStoredPayslipReceivableState(state, payslip, receivable);
+    appendRunEvent(state, {
+      payRunId: payRun.payRunId,
+      companyId: payRun.companyId,
+      eventType: "employee_receivable_registered",
+      actorId,
+      note: `Registered employee receivable ${receivable.employeeReceivableId} for employment ${receivable.employmentId}.`,
+      recordedAt: createdAt
+    });
+  }
+}
+
+function updateStoredPayslipReceivableState(state, payslip, receivable) {
+  payslip.renderPayload.totals = {
+    ...copy(payslip.renderPayload.totals || {}),
+    cashNetPayAmount: roundMoney(Number(payslip.renderPayload?.totals?.cashNetPayAmount ?? Math.max(0, Number(payslip.renderPayload?.totals?.netPay || 0)))),
+    employeeReceivableAmount: roundMoney(Number(receivable.amount || 0)),
+    employeeReceivableId: receivable.employeeReceivableId,
+    employeeReceivableStatus: receivable.status,
+    employeeReceivableOutstandingAmount: roundMoney(Number(receivable.outstandingAmount || 0)),
+    receivableSettlementPlanId: receivable.settlementPlanId || null
+  };
+  payslip.snapshotHash = buildSnapshotHash(payslip.renderPayload);
+}
+
+function autoResolveNegativeNetPayExceptionsForPayRun({ state, payRun, actorId = "system", clock }) {
+  let changed = false;
+  for (const payrollExceptionId of state.payrollExceptionIdsByRun.get(payRun.payRunId) || []) {
+    const record = state.payrollExceptions.get(payrollExceptionId) || null;
+    if (!record || record.status !== "open" || record.code !== "negative_net_pay") {
+      continue;
+    }
+    record.status = "resolved";
+    record.resolvedAt = nowIso(clock);
+    record.resolvedByActorId = requireText(actorId, "actor_id_required");
+    record.resolutionNote = "Employee receivable chain registered on payroll approval.";
+    record.updatedAt = record.resolvedAt;
+    changed = true;
+  }
+  if (changed) {
+    payRun.exceptionSummary = summarizePayrollExceptions(listPayrollExceptionsFromState(state, payRun.payRunId));
+    payRun.updatedAt = nowIso(clock);
+  }
+}
+
+function cancelPendingReceivableSettlementArtifacts(state, employeeReceivableId, updatedAt) {
+  const planId = state.receivableSettlementPlanIdByReceivable.get(employeeReceivableId) || null;
+  const plan = planId ? state.receivableSettlementPlans.get(planId) || null : null;
+  if (plan) {
+    plan.status = "cancelled";
+    plan.cancelledAt = updatedAt;
+    plan.updatedAt = updatedAt;
+    plan.installments = (plan.installments || []).map((installment) => (
+      ["planned", "partially_executed"].includes(installment.status)
+        ? { ...installment, status: "cancelled" }
+        : installment
+    ));
+  }
+  for (const receivableOffsetDecisionId of state.receivableOffsetDecisionIdsByReceivable.get(employeeReceivableId) || []) {
+    const decision = state.receivableOffsetDecisions.get(receivableOffsetDecisionId) || null;
+    if (!decision || decision.status !== "pending_execution") {
+      continue;
+    }
+    decision.status = "cancelled";
+    decision.updatedAt = updatedAt;
+  }
 }
 
 function projectPayrollPayoutBatchExportSecretRecord({
@@ -3256,7 +4374,7 @@ function migrateLegacyPayrollPayoutExportSecrets(state, { secretStore }) {
   }
 }
 
-function buildVacationLiabilitySnapshotModel({ state, companyId, reportingPeriod } = {}) {
+function buildVacationLiabilitySnapshotModel({ state, companyId, reportingPeriod, hrPlatform = null, rules = null } = {}) {
   const resolvedCompanyId = requireText(companyId, "company_id_required");
   const resolvedReportingPeriod = normalizeReportingPeriod(reportingPeriod, "reporting_period_required");
   const approvedRuns = (state.payRunIdsByCompany.get(resolvedCompanyId) || [])
@@ -3265,6 +4383,83 @@ function buildVacationLiabilitySnapshotModel({ state, companyId, reportingPeriod
     .filter((payRun) => payRun.status === "approved" && payRun.reportingPeriod <= resolvedReportingPeriod)
     .sort((left, right) => left.reportingPeriod.localeCompare(right.reportingPeriod) || left.createdAt.localeCompare(right.createdAt));
 
+  const legacyMetrics = collectVacationLiabilityLegacyMetrics({ state, approvedRuns });
+  const employmentContexts = collectVacationLiabilityEmploymentContexts({
+    state,
+    companyId: resolvedCompanyId,
+    approvedRuns
+  });
+
+  const keys = [...new Set([...legacyMetrics.keys(), ...employmentContexts.keys()])];
+  const employeeSnapshots = keys
+    .map((key) => {
+      const legacy = legacyMetrics.get(key) || {
+        employmentId: key.split(":")[0] || null,
+        employeeId: key.split(":")[1] || null,
+        vacationBasisAmount: 0,
+        vacationSettlementAmount: 0
+      };
+      const context = employmentContexts.get(key) || null;
+      const liabilityPreview = buildVacationLiabilityAmountPreview({
+        state,
+        companyId: resolvedCompanyId,
+        context,
+        reportingPeriod: resolvedReportingPeriod
+      });
+      const liabilityAmount = roundMoney(liabilityPreview.liabilityAmount || 0);
+      const employerContributionPreview = buildVacationLiabilityEmployerContributionPreview({
+        state,
+        approvedRuns,
+        companyId: resolvedCompanyId,
+        reportingPeriod: resolvedReportingPeriod,
+        employmentId: legacy.employmentId,
+        employeeId: legacy.employeeId,
+        liabilityAmount,
+        hrPlatform,
+        rules
+      });
+      return {
+        ...legacy,
+        ...liabilityPreview,
+        liabilityAmount,
+        employerContributionClassCode: employerContributionPreview.contributionClassCode,
+        employerContributionRatePercent: employerContributionPreview.ratePercent,
+        employerContributionLiabilityAmount: employerContributionPreview.amount,
+        totalLiabilityAmount: roundMoney(liabilityAmount + employerContributionPreview.amount)
+      };
+    })
+    .sort(
+      (left, right) =>
+        String(left.employeeId || "").localeCompare(String(right.employeeId || "")) ||
+        String(left.employmentId || "").localeCompare(String(right.employmentId || ""))
+    );
+
+  const totals = {
+    vacationBasisAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.vacationBasisAmount || 0), 0)),
+    vacationSettlementAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.vacationSettlementAmount || 0), 0)),
+    liabilityAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.liabilityAmount || 0), 0)),
+    employerContributionLiabilityAmount: roundMoney(
+      employeeSnapshots.reduce((sum, entry) => sum + Number(entry.employerContributionLiabilityAmount || 0), 0)
+    ),
+    totalLiabilityAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.totalLiabilityAmount || 0), 0))
+  };
+
+  return {
+    companyId: resolvedCompanyId,
+    reportingPeriod: resolvedReportingPeriod,
+    payRunIds: approvedRuns.map((payRun) => payRun.payRunId),
+    employeeSnapshots,
+    totals,
+    snapshotHash: buildSnapshotHash({
+      companyId: resolvedCompanyId,
+      reportingPeriod: resolvedReportingPeriod,
+      employeeSnapshots,
+      totals
+    })
+  };
+}
+
+function collectVacationLiabilityLegacyMetrics({ state, approvedRuns }) {
   const employeeMap = new Map();
   for (const payRun of approvedRuns) {
     for (const lineId of state.payRunLineIdsByRun.get(payRun.payRunId) || []) {
@@ -3288,32 +4483,138 @@ function buildVacationLiabilitySnapshotModel({ state, companyId, reportingPeriod
       employeeMap.set(key, current);
     }
   }
+  return employeeMap;
+}
 
-  const employeeSnapshots = [...employeeMap.values()]
-    .map((entry) => ({
-      ...entry,
-      liabilityAmount: roundMoney(Math.max(0, entry.vacationBasisAmount - entry.vacationSettlementAmount))
-    }))
-    .sort((left, right) => left.employeeId.localeCompare(right.employeeId));
+function collectVacationLiabilityEmploymentContexts({ state, companyId, approvedRuns }) {
+  const contexts = new Map();
+  for (const payRun of approvedRuns) {
+    const snapshot = payRun.payrollInputSnapshotId ? state.payrollInputSnapshots.get(payRun.payrollInputSnapshotId) || null : null;
+    if (!snapshot?.sourceSnapshot || typeof snapshot.sourceSnapshot !== "object") {
+      continue;
+    }
+    for (const entry of Object.values(snapshot.sourceSnapshot)) {
+      if (!entry?.employment?.employmentId) {
+        continue;
+      }
+      const employmentId = entry.employment.employmentId;
+      const employeeId = entry.employee?.employeeId || entry.employment.employeeId || null;
+      const key = `${employmentId}:${employeeId}`;
+      contexts.set(key, {
+        companyId,
+        employee: copy(entry.employee || null),
+        employment: copy(entry.employment || null),
+        contract: copy(entry.contract || null),
+        hrSnapshot: copy(entry.hrSnapshot || null),
+        scheduleAssignment: copy(entry.scheduleAssignment || null),
+        vacationBalance: copy(entry.vacationBalance || null),
+        agreementOverlay: copy(entry.agreementOverlay || null),
+        payRunId: payRun.payRunId,
+        payDate: payRun.payDate,
+        reportingPeriod: payRun.reportingPeriod
+      });
+    }
+  }
+  return contexts;
+}
 
-  const totals = {
-    vacationBasisAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.vacationBasisAmount || 0), 0)),
-    vacationSettlementAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.vacationSettlementAmount || 0), 0)),
-    liabilityAmount: roundMoney(employeeSnapshots.reduce((sum, entry) => sum + Number(entry.liabilityAmount || 0), 0))
+function buildVacationLiabilityAmountPreview({ state, companyId, context = null, reportingPeriod } = {}) {
+  const employmentId = context?.employment?.employmentId || null;
+  const employeeId = context?.employee?.employeeId || context?.employment?.employeeId || null;
+  const vacationBalance = context?.vacationBalance || null;
+  const paidDaysRemaining = roundQuantity(vacationBalance?.paidDays || 0);
+  const savedDaysRemaining = roundQuantity(vacationBalance?.savedDays || 0);
+  const remainingDays = roundQuantity(paidDaysRemaining + savedDaysRemaining);
+  const reportingPeriodEndDate = endOfMonth(Number(reportingPeriod.slice(0, 4)), Number(reportingPeriod.slice(4, 6)));
+
+  const previewBase = {
+    employmentId,
+    employeeId,
+    vacationBalanceSnapshotDate: vacationBalance?.snapshotDate || reportingPeriodEndDate,
+    vacationYearStartDate: vacationBalance?.vacationYearStartDate || null,
+    vacationYearEndDate: vacationBalance?.vacationYearEndDate || null,
+    paidDaysRemaining,
+    savedDaysRemaining,
+    remainingDays,
+    liabilityCalculationCode: remainingDays > 0 ? "vacation_days_remaining" : "no_remaining_vacation_days"
   };
 
+  if (!context?.contract || !vacationBalance || remainingDays <= 0) {
+    return {
+      ...previewBase,
+      vacationRuleCode: null,
+      liabilityAmount: 0
+    };
+  }
+
+  const ruleSelection = buildAutomaticSwedishVacationRuleSelection({
+    state,
+    companyId,
+    employment: context.employment,
+    contract: context.contract,
+    vacationBalance
+  });
+  if (!ruleSelection.ruleCode) {
+    return {
+      ...previewBase,
+      vacationRuleCode: null,
+      liabilityAmount: 0
+    };
+  }
+
+  if (ruleSelection.ruleCode === "procentregeln") {
+    const vacationEntitlementDays = resolveAutomaticSwedishVacationEntitlementDays();
+    const vacationPayPercent = resolveAutomaticSwedishVacationPayPercent(vacationEntitlementDays);
+    const vacationPayBasisAmount = roundMoney(ruleSelection.totalVacationPayBasisAmount || 0);
+    const vacationPayTotalAmount = roundMoney((vacationPayBasisAmount * vacationPayPercent) / 100);
+    const vacationPayPerDayAmount =
+      vacationEntitlementDays > 0 ? roundMoney(vacationPayTotalAmount / vacationEntitlementDays) : 0;
+    const liabilityAmount = roundMoney(vacationPayPerDayAmount * remainingDays);
+    return {
+      ...previewBase,
+      vacationRuleCode: "procentregeln",
+      vacationRuleReasonCode: ruleSelection.reasonCode,
+      earningYearStartDate: ruleSelection.earningYearStartDate,
+      earningYearEndDate: ruleSelection.earningYearEndDate,
+      vacationEntitlementDays,
+      vacationPayBasisAmount,
+      variableVacationBasisAmount: roundMoney(ruleSelection.variableVacationPayBasisAmount || 0),
+      variableSharePercent: roundMoney(ruleSelection.variableSharePercent || 0),
+      vacationPayPercent,
+      vacationPayPerDayAmount,
+      liabilityAmount
+    };
+  }
+
+  const dailySalaryAmount = resolveAutomaticSwedishVacationMonthlySalaryLiabilityDayAmount({
+    contract: context.contract,
+    hrSnapshot: context.hrSnapshot,
+    scheduleAssignment: context.scheduleAssignment
+  });
+  const supplementUnitRate = resolveAutomaticSwedishVacationSupplementUnitRate({
+    companyId,
+    employment: context.employment,
+    contract: context.contract,
+    hrSnapshot: context.hrSnapshot,
+    agreementOverlay: context.agreementOverlay,
+    state
+  });
+  const salaryLiabilityAmount = roundMoney(dailySalaryAmount * remainingDays);
+  const supplementLiabilityAmount = roundMoney(supplementUnitRate * remainingDays);
   return {
-    companyId: resolvedCompanyId,
-    reportingPeriod: resolvedReportingPeriod,
-    payRunIds: approvedRuns.map((payRun) => payRun.payRunId),
-    employeeSnapshots,
-    totals,
-    snapshotHash: buildSnapshotHash({
-      companyId: resolvedCompanyId,
-      reportingPeriod: resolvedReportingPeriod,
-      employeeSnapshots,
-      totals
-    })
+    ...previewBase,
+    vacationRuleCode: "sammaloneregeln",
+    vacationRuleReasonCode: ruleSelection.reasonCode,
+    earningYearStartDate: ruleSelection.earningYearStartDate,
+    earningYearEndDate: ruleSelection.earningYearEndDate,
+    totalVacationBasisAmount: roundMoney(ruleSelection.totalVacationPayBasisAmount || 0),
+    variableVacationBasisAmount: roundMoney(ruleSelection.variableVacationPayBasisAmount || 0),
+    variableSharePercent: roundMoney(ruleSelection.variableSharePercent || 0),
+    vacationSalaryPerDayAmount: dailySalaryAmount,
+    vacationSupplementPerDayAmount: supplementUnitRate,
+    salaryLiabilityAmount,
+    supplementLiabilityAmount,
+    liabilityAmount: roundMoney(salaryLiabilityAmount + supplementLiabilityAmount)
   };
 }
 
@@ -3483,6 +4784,151 @@ function persistAgiMaterialization(state, materialized) {
   }
 }
 
+function syncAgiVersionEvidenceBundle({ state, submission, version, actorId = "system", evidencePlatform = null } = {}) {
+  if (!version || !submission) {
+    return null;
+  }
+  const payload = version.payloadJson || {};
+  const employerTotals = payload.employerTotals || {};
+  const receipts = (state.agiReceiptIdsByVersion.get(version.agiSubmissionVersionId) || [])
+    .map((agiReceiptId) => state.agiReceipts.get(agiReceiptId))
+    .filter(Boolean);
+  const errors = (state.agiErrorIdsByVersion.get(version.agiSubmissionVersionId) || [])
+    .map((agiErrorId) => state.agiErrors.get(agiErrorId))
+    .filter(Boolean);
+  const signatures = (state.agiSignatureIdsByVersion.get(version.agiSubmissionVersionId) || [])
+    .map((agiSignatureId) => state.agiSignatures.get(agiSignatureId))
+    .filter(Boolean);
+  const evidenceBundleId = registerPayrollEvidenceBundle({
+    evidencePlatform,
+    executionBoundary: version.executionBoundary,
+    companyId: version.companyId,
+    bundleType: "payroll_agi_version",
+    sourceObjectType: "payroll_agi_submission_version",
+    sourceObjectId: version.agiSubmissionVersionId,
+    sourceObjectVersion: buildAgiVersionEvidenceSourceVersion({
+      version,
+      receipts,
+      errors,
+      signatures
+    }),
+    title: `Payroll AGI ${version.reportingPeriod} v${version.versionNo}`,
+    actorId,
+    requireTrialGuard: false,
+    previousEvidenceBundleId: version.evidenceBundleId || null,
+    metadata: {
+      agiSubmissionId: submission.agiSubmissionId,
+      reportingPeriod: version.reportingPeriod,
+      versionNo: version.versionNo,
+      state: version.state,
+      correctionReason: version.correctionReason || null,
+      previousSubmittedVersionId: version.previousSubmittedVersionId || null,
+      authoritySubmissionId: version.authoritySubmissionId || null,
+      changedEmployeeIds: copy(version.changedEmployeeIds || []),
+      sourcePayRunIds: copy(version.sourcePayRunIds || []),
+      field487SummaArbetsgivaravgifterOchSlf: employerTotals.field487SummaArbetsgivaravgifterOchSlf ?? null,
+      field497SummaSkatteavdrag: employerTotals.field497SummaSkatteavdrag ?? null,
+      receiptCount: receipts.length,
+      errorCount: errors.length,
+      signatureCount: signatures.length,
+      submissionMode: version.submissionMode || null
+    },
+    artifactRefs: [
+      {
+        artifactType: "agi_payload",
+        artifactRef: `payload:${version.agiSubmissionVersionId}`,
+        checksum: version.payloadHash,
+        roleCode: "submission_payload",
+        metadata: {
+          payloadVersion: version.adapterPayloadJson?.payloadVersion || "agi-json-v1"
+        }
+      },
+      {
+        artifactType: "agi_employer_totals",
+        artifactRef: `employer-totals:${version.agiSubmissionVersionId}`,
+        checksum: buildSnapshotHash(employerTotals),
+        roleCode: "employer_totals",
+        metadata: {
+          field487SummaArbetsgivaravgifterOchSlf: employerTotals.field487SummaArbetsgivaravgifterOchSlf ?? 0,
+          field497SummaSkatteavdrag: employerTotals.field497SummaSkatteavdrag ?? 0
+        }
+      },
+      ...(version.authoritySubmissionId
+        ? [
+            {
+              artifactType: "regulated_submission_ref",
+              artifactRef: `submission:${version.authoritySubmissionId}`,
+              checksum: version.authoritySubmissionId,
+              roleCode: "regulated_submission_bridge",
+              metadata: {
+                submissionType: "agi_monthly"
+              }
+            }
+          ]
+        : []),
+      ...receipts.map((receipt) => ({
+        artifactType: "agi_receipt",
+        artifactRef: `receipt:${receipt.agiReceiptId}`,
+        checksum: buildSnapshotHash(receipt.payloadJson || {}),
+        roleCode: "submission_receipt",
+        metadata: {
+          receiptStatus: receipt.receiptStatus,
+          receiptCode: receipt.receiptCode
+        }
+      }))
+    ],
+    sourceRefs: (version.sourcePayRunIds || []).map((payRunId) => ({
+      sourceType: "pay_run",
+      sourceId: payRunId
+    })),
+    relatedObjectRefs: [
+      {
+        objectType: "agi_submission",
+        objectId: submission.agiSubmissionId
+      },
+      ...(version.previousSubmittedVersionId
+        ? [{
+            objectType: "agi_submission_version",
+            objectId: version.previousSubmittedVersionId
+          }]
+        : []),
+      ...receipts.map((receipt) => ({
+        objectType: "agi_receipt",
+        objectId: receipt.agiReceiptId
+      })),
+      ...signatures.map((signature) => ({
+        objectType: "agi_signature",
+        objectId: signature.agiSignatureId
+      })),
+      ...errors.map((error) => ({
+        objectType: "agi_error",
+        objectId: error.agiErrorId
+      }))
+    ]
+  });
+  if (evidenceBundleId) {
+    version.evidenceBundleId = evidenceBundleId;
+  }
+  return evidenceBundleId;
+}
+
+function buildAgiVersionEvidenceSourceVersion({ version, receipts = [], errors = [], signatures = [] } = {}) {
+  return buildSnapshotHash({
+    agiSubmissionVersionId: version?.agiSubmissionVersionId || null,
+    payloadHash: version?.payloadHash || null,
+    state: version?.state || null,
+    validationErrors: copy(version?.validationErrors || []),
+    validationWarnings: copy(version?.validationWarnings || []),
+    readyForSignAt: version?.readyForSignAt || null,
+    submittedAt: version?.submittedAt || null,
+    supersededAt: version?.supersededAt || null,
+    submissionMode: version?.submissionMode || null,
+    receiptIds: receipts.map((receipt) => receipt.agiReceiptId).sort(),
+    errorIds: errors.map((error) => error.agiErrorId).sort(),
+    signatureIds: signatures.map((signature) => signature.agiSignatureId).sort()
+  });
+}
+
 function materializeAgiSubmissionVersion({
   state,
   companyId,
@@ -3524,13 +4970,18 @@ function materializeAgiSubmissionVersion({
   const absencePayloads = [];
   const validationWarnings = [];
   const lockEmploymentIds = new Set();
+  const specificationNumbers = assignAgiEmployeeSpecificationNumbers({
+    previousEmployees: previousVersion?.payloadJson?.employees || [],
+    employeeGroups
+  });
 
   for (const group of employeeGroups) {
     const materializedEmployee = materializeAgiEmployeeGroup({
       companyId,
       reportingPeriod,
       group,
-      createdAt: materializedAt
+      createdAt: materializedAt,
+      specificationNumber: specificationNumbers.get(group.employee.employeeId) || 1
     });
     employees.push(materializedEmployee.employee);
     employeeLines.push(...materializedEmployee.lines);
@@ -3540,6 +4991,12 @@ function materializeAgiSubmissionVersion({
       lockEmploymentIds.add(employmentId);
     }
   }
+  const employeeTotals = summarizeAgiEmployeeTotals(employees);
+  const employerTotals = summarizeAgiEmployerTotals({
+    state,
+    approvedRuns,
+    employeeTotals
+  });
 
   const payload = {
     employer: {
@@ -3560,7 +5017,8 @@ function materializeAgiSubmissionVersion({
     providerBaselineRefs: dedupeProviderBaselineRefs(approvedRuns.flatMap((run) => run.providerBaselineRefs || [])),
     decisionSnapshotRefs: dedupeDecisionSnapshotRefs(approvedRuns.flatMap((run) => run.decisionSnapshotRefs || [])),
     executionBoundary: copy(executionBoundary),
-    totals: summarizeAgiEmployeeTotals(employees),
+    totals: employeeTotals,
+    employerTotals,
     employees: employees.map((employee) => copy(employee.payloadJson)),
     generatedAt: materializedAt,
     correctionReason: correctionReason || null,
@@ -3590,11 +5048,29 @@ function materializeAgiSubmissionVersion({
       legalEffect: executionBoundary.supportsLegalEffect === true,
       watermarkCode: executionBoundary.watermarkCode || null,
       providerPolicyCode: executionBoundary.providerPolicyCode || null,
+      declarationEnvelope: {
+        employer: copy(payload.employer),
+        reportingPeriod,
+        mainRecord: {
+          field487SummaArbetsgivaravgifterOchSlf: employerTotals.field487SummaArbetsgivaravgifterOchSlf,
+          field497SummaSkatteavdrag: employerTotals.field497SummaSkatteavdrag
+        },
+        individuals: payload.employees.map((employee) => ({
+          employeeId: employee.employeeId,
+          specificationNumber: employee.specificationNumber,
+          personIdentifierType: employee.personIdentifierType,
+          personIdentifier: employee.personIdentifier,
+          compensationFields: copy(employee.compensationFields || {}),
+          taxFields: copy(employee.taxFields || {}),
+          absence: copy(employee.absence || {})
+        }))
+      },
       payload
     },
     executionBoundary: copy(executionBoundary),
     trialGuard: buildPayrollTrialGuard(executionBoundary),
     evidenceBundleId: null,
+    authoritySubmissionId: null,
     changedEmployeeIds,
     lockEmploymentIds: [...lockEmploymentIds].sort(),
     validationErrors: [],
@@ -3711,6 +5187,275 @@ function buildPayrollRulepackRef(decisionObject) {
     return null;
   }
   return requirePinnedPayrollDecisionRulepackRef(decisionObject, "payroll_rulepack_ref");
+}
+
+function assignAgiEmployeeSpecificationNumbers({ previousEmployees = [], employeeGroups = [] } = {}) {
+  const previousByEmployeeId = new Map();
+  let maxSpecificationNumber = 0;
+  for (const employee of Array.isArray(previousEmployees) ? previousEmployees : []) {
+    const employeeId = normalizeOptionalText(employee?.employeeId);
+    const specificationNumber = normalizeAgiSpecificationNumber(employee?.specificationNumber);
+    if (!employeeId || specificationNumber == null) {
+      continue;
+    }
+    previousByEmployeeId.set(employeeId, specificationNumber);
+    if (specificationNumber > maxSpecificationNumber) {
+      maxSpecificationNumber = specificationNumber;
+    }
+  }
+  const resolved = new Map();
+  for (const group of employeeGroups || []) {
+    const employeeId = requireText(group?.employee?.employeeId, "agi_employee_id_required");
+    if (resolved.has(employeeId)) {
+      continue;
+    }
+    const priorSpecificationNumber = previousByEmployeeId.get(employeeId);
+    if (priorSpecificationNumber != null) {
+      resolved.set(employeeId, priorSpecificationNumber);
+      continue;
+    }
+    maxSpecificationNumber += 1;
+    resolved.set(employeeId, maxSpecificationNumber);
+  }
+  return resolved;
+}
+
+function summarizeAgiEmployerTotals({ state, approvedRuns, employeeTotals } = {}) {
+  const contributionBucketsByRate = new Map();
+  const sourcePayRunIds = [];
+  const sourcePayslipIds = [];
+  let vaxaRefundExposureAmount = 0;
+
+  for (const payRun of approvedRuns || []) {
+    sourcePayRunIds.push(payRun.payRunId);
+    const payslips = (state.payslipIdsByRun.get(payRun.payRunId) || [])
+      .map((payslipId) => state.payslips.get(payslipId))
+      .filter(Boolean);
+    for (const payslip of payslips) {
+      sourcePayslipIds.push(payslip.payslipId);
+      const payslipTotals = payslip?.renderPayload?.totals || payslip?.totals || {};
+      const decisionOutputs = payslipTotals?.employerContributionDecision?.outputs || {};
+      const decisionType = normalizeOptionalText(decisionOutputs.decisionType) || null;
+      const fullRatePercent = roundMoney(decisionOutputs.fullRatePercent || 0);
+      const components = Array.isArray(decisionOutputs.contributionComponents) ? decisionOutputs.contributionComponents : [];
+      const normalizedComponents =
+        components.length > 0
+          ? components
+          : [{
+              componentCode: decisionType === "vaxa" ? "vaxa_reduced_band" : "standard_contribution",
+              baseAmount: roundMoney(decisionOutputs.contributionBase || payslipTotals?.employerContributionBase || 0),
+              ratePercent: roundMoney(
+                decisionType === "vaxa"
+                  ? fullRatePercent
+                  : decisionOutputs.ratePercent || 0
+              )
+            }];
+      for (const component of normalizedComponents) {
+        const baseAmount = roundMoney(Math.max(0, component?.baseAmount || 0));
+        if (baseAmount <= 0) {
+          continue;
+        }
+        const usesVaxaGrossUp = decisionType === "vaxa" && component.componentCode === "vaxa_reduced_band" && fullRatePercent > 0;
+        const reportedRatePercent = roundMoney(
+          usesVaxaGrossUp
+            ? fullRatePercent
+            : Math.max(0, Number(component?.ratePercent || 0))
+        );
+        const bucketKey = reportedRatePercent.toFixed(2);
+        const current = contributionBucketsByRate.get(bucketKey) || {
+          ratePercent: reportedRatePercent,
+          baseAmount: 0,
+          sourceDecisionTypes: new Set(),
+          sourceComponentCodes: new Set(),
+          sourcePayRunIds: new Set(),
+          sourcePayslipIds: new Set(),
+          usesVaxaGrossUp: false
+        };
+        current.baseAmount = roundMoney(current.baseAmount + baseAmount);
+        current.sourceDecisionTypes.add(decisionType || "unknown");
+        current.sourceComponentCodes.add(normalizeOptionalText(component?.componentCode) || "unknown");
+        current.sourcePayRunIds.add(payRun.payRunId);
+        current.sourcePayslipIds.add(payslip.payslipId);
+        current.usesVaxaGrossUp = current.usesVaxaGrossUp || usesVaxaGrossUp;
+        contributionBucketsByRate.set(bucketKey, current);
+      }
+      vaxaRefundExposureAmount = roundMoney(vaxaRefundExposureAmount + Number(decisionOutputs.taxAccountReliefAmount || 0));
+    }
+  }
+
+  const contributionBuckets = [...contributionBucketsByRate.values()]
+    .map((bucket) => {
+      const declaredContributionAmount = roundMoney(bucket.baseAmount * (Number(bucket.ratePercent || 0) / 100));
+      return {
+        ratePercent: roundMoney(bucket.ratePercent || 0),
+        baseAmount: roundMoney(bucket.baseAmount || 0),
+        declaredContributionAmount,
+        roundedContributionAmount: truncateKronaAmount(declaredContributionAmount),
+        sourceDecisionTypes: [...bucket.sourceDecisionTypes].sort(),
+        sourceComponentCodes: [...bucket.sourceComponentCodes].sort(),
+        sourcePayRunIds: [...bucket.sourcePayRunIds].sort(),
+        sourcePayslipIds: [...bucket.sourcePayslipIds].sort(),
+        usesVaxaGrossUp: bucket.usesVaxaGrossUp
+      };
+    })
+    .sort((left, right) => right.ratePercent - left.ratePercent || left.baseAmount - right.baseAmount);
+
+  const taxDeductionAmount = truncateKronaAmount(
+    Number(employeeTotals?.preliminaryTaxAmount || 0)
+      + Number(employeeTotals?.sinkTaxAmount || 0)
+      + Number(employeeTotals?.aSinkTaxAmount || 0)
+  );
+  const employerContributionAmount = contributionBuckets.reduce(
+    (sum, bucket) => sum + Number(bucket.roundedContributionAmount || 0),
+    0
+  );
+
+  return {
+    field487SummaArbetsgivaravgifterOchSlf: employerContributionAmount,
+    field497SummaSkatteavdrag: taxDeductionAmount,
+    employerContributionAmount,
+    slfAmount: 0,
+    taxDeductionAmount,
+    contributionBuckets,
+    vaxaRefundExposureAmount: roundMoney(vaxaRefundExposureAmount),
+    sourcePayRunIds: [...new Set(sourcePayRunIds)].sort(),
+    sourcePayslipIds: [...new Set(sourcePayslipIds)].sort()
+  };
+}
+
+function compareAgiEmployerTotals(actualTotals, expectedTotals) {
+  return buildSnapshotHash(projectAgiEmployerTotalsForComparison(actualTotals)) === buildSnapshotHash(projectAgiEmployerTotalsForComparison(expectedTotals));
+}
+
+function projectAgiEmployerTotalsForComparison(totals = {}) {
+  return {
+    field487SummaArbetsgivaravgifterOchSlf: truncateKronaAmount(totals.field487SummaArbetsgivaravgifterOchSlf || 0),
+    field497SummaSkatteavdrag: truncateKronaAmount(totals.field497SummaSkatteavdrag || 0),
+    employerContributionAmount: truncateKronaAmount(totals.employerContributionAmount || 0),
+    slfAmount: truncateKronaAmount(totals.slfAmount || 0),
+    taxDeductionAmount: truncateKronaAmount(totals.taxDeductionAmount || 0),
+    vaxaRefundExposureAmount: roundMoney(totals.vaxaRefundExposureAmount || 0),
+    contributionBuckets: (totals.contributionBuckets || [])
+      .map((bucket) => ({
+        ratePercent: roundMoney(bucket.ratePercent || 0),
+        baseAmount: roundMoney(bucket.baseAmount || 0),
+        declaredContributionAmount: roundMoney(bucket.declaredContributionAmount || 0),
+        roundedContributionAmount: truncateKronaAmount(bucket.roundedContributionAmount || 0),
+        usesVaxaGrossUp: bucket.usesVaxaGrossUp === true
+      }))
+      .sort((left, right) => right.ratePercent - left.ratePercent || left.baseAmount - right.baseAmount)
+  };
+}
+
+function buildPayrollRulepackRefFromRulePack(rulePack, effectiveDate = null) {
+  if (!rulePack) {
+    return null;
+  }
+  return {
+    rulepackId: rulePack.rulePackId,
+    rulepackCode: rulePack.rulePackCode,
+    rulepackVersion: rulePack.version,
+    rulepackChecksum: rulePack.checksum,
+    effectiveDate: effectiveDate || rulePack.effectiveFrom || null
+  };
+}
+
+function buildVacationLiabilityEmployerContributionPreview({
+  state,
+  approvedRuns,
+  companyId,
+  reportingPeriod,
+  employmentId,
+  employeeId,
+  liabilityAmount,
+  hrPlatform = null,
+  rules = null
+}) {
+  const resolvedLiabilityAmount = roundMoney(Math.max(0, liabilityAmount || 0));
+  if (resolvedLiabilityAmount <= 0) {
+    return {
+      amount: 0,
+      ratePercent: 0,
+      contributionClassCode: null
+    };
+  }
+
+  const employee = resolveVacationLiabilityEmployeeRecord({
+    state,
+    approvedRuns,
+    companyId,
+    employmentId,
+    employeeId,
+    hrPlatform
+  });
+  if (!employee) {
+    return {
+      amount: 0,
+      ratePercent: 0,
+      contributionClassCode: null
+    };
+  }
+  if (!rules) {
+    return {
+      amount: 0,
+      ratePercent: 0,
+      contributionClassCode: null
+    };
+  }
+
+  const effectiveDate = endOfMonth(Number(reportingPeriod.slice(0, 4)), Number(reportingPeriod.slice(4, 6)));
+  const statutoryProfile = getStoredEmploymentStatutoryProfileForSnapshot({ state, companyId, employmentId });
+  const employerContributionDecisionSnapshot = selectEmployerContributionDecisionSnapshot({
+    state,
+    companyId,
+    employmentId,
+    effectiveDate
+  });
+  const preview = buildEmployerContributionPreview({
+    rules,
+    contributionBase: resolvedLiabilityAmount,
+    employee,
+    statutoryProfile,
+    payDate: effectiveDate,
+    employerContributionDecisionSnapshot
+  });
+
+  return {
+    amount: roundMoney(preview.amount || 0),
+    ratePercent: roundMoney(preview.decisionObject?.outputs?.ratePercent || 0),
+    contributionClassCode: preview.decisionObject?.outputs?.contributionClassCode || null
+  };
+}
+
+function resolveVacationLiabilityEmployeeRecord({ state, approvedRuns, companyId, employmentId, employeeId, hrPlatform = null }) {
+  if (hrPlatform?.getEmployee && employeeId) {
+    try {
+      return hrPlatform.getEmployee({ companyId, employeeId });
+    } catch {
+      // Fall through to immutable payroll input snapshots when HR runtime data is unavailable.
+    }
+  }
+
+  for (const payRun of [...approvedRuns].reverse()) {
+    const snapshot = payRun.payrollInputSnapshotId ? state.payrollInputSnapshots.get(payRun.payrollInputSnapshotId) || null : null;
+    const sourceSnapshot = snapshot?.sourceSnapshot?.[employmentId] || null;
+    if (sourceSnapshot?.employee) {
+      return copy(sourceSnapshot.employee);
+    }
+  }
+
+  return employeeId
+    ? {
+        companyId,
+        employeeId
+      }
+    : null;
+}
+
+function getStoredEmploymentStatutoryProfileForSnapshot({ state, companyId, employmentId }) {
+  const profileId = state.employmentStatutoryProfileIdByEmployment.get(employmentId);
+  const profile = profileId ? state.employmentStatutoryProfiles.get(profileId) || null : null;
+  return profile && profile.companyId === companyId ? copy(profile) : null;
 }
 
 function buildPayrollDecisionSnapshotRef({ payRunId, employmentId, employeeId, snapshotTypeCode, decisionObject }) {
@@ -3966,7 +5711,7 @@ function buildAgiEmployeeGroups({ state, companyId, reportingPeriod, approvedRun
   );
 }
 
-function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, createdAt }) {
+function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, createdAt, specificationNumber }) {
   const fieldTotals = {
     cashCompensationAmount: 0,
     taxableBenefitAmount: 0,
@@ -4051,6 +5796,7 @@ function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, create
   const unapprovedAbsenceCount = reportableLeaveEntries.filter((entry) => entry.status !== "approved").length;
   const employeePayload = {
     employeeId: group.employee.employeeId,
+    specificationNumber: requireAgiSpecificationNumber(specificationNumber),
     personIdentifierType: normalizeOptionalText(group.employee.identityType) || "other",
     personIdentifier: normalizeOptionalText(group.employee.identityValue) || normalizeOptionalText(group.employee.identityValueMasked),
     protectedIdentity: group.employee.protectedIdentity === true,
@@ -4077,6 +5823,7 @@ function materializeAgiEmployeeGroup({ companyId, reportingPeriod, group, create
     agiSubmissionVersionId: null,
     companyId,
     employeeId: group.employee.employeeId,
+    specificationNumber: employeePayload.specificationNumber,
     personIdentifierType: employeePayload.personIdentifierType,
     personIdentifier: employeePayload.personIdentifier,
     protectedIdentity: employeePayload.protectedIdentity,
@@ -4166,6 +5913,7 @@ function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, ti
 
   const payload = version.payloadJson || {};
   const employees = Array.isArray(payload.employees) ? payload.employees : [];
+  const seenSpecificationNumbers = new Set();
   if (employees.length === 0) {
     errors.push(createAgiValidationError("agi_employee_payload_missing", "AGI submission requires at least one employee payload."));
   }
@@ -4182,6 +5930,48 @@ function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, ti
     if (employee.absence?.incomplete === true || Number(employee.absence?.unapprovedEntryCount || 0) > 0) {
       errors.push(createAgiValidationError("agi_absence_incomplete", `Employee ${employee.employeeId} has incomplete or unattested AGI-related absence.`));
     }
+    const specificationNumber = normalizeAgiSpecificationNumber(employee.specificationNumber);
+    if (specificationNumber == null) {
+      errors.push(
+        createAgiValidationError(
+          "agi_specification_number_missing",
+          `Employee ${employee.employeeId} is missing a stable specification number for AGI correction replacement.`
+        )
+      );
+    } else if (seenSpecificationNumbers.has(specificationNumber)) {
+      errors.push(
+        createAgiValidationError(
+          "agi_specification_number_duplicate",
+          `Specification number ${specificationNumber} is duplicated across AGI employee payloads.`
+        )
+      );
+    } else {
+      seenSpecificationNumbers.add(specificationNumber);
+    }
+  }
+
+  let specificationNumbersStable = true;
+  if (version.previousSubmittedVersionId) {
+    const previousVersion = requireAgiSubmissionVersion(state, version.previousSubmittedVersionId);
+    const previousEmployees = Array.isArray(previousVersion.payloadJson?.employees) ? previousVersion.payloadJson.employees : [];
+    const previousSpecifications = new Map(
+      previousEmployees
+        .map((employee) => [normalizeOptionalText(employee?.employeeId), normalizeAgiSpecificationNumber(employee?.specificationNumber)])
+        .filter(([employeeId, specificationNumber]) => employeeId && specificationNumber != null)
+    );
+    for (const employee of employees) {
+      const employeeId = normalizeOptionalText(employee?.employeeId);
+      const previousSpecificationNumber = employeeId ? previousSpecifications.get(employeeId) : null;
+      if (previousSpecificationNumber != null && previousSpecificationNumber !== normalizeAgiSpecificationNumber(employee?.specificationNumber)) {
+        specificationNumbersStable = false;
+        errors.push(
+          createAgiValidationError(
+            "agi_specification_number_changed",
+            `Employee ${employee.employeeId} must reuse the same specification number when correcting AGI.`
+          )
+        );
+      }
+    }
   }
 
   if (version.previousSubmittedVersionId && (version.changedEmployeeIds || []).length > 0 && !version.correctionReason) {
@@ -4194,15 +5984,42 @@ function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, ti
       .filter(Boolean)
   );
   const expectedTotals = payload.totals || {};
-  const totalsMatch =
+  const employeeTotalsMatch =
     roundMoney(totals.cashCompensationAmount) === roundMoney(expectedTotals.cashCompensationAmount || 0) &&
     roundMoney(totals.taxableBenefitAmount) === roundMoney(expectedTotals.taxableBenefitAmount || 0) &&
     roundMoney(totals.preliminaryTaxAmount) === roundMoney(expectedTotals.preliminaryTaxAmount || 0) &&
     roundMoney(totals.sinkTaxAmount) === roundMoney(expectedTotals.sinkTaxAmount || 0) &&
     roundMoney(totals.aSinkTaxAmount) === roundMoney(expectedTotals.aSinkTaxAmount || 0) &&
     totals.employeeCount === Number(expectedTotals.employeeCount || 0);
-  if (!totalsMatch) {
+  if (!employeeTotalsMatch) {
     errors.push(createAgiValidationError("agi_totals_mismatch", "AGI totals do not match the employee payloads."));
+  }
+
+  const expectedEmployerTotals = summarizeAgiEmployerTotals({
+    state,
+    approvedRuns: collectApprovedPayRunsForPeriod(state, submission.companyId, submission.reportingPeriod),
+    employeeTotals: totals
+  });
+  const payloadEmployerTotals = payload.employerTotals || {};
+  if (
+    normalizeAgiWholeKronaAmount(payloadEmployerTotals.field487SummaArbetsgivaravgifterOchSlf) == null
+    || normalizeAgiWholeKronaAmount(payloadEmployerTotals.field497SummaSkatteavdrag) == null
+  ) {
+    errors.push(
+      createAgiValidationError(
+        "agi_employer_totals_missing",
+        "AGI employer totals must include field 487 and field 497 before submission readiness."
+      )
+    );
+  }
+  const employerTotalsMatch = compareAgiEmployerTotals(payloadEmployerTotals, expectedEmployerTotals);
+  if (!employerTotalsMatch) {
+    errors.push(
+      createAgiValidationError(
+        "agi_employer_totals_mismatch",
+        "AGI employer totals do not match approved payroll employer-contribution and tax-deduction aggregates."
+      )
+    );
   }
 
   const leaveLocksExist =
@@ -4221,7 +6038,7 @@ function evaluateAgiValidation({ state, submission, version, orgAuthPlatform, ti
   return {
     errors,
     warnings,
-    totalsMatch
+    totalsMatch: employeeTotalsMatch && employerTotalsMatch && specificationNumbersStable
   };
 }
 
@@ -4523,6 +6340,18 @@ function syncPayRunApprovalEvidenceBundle({ state, payRun, actorId = "system", e
   const remittanceInstructions = (state.remittanceInstructionIdsByRun.get(payRun.payRunId) || [])
     .map((remittanceInstructionId) => state.remittanceInstructions.get(remittanceInstructionId))
     .filter(Boolean);
+  const employeeReceivables = (state.employeeReceivableIdsByRun.get(payRun.payRunId) || [])
+    .map((employeeReceivableId) => state.employeeReceivables.get(employeeReceivableId))
+    .filter(Boolean);
+  const receivableSettlementPlans = employeeReceivables
+    .map((receivable) => state.receivableSettlementPlanIdByReceivable.get(receivable.employeeReceivableId))
+    .filter(Boolean)
+    .map((receivableSettlementPlanId) => state.receivableSettlementPlans.get(receivableSettlementPlanId))
+    .filter(Boolean);
+  const receivableOffsetDecisions = (state.receivableOffsetDecisionIdsByCompany.get(payRun.companyId) || [])
+    .map((receivableOffsetDecisionId) => state.receivableOffsetDecisions.get(receivableOffsetDecisionId))
+    .filter(Boolean)
+    .filter((decision) => decision.executedPayRunId === payRun.payRunId);
   const exceptions = listPayrollExceptionsFromState(state, payRun.payRunId).map(copy);
   const events = (state.payRunEventIdsByRun.get(payRun.payRunId) || [])
     .map((eventId) => state.payRunEvents.get(eventId))
@@ -4592,6 +6421,39 @@ function syncPayRunApprovalEvidenceBundle({ state, payRun, actorId = "system", e
         }),
         roleCode: exception.code
       })),
+      ...employeeReceivables.map((receivable) => ({
+        artifactType: "employee_receivable",
+        artifactRef: receivable.employeeReceivableId,
+        checksum: buildSnapshotHash({
+          employeeReceivableId: receivable.employeeReceivableId,
+          amount: receivable.amount,
+          outstandingAmount: receivable.outstandingAmount,
+          status: receivable.status
+        }),
+        roleCode: receivable.employmentId
+      })),
+      ...receivableSettlementPlans.map((plan) => ({
+        artifactType: "employee_receivable_settlement_plan",
+        artifactRef: plan.receivableSettlementPlanId,
+        checksum: buildSnapshotHash({
+          receivableSettlementPlanId: plan.receivableSettlementPlanId,
+          employeeReceivableId: plan.employeeReceivableId,
+          status: plan.status,
+          installments: plan.installments || []
+        }),
+        roleCode: plan.employeeReceivableId
+      })),
+      ...receivableOffsetDecisions.map((decision) => ({
+        artifactType: "employee_receivable_offset_decision",
+        artifactRef: decision.receivableOffsetDecisionId,
+        checksum: buildSnapshotHash({
+          receivableOffsetDecisionId: decision.receivableOffsetDecisionId,
+          employeeReceivableId: decision.employeeReceivableId,
+          executedAmount: decision.executedAmount,
+          status: decision.status
+        }),
+        roleCode: decision.employeeReceivableId
+      })),
       ...events.map((event) => ({
         artifactType: "pay_run_event",
         artifactRef: event.payRunEventId,
@@ -4638,6 +6500,10 @@ function syncPayRunApprovalEvidenceBundle({ state, payRun, actorId = "system", e
       ...payRun.employmentIds.map((employmentId) => ({
         objectType: "employment",
         objectId: employmentId
+      })),
+      ...employeeReceivables.map((receivable) => ({
+        objectType: "employee_receivable",
+        objectId: receivable.employeeReceivableId
       })),
       ...payslips.map((payslip) => ({
         objectType: "payslip",
@@ -4790,7 +6656,9 @@ function buildPayrollPostingIntentPreview({
   lines,
   preliminaryTaxAmount,
   employerContributionAmount,
-  netPayAmount
+  netPayAmount,
+  cashNetPayAmount = null,
+  employeeReceivableAmount = null
 }) {
   const dimensionKeys = [...new Set(lines.map((line) => stableStringify(normalizePayrollDimensions(line.dimensionJson || {}))))].sort();
   const payload = {
@@ -4803,6 +6671,8 @@ function buildPayrollPostingIntentPreview({
     preliminaryTaxAmount: roundMoney(preliminaryTaxAmount || 0),
     employerContributionAmount: roundMoney(employerContributionAmount || 0),
     netPayAmount: netPayAmount == null ? null : roundMoney(netPayAmount),
+    cashNetPayAmount: cashNetPayAmount == null ? null : roundMoney(cashNetPayAmount),
+    employeeReceivableAmount: employeeReceivableAmount == null ? null : roundMoney(employeeReceivableAmount),
     dimensions: dimensionKeys.map((serialized) => JSON.parse(serialized))
   };
   return {
@@ -4813,7 +6683,9 @@ function buildPayrollPostingIntentPreview({
       dimensionCount: payload.dimensions.length,
       preliminaryTaxAmount: payload.preliminaryTaxAmount,
       employerContributionAmount: payload.employerContributionAmount,
-      netPayAmount: payload.netPayAmount
+      netPayAmount: payload.netPayAmount,
+      cashNetPayAmount: payload.cashNetPayAmount,
+      employeeReceivableAmount: payload.employeeReceivableAmount
     })
   };
 }
@@ -4825,10 +6697,24 @@ function buildPayrollBankPaymentPreview({
   employment,
   primaryBankAccount,
   netPayAmount,
+  cashNetPayAmount = null,
+  employeeReceivableAmount = null,
   executionBoundary = null
 }) {
   const normalizedNetPayAmount = netPayAmount == null ? null : roundMoney(netPayAmount);
-  const requiresBankPayout = normalizedNetPayAmount != null && normalizedNetPayAmount > 0;
+  const normalizedCashNetPayAmount =
+    cashNetPayAmount == null
+      ? normalizedNetPayAmount == null
+        ? null
+        : roundMoney(Math.max(0, normalizedNetPayAmount))
+      : roundMoney(cashNetPayAmount);
+  const normalizedEmployeeReceivableAmount =
+    employeeReceivableAmount == null
+      ? normalizedNetPayAmount == null
+        ? null
+        : roundMoney(Math.max(0, -normalizedNetPayAmount))
+      : roundMoney(employeeReceivableAmount);
+  const requiresBankPayout = normalizedCashNetPayAmount != null && normalizedCashNetPayAmount > 0;
   const trialGuardActive = executionBoundary?.trialGuardActive === true;
   const accountTarget = requiresBankPayout
     ? trialGuardActive
@@ -4849,6 +6735,8 @@ function buildPayrollBankPaymentPreview({
     reportingPeriod,
     payDate,
     netPayAmount: normalizedNetPayAmount,
+    cashNetPayAmount: normalizedCashNetPayAmount,
+    employeeReceivableAmount: normalizedEmployeeReceivableAmount,
     requiresBankPayout,
     payoutReady: requiresBankPayout ? (trialGuardActive ? true : primaryBankAccount != null) : true,
     accountTarget,
@@ -4864,6 +6752,8 @@ function buildPayrollBankPaymentPreview({
       requiresBankPayout,
       payoutReady: payload.payoutReady,
       netPayAmount: normalizedNetPayAmount,
+      cashNetPayAmount: normalizedCashNetPayAmount,
+      employeeReceivableAmount: normalizedEmployeeReceivableAmount,
       bankRailMode: payload.bankRailMode
     })
   };
@@ -4908,6 +6798,7 @@ function resolveEffectiveTaxProfile({ statutoryProfile, effectiveDate, rulePack 
 function calculateEmploymentRun({
   state,
   rules,
+  payRunId = null,
   employment,
   period,
   runType,
@@ -4978,6 +6869,25 @@ function calculateEmploymentRun({
     reportingPeriod: period.reportingPeriod
   });
   let pensionPayloadBundle = { enrollments: [], activeAgreements: [], basisSnapshots: [], events: [], payLinePayloads: [], warnings: [] };
+  const payrollTravelClaims = (travelPayloadBundle.claims || []).map((claim) => ({
+    travelClaimId: claim.travelClaimId,
+    reportingPeriod: claim.reportingPeriod,
+    approvalStatus: claim.approvalStatus,
+    dimensionJson: normalizePayrollDimensions(claim.dimensionJson || {}),
+    taxFreeTravelAllowance: claim.valuation?.taxFreeTravelAllowance || 0,
+    taxableTravelAllowance: claim.valuation?.taxableTravelAllowance || 0,
+    taxFreeMileage: claim.valuation?.taxFreeMileage || 0,
+    taxableMileage: claim.valuation?.taxableMileage || 0,
+    expenseReimbursementAmount: claim.valuation?.expenseReimbursementAmount || 0,
+    deductibleExpenseVatAmount: claim.valuation?.deductibleExpenseVatAmount || 0,
+    expenseVatDecidedCount: claim.valuation?.expenseVatDecidedCount || 0,
+    expenseVatReviewCount: claim.valuation?.expenseVatReviewCount || 0,
+    expenseVatNotClassifiedCount: claim.valuation?.expenseVatNotClassifiedCount || 0,
+    advanceNetDeductionAmount: claim.valuation?.advanceNetDeductionAmount || 0,
+    expenseSplit: copy(claim.valuation?.expenseSplit || null),
+    reviewCodes: copy(claim.valuation?.reviewCodes || []),
+    payrollDispatchStatus: copy(claim.payrollDispatchStatus || null)
+  }));
 
   const sourceSnapshot = {
     employee,
@@ -5005,8 +6915,11 @@ function calculateEmploymentRun({
       taxableValue: event.valuation?.taxableValue || 0,
       netDeductionValue: event.valuation?.netDeductionValue || 0,
       offsetBreakdown: copy(event.valuation?.offsetBreakdown || null),
-      reviewCodes: copy(event.valuation?.reviewCodes || [])
+      reviewCodes: copy(event.valuation?.reviewCodes || []),
+      dimensionJson: normalizePayrollDimensions(event.dimensionJson || {}),
+      payrollDispatchStatus: copy(event.payrollDispatchStatus || null)
     })),
+    benefitPayrollPayloads: snapshotExternalPayrollLinePayloads(benefitPayloadBundle.payLinePayloads || []),
     documentClassificationIntents: (documentClassificationPayloadBundle.payloads || []).map((payload) => ({
       documentClassificationPayrollPayloadId: payload.documentClassificationPayrollPayloadId,
       treatmentIntentId: payload.treatmentIntentId,
@@ -5014,27 +6927,23 @@ function calculateEmploymentRun({
       processingStep: payload.processingStep,
       payItemCode: payload.payItemCode,
       amount: payload.amount,
+      sourceType: payload.payLinePayloadJson?.sourceType || null,
+      sourceId: payload.payLinePayloadJson?.sourceId || null,
+      dimensionJson: normalizePayrollDimensions(payload.payLinePayloadJson?.dimensionJson || {}),
       dispatchStatus: payload.dispatchStatus?.latestStage || "not_dispatched"
     })),
-    travelClaims: (travelPayloadBundle.claims || []).map((claim) => ({
-      travelClaimId: claim.travelClaimId,
-      reportingPeriod: claim.reportingPeriod,
-      approvalStatus: claim.approvalStatus,
-      taxFreeTravelAllowance: claim.valuation?.taxFreeTravelAllowance || 0,
-      taxableTravelAllowance: claim.valuation?.taxableTravelAllowance || 0,
-      taxFreeMileage: claim.valuation?.taxFreeMileage || 0,
-      taxableMileage: claim.valuation?.taxableMileage || 0,
-      expenseReimbursementAmount: claim.valuation?.expenseReimbursementAmount || 0,
-      advanceNetDeductionAmount: claim.valuation?.advanceNetDeductionAmount || 0,
-      expenseSplit: copy(claim.valuation?.expenseSplit || null),
-      reviewCodes: copy(claim.valuation?.reviewCodes || [])
-    })),
+    documentClassificationPayrollPayloads: snapshotExternalPayrollLinePayloads(
+      documentClassificationPayloadBundle.payLinePayloads || []
+    ),
+    travelClaims: payrollTravelClaims,
+    travelPayrollPayloads: snapshotExternalPayrollLinePayloads(travelPayloadBundle.payLinePayloads || []),
     garnishmentDecisionSnapshot: null,
     garnishmentComputation: null,
     pensionEnrollments: [],
     salaryExchangeAgreements: [],
     pensionEvents: [],
-    pensionBasisSnapshots: []
+    pensionBasisSnapshots: [],
+    pensionPayrollPayloads: []
   };
 
   const warnings = (benefitPayloadBundle.warnings || []).map((warningCode) =>
@@ -5079,19 +6988,29 @@ function calculateEmploymentRun({
   lines.push(...baseLines);
   steps[3] = createCompletedStep(3, summarizeLineStep(baseLines));
 
-  const variableLines = createVariableLines({
+  const variableLineBundle = createVariableLines({
     companyId: employment.companyId,
     employment,
     contract,
+    period,
+    runType,
     hrSnapshot,
     agreementOverlay,
     timeEntries,
     leaveEntries,
     leavePayItemMappings,
     manualInputs: manualInputs.filter((input) => input.processingStep === 4),
+    employmentTimeBase,
+    timePlatform,
     state,
     warnings
   });
+  const variableLines = variableLineBundle.lines;
+  if (variableLineBundle.automaticLeavePreview) {
+    sourceSnapshot.automaticLeavePreview = copy(variableLineBundle.automaticLeavePreview);
+    sourceSnapshot.vacationPayrollComputation = copy(variableLineBundle.automaticLeavePreview.vacation || null);
+    sourceSnapshot.vacationVariablePayComputation = copy(variableLineBundle.automaticLeavePreview.vacationVariablePay || null);
+  }
   const finalPayLines = createFinalPayLines({
     companyId: employment.companyId,
     employment,
@@ -5188,7 +7107,8 @@ function calculateEmploymentRun({
     pensionEnrollmentId: enrollment.pensionEnrollmentId,
     planCode: enrollment.planCode,
     providerCode: enrollment.providerCode,
-    contributionMode: enrollment.contributionMode
+    contributionMode: enrollment.contributionMode,
+    dimensionJson: normalizePayrollDimensions(enrollment.dimensionJson || {})
   }));
   sourceSnapshot.salaryExchangeAgreements = (pensionPayloadBundle.activeAgreements || []).map((agreement) => ({
     salaryExchangeAgreementId: agreement.salaryExchangeAgreementId,
@@ -5201,7 +7121,9 @@ function calculateEmploymentRun({
     policyEffectiveTo: agreement.policyEffectiveTo,
     minimumMonthlyExchangeAmount: agreement.minimumMonthlyExchangeAmount,
     maximumExchangeShare: agreement.maximumExchangeShare,
-    specialPayrollTaxRatePercent: agreement.specialPayrollTaxRatePercent
+    specialPayrollTaxRatePercent: agreement.specialPayrollTaxRatePercent,
+    dimensionJson: normalizePayrollDimensions(agreement.dimensionJson || {}),
+    payrollDispatchStatus: copy(agreement.payrollDispatchStatus || null)
   }));
   sourceSnapshot.pensionBasisSnapshots = (pensionPayloadBundle.basisSnapshots || []).map((snapshot) => ({
     pensionBasisSnapshotId: snapshot.pensionBasisSnapshotId,
@@ -5221,8 +7143,11 @@ function calculateEmploymentRun({
     providerCode: event.providerCode,
     contributionAmount: event.contributionAmount,
     salaryExchangeFlag: event.salaryExchangeFlag,
-    extraPensionFlag: event.extraPensionFlag
+    extraPensionFlag: event.extraPensionFlag,
+    dimensionJson: normalizePayrollDimensions(event.payrollLinePayloadJson?.dimensionJson || {}),
+    payrollDispatchStatus: copy(event.payrollDispatchStatus || null)
   }));
+  sourceSnapshot.pensionPayrollPayloads = snapshotExternalPayrollLinePayloads(pensionPayloadBundle.payLinePayloads || []);
   warnings.push(
     ...(pensionPayloadBundle.warnings || []).map((warningCode) => createWarning(warningCode, `Pension engine warning: ${warningCode}.`))
   );
@@ -5315,6 +7240,13 @@ function calculateEmploymentRun({
   });
   sourceSnapshot.garnishmentDecisionSnapshot = garnishmentPreview.snapshot || null;
   sourceSnapshot.garnishmentComputation = garnishmentPreview.payload || null;
+  const receivableOffsetLineBundle = createReceivableOffsetLines({
+    state,
+    payRunId,
+    employment,
+    reportingPeriod: period.reportingPeriod
+  });
+  sourceSnapshot.employeeReceivableOffsetDecisions = copy(receivableOffsetLineBundle.decisionPreviews || []);
 
   const netDeductionLines = [
     ...createGeneratedGarnishmentLines({
@@ -5322,6 +7254,7 @@ function calculateEmploymentRun({
       preview: garnishmentPreview,
       state
     }),
+    ...receivableOffsetLineBundle.lines,
     ...createStepLinesFromPayloads({
       processingStep: 13,
       employment,
@@ -5380,6 +7313,21 @@ function calculateEmploymentRun({
       .filter((line) => line.payItemCode === "EXPENSE_REIMBURSEMENT")
       .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
   );
+  const travelDeductibleExpenseVatAmount = roundMoney(
+    payrollTravelClaims.reduce((sum, claim) => sum + Number(claim.deductibleExpenseVatAmount || 0), 0)
+  );
+  const travelExpenseVatDecidedCount = payrollTravelClaims.reduce(
+    (sum, claim) => sum + Number(claim.expenseVatDecidedCount || 0),
+    0
+  );
+  const travelExpenseVatReviewCount = payrollTravelClaims.reduce(
+    (sum, claim) => sum + Number(claim.expenseVatReviewCount || 0),
+    0
+  );
+  const travelExpenseVatNotClassifiedCount = payrollTravelClaims.reduce(
+    (sum, claim) => sum + Number(claim.expenseVatNotClassifiedCount || 0),
+    0
+  );
   const pensionPremiumAmount = roundMoney(
     lines
       .filter((line) => ["PENSION_PREMIUM", "FORA_PREMIUM", "EXTRA_PENSION_PREMIUM"].includes(line.payItemCode))
@@ -5400,6 +7348,11 @@ function calculateEmploymentRun({
       .filter((line) => line.payItemCode === "GARNISHMENT")
       .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
   );
+  const employeeReceivableOffsetAmount = roundMoney(
+    lines
+      .filter((line) => line.sourceType === "employee_receivable_offset_decision")
+      .reduce((sum, line) => sum + Math.abs(line.amount || 0), 0)
+  );
   if (taxableBenefitAmount > 0 && lineTotals.grossAfterDeductions <= 0) {
     warnings.push(
       createWarning(
@@ -5416,8 +7369,13 @@ function calculateEmploymentRun({
     taxableBenefitAmount,
     taxFreeAllowanceAmount,
     expenseReimbursementAmount,
+    travelDeductibleExpenseVatAmount,
+    travelExpenseVatDecidedCount,
+    travelExpenseVatReviewCount,
+    travelExpenseVatNotClassifiedCount,
     pensionPremiumAmount,
     garnishmentAmount,
+    employeeReceivableOffsetAmount,
     salaryExchangeGrossDeductionAmount,
     pensionSpecialPayrollTaxAmount
   });
@@ -5448,9 +7406,15 @@ function calculateEmploymentRun({
       employerContributionDecision: employerContributionPreview.decisionObject,
       garnishmentAmount,
       garnishmentDecision: garnishmentPreview.decisionObject,
+      employeeReceivableOffsetAmount,
+      employeeReceivableOffsetDecisions: copy(receivableOffsetLineBundle.decisionPreviews || []),
       taxableBenefitAmount,
       taxFreeAllowanceAmount,
       expenseReimbursementAmount,
+      travelDeductibleExpenseVatAmount,
+      travelExpenseVatDecidedCount,
+      travelExpenseVatReviewCount,
+      travelExpenseVatNotClassifiedCount,
       pensionPremiumAmount,
       salaryExchangeGrossDeductionAmount,
       pensionSpecialPayrollTaxAmount
@@ -5482,7 +7446,9 @@ function calculateEmploymentRun({
     lines,
     preliminaryTaxAmount: taxPreview.amount,
     employerContributionAmount: employerContributionPreview.amount,
-    netPayAmount: lineTotals.netPay
+    netPayAmount: lineTotals.netPay,
+    cashNetPayAmount: lineTotals.cashNetPayAmount,
+    employeeReceivableAmount: lineTotals.employeeReceivableAmount
   });
   steps[17] = postingIntentPreview.step;
   const bankPaymentPreview = buildPayrollBankPaymentPreview({
@@ -5492,6 +7458,8 @@ function calculateEmploymentRun({
     employment,
     primaryBankAccount,
     netPayAmount: lineTotals.netPay,
+    cashNetPayAmount: lineTotals.cashNetPayAmount,
+    employeeReceivableAmount: lineTotals.employeeReceivableAmount,
     executionBoundary
   });
   steps[18] = bankPaymentPreview.step;
@@ -5545,12 +7513,16 @@ function createVariableLines({
   companyId,
   employment,
   contract,
+  period,
+  runType = "regular",
   hrSnapshot = null,
   agreementOverlay = null,
   timeEntries,
   leaveEntries,
   leavePayItemMappings,
   manualInputs,
+  employmentTimeBase = null,
+  timePlatform = null,
   state,
   warnings
 }) {
@@ -5612,7 +7584,34 @@ function createVariableLines({
     }
   }
 
-  const leaveGroups = aggregateLeaveEntries(leaveEntries);
+  const automaticSwedishLeave = createAutomaticSwedishLeaveLines({
+    companyId,
+    employment,
+    contract,
+    period,
+    hrSnapshot,
+    employmentTimeBase,
+    leaveEntries,
+    agreementOverlay,
+    timePlatform,
+    state
+  });
+  lines.push(...automaticSwedishLeave.lines);
+
+  const automaticVacationVariablePaySettlement = buildAutomaticSwedishVariableVacationPaySettlement({
+    companyId,
+    employment,
+    contract,
+    period,
+    runType,
+    employmentTimeBase,
+    state
+  });
+  lines.push(...automaticVacationVariablePaySettlement.lines);
+
+  const leaveGroups = aggregateLeaveEntries(
+    leaveEntries.filter((entry) => !automaticSwedishLeave.handledLeaveEntryIds.has(entry.leaveEntryId))
+  );
   for (const group of leaveGroups) {
     const mapping = leavePayItemMappings.find(
       (candidate) =>
@@ -5695,7 +7694,1194 @@ function createVariableLines({
     );
   }
 
+  const automaticPreview = {};
+  if (automaticSwedishLeave.preview) {
+    Object.assign(automaticPreview, automaticSwedishLeave.preview);
+  }
+  if (automaticVacationVariablePaySettlement.preview) {
+    automaticPreview.vacationVariablePay = automaticVacationVariablePaySettlement.preview;
+  }
+
+  return {
+    lines,
+    automaticLeavePreview: Object.keys(automaticPreview).length > 0 ? automaticPreview : null
+  };
+}
+
+function createAutomaticSwedishLeaveLines({
+  companyId,
+  employment,
+  contract,
+  period,
+  hrSnapshot = null,
+  employmentTimeBase = null,
+  leaveEntries,
+  agreementOverlay = null,
+  timePlatform = null,
+  state
+}) {
+  const handledLeaveEntryIds = new Set();
+  const currentSickLeaveEntries = (leaveEntries || []).filter((entry) => entry.payrollTreatmentCode === "sick_leave");
+  const currentVacationLeaveEntries = (leaveEntries || []).filter((entry) => entry.payrollTreatmentCode === "vacation");
+  if (!period || (currentSickLeaveEntries.length === 0 && currentVacationLeaveEntries.length === 0)) {
+    return {
+      lines: [],
+      handledLeaveEntryIds,
+      preview: null
+    };
+  }
+
+  for (const entry of currentSickLeaveEntries) {
+    handledLeaveEntryIds.add(entry.leaveEntryId);
+  }
+  for (const entry of currentVacationLeaveEntries) {
+    handledLeaveEntryIds.add(entry.leaveEntryId);
+  }
+
+  const historicalSickLeaveEntries =
+    timePlatform?.listLeaveEntries
+      ? timePlatform
+          .listLeaveEntries({
+            companyId,
+            employmentId: employment.employmentId,
+            status: "approved"
+          })
+          .filter((entry) => entry.payrollTreatmentCode === "sick_leave")
+          .filter((entry) => entry.startDate <= period.endsOn)
+      : currentSickLeaveEntries;
+
+  const sickLines = currentSickLeaveEntries.length
+    ? buildAutomaticSwedishSickLeaveLines({
+        companyId,
+        employment,
+        contract,
+        period,
+        hrSnapshot,
+        employmentTimeBase,
+        leaveEntries: historicalSickLeaveEntries,
+        state
+      })
+    : [];
+  const vacationComputation = currentVacationLeaveEntries.length
+    ? buildAutomaticSwedishVacationLeaveLines({
+        companyId,
+        employment,
+        contract,
+        period,
+        hrSnapshot,
+        employmentTimeBase,
+        leaveEntries: currentVacationLeaveEntries,
+        agreementOverlay,
+        state
+      })
+    : { lines: [], preview: null };
+  return {
+    lines: [...sickLines, ...(vacationComputation.lines || [])],
+    handledLeaveEntryIds,
+    preview: {
+      vacation: vacationComputation.preview || null
+    }
+  };
+}
+
+function buildAutomaticSwedishSickLeaveLines({
+  companyId,
+  employment,
+  contract,
+  period,
+  hrSnapshot = null,
+  employmentTimeBase = null,
+  leaveEntries,
+  state
+}) {
+  const scheduleAssignment = employmentTimeBase?.activeScheduleAssignment || null;
+  const dayRecords = buildAutomaticSwedishSickLeaveDayRecords({
+    employment,
+    hrSnapshot,
+    scheduleAssignment,
+    leaveEntries,
+    periodEndsOn: period.endsOn
+  });
+  if (dayRecords.length === 0) {
+    return [];
+  }
+
+  const hourlyBaseRate = resolveAutomaticSwedishSickBaseHourlyRate({
+    employment,
+    contract,
+    hrSnapshot,
+    scheduleAssignment
+  });
+  const averageWeeklyHours = resolveAutomaticSwedishSickAverageWeeklyHours({
+    employment,
+    contract,
+    hrSnapshot,
+    scheduleAssignment
+  });
+  const sickPayHourlyRate = roundMoney(hourlyBaseRate * 0.8);
+  const spells = buildAutomaticSwedishSickSpells({
+    dayRecords,
+    hrSnapshot,
+    scheduleAssignment
+  });
+  const lines = [];
+  const sickPayItem = getRequiredPayItemByCode(state, companyId, "SICK_PAY");
+  const qualifyingDeductionItem = getRequiredPayItemByCode(state, companyId, "QUALIFYING_DEDUCTION");
+  const sickAbsenceDeductionItem = getRequiredPayItemByCode(state, companyId, "SICK_ABSENCE_DEDUCTION");
+
+  for (const spell of spells) {
+    const qualifyingDeductionTarget = roundMoney(sickPayHourlyRate * averageWeeklyHours * 0.2);
+    let remainingQualifyingDeduction = qualifyingDeductionTarget;
+
+    for (const dayRecord of spell.days) {
+      const employerPeriodDayNo = diffIsoDates(spell.startDate, dayRecord.date) + 1;
+      const withinEmployerPeriod = employerPeriodDayNo <= 14;
+      const absenceDeductionAmount = roundMoney(dayRecord.absenceHours * hourlyBaseRate);
+      const sickPayAmount = withinEmployerPeriod ? roundMoney(dayRecord.absenceHours * sickPayHourlyRate) : 0;
+      const qualifyingDeductionAmount =
+        withinEmployerPeriod && remainingQualifyingDeduction > 0
+          ? roundMoney(Math.min(remainingQualifyingDeduction, sickPayAmount))
+          : 0;
+      remainingQualifyingDeduction = roundMoney(Math.max(0, remainingQualifyingDeduction - qualifyingDeductionAmount));
+
+      if (dayRecord.date < period.startsOn || dayRecord.date > period.endsOn) {
+        continue;
+      }
+
+      const sourceId = buildAutomaticSwedishLeaveDaySourceId(dayRecord.leaveEntryIds, dayRecord.date);
+      if (contract?.salaryModelCode === "monthly_salary" && absenceDeductionAmount > 0) {
+        lines.push(
+          createPayLine({
+            payItem: sickAbsenceDeductionItem,
+            employment,
+            quantity: dayRecord.quantityDays,
+            unitRate: resolveAutomaticSwedishLeaveDayUnitRate({
+              hourlyRate: hourlyBaseRate,
+              scheduledHours: dayRecord.scheduledHours,
+              quantityDays: dayRecord.quantityDays,
+              amount: absenceDeductionAmount
+            }),
+            amount: absenceDeductionAmount,
+            sourceType: "leave_entry",
+            sourceId,
+            note: `Automatic statutory sick absence deduction for ${dayRecord.date}. Spell starts ${spell.startDate}.`
+          })
+        );
+      }
+
+      if (sickPayAmount > 0) {
+        lines.push(
+          createPayLine({
+            payItem: sickPayItem,
+            employment,
+            quantity: dayRecord.quantityDays,
+            unitRate: resolveAutomaticSwedishLeaveDayUnitRate({
+              hourlyRate: sickPayHourlyRate,
+              scheduledHours: dayRecord.scheduledHours,
+              quantityDays: dayRecord.quantityDays,
+              amount: sickPayAmount
+            }),
+            amount: sickPayAmount,
+            sourceType: "leave_entry",
+            sourceId,
+            note: `Automatic statutory sick pay for ${dayRecord.date}, employer period day ${employerPeriodDayNo}.`
+          })
+        );
+      }
+
+      if (qualifyingDeductionAmount > 0) {
+        const quantity = dayRecord.quantityDays > 0 ? dayRecord.quantityDays : 1;
+        lines.push(
+          createPayLine({
+            payItem: qualifyingDeductionItem,
+            employment,
+            quantity,
+            unitRate: roundMoney(qualifyingDeductionAmount / quantity),
+            amount: qualifyingDeductionAmount,
+            sourceType: "leave_entry",
+            sourceId,
+            note: `Automatic statutory qualifying deduction for sickness spell starting ${spell.startDate}.`
+          })
+        );
+      }
+    }
+  }
+
   return lines;
+}
+
+function buildAutomaticSwedishSickLeaveDayRecords({
+  employment,
+  hrSnapshot = null,
+  scheduleAssignment = null,
+  leaveEntries,
+  periodEndsOn
+}) {
+  const grouped = new Map();
+
+  for (const entry of leaveEntries || []) {
+    for (const leaveDay of entry.days || []) {
+      if (!leaveDay?.date || leaveDay.date > periodEndsOn) {
+        continue;
+      }
+      const scheduledHours = resolveAutomaticSwedishScheduledHoursForDate({
+        workDate: leaveDay.date,
+        hrSnapshot,
+        scheduleAssignment
+      });
+      const absenceHours = resolveAutomaticSwedishSickAbsenceHours({
+        employment,
+        leaveDay,
+        scheduledHours
+      });
+      if (absenceHours <= 0) {
+        continue;
+      }
+
+      const current = grouped.get(leaveDay.date) || {
+        date: leaveDay.date,
+        leaveEntryIds: [],
+        absenceHours: 0,
+        scheduledHours,
+        quantityDays: 0
+      };
+      current.leaveEntryIds.push(entry.leaveEntryId);
+      current.absenceHours = roundMoney(current.absenceHours + absenceHours);
+      current.scheduledHours =
+        current.scheduledHours == null
+          ? scheduledHours
+          : Math.max(Number(current.scheduledHours || 0), Number(scheduledHours || 0));
+      grouped.set(leaveDay.date, current);
+    }
+  }
+
+  return [...grouped.values()]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((dayRecord) => {
+      const scheduledHours = Number(dayRecord.scheduledHours || 0);
+      const cappedAbsenceHours =
+        scheduledHours > 0 ? roundMoney(Math.min(dayRecord.absenceHours, scheduledHours)) : roundMoney(dayRecord.absenceHours);
+      const quantityDays =
+        scheduledHours > 0 ? roundQuantity(cappedAbsenceHours / scheduledHours) : roundQuantity(cappedAbsenceHours > 0 ? 1 : 0);
+      return {
+        ...dayRecord,
+        leaveEntryIds: [...new Set(dayRecord.leaveEntryIds)].sort(),
+        absenceHours: cappedAbsenceHours,
+        quantityDays
+      };
+    });
+}
+
+function buildAutomaticSwedishSickSpells({ dayRecords, hrSnapshot = null, scheduleAssignment = null }) {
+  const spells = [];
+  let currentSpell = null;
+
+  for (const dayRecord of dayRecords) {
+    if (
+      !currentSpell ||
+      !shouldMergeAutomaticSwedishSickSpell({
+        previousDate: currentSpell.days[currentSpell.days.length - 1].date,
+        nextDate: dayRecord.date,
+        hrSnapshot,
+        scheduleAssignment
+      })
+    ) {
+      currentSpell = {
+        startDate: dayRecord.date,
+        days: []
+      };
+      spells.push(currentSpell);
+    }
+    currentSpell.days.push(dayRecord);
+  }
+
+  return spells;
+}
+
+function shouldMergeAutomaticSwedishSickSpell({ previousDate, nextDate, hrSnapshot = null, scheduleAssignment = null }) {
+  if (nextDate <= addIsoDays(previousDate, 1)) {
+    return true;
+  }
+
+  let cursor = addIsoDays(previousDate, 1);
+  while (cursor < nextDate) {
+    if (Number(resolveAutomaticSwedishScheduledHoursForDate({ workDate: cursor, hrSnapshot, scheduleAssignment }) || 0) > 0) {
+      return false;
+    }
+    cursor = addIsoDays(cursor, 1);
+  }
+  return true;
+}
+
+function resolveAutomaticSwedishSickBaseHourlyRate({ employment, contract, hrSnapshot = null, scheduleAssignment = null }) {
+  if (contract?.hourlyRate != null) {
+    return roundMoney(contract.hourlyRate);
+  }
+  if (contract?.monthlySalary == null) {
+    throw createError(
+      409,
+      "statutory_sick_pay_basis_missing",
+      `Automatic statutory sick pay requires hourlyRate or monthlySalary for ${employment.employmentNo}.`
+    );
+  }
+
+  const ordinaryHoursPerMonth = Number(hrSnapshot?.activeSalaryBasis?.ordinaryHoursPerMonth || 0);
+  if (ordinaryHoursPerMonth > 0) {
+    return roundMoney(contract.monthlySalary / ordinaryHoursPerMonth);
+  }
+
+  const averageWeeklyHours = resolveAutomaticSwedishSickAverageWeeklyHours({
+    employment,
+    contract,
+    hrSnapshot,
+    scheduleAssignment
+  });
+  if (averageWeeklyHours > 0) {
+    return roundMoney((contract.monthlySalary * 12) / (52 * averageWeeklyHours));
+  }
+
+  throw createError(
+    409,
+    "statutory_sick_pay_basis_missing",
+    `Automatic statutory sick pay could not derive an hourly basis for ${employment.employmentNo}.`
+  );
+}
+
+function resolveAutomaticSwedishSickAverageWeeklyHours({ employment, contract, hrSnapshot = null, scheduleAssignment = null }) {
+  const standardWeeklyHours = Number(hrSnapshot?.activeSalaryBasis?.standardWeeklyHours || 0);
+  if (standardWeeklyHours > 0) {
+    return roundMoney(standardWeeklyHours);
+  }
+
+  const ordinaryHoursPerMonth = Number(hrSnapshot?.activeSalaryBasis?.ordinaryHoursPerMonth || 0);
+  if (ordinaryHoursPerMonth > 0) {
+    return roundMoney((ordinaryHoursPerMonth * 12) / 52);
+  }
+
+  const scheduledWeeklyHours = resolveAutomaticSwedishScheduledWeeklyHours(scheduleAssignment);
+  if (scheduledWeeklyHours > 0) {
+    return scheduledWeeklyHours;
+  }
+
+  throw createError(
+    409,
+    "statutory_sick_pay_weekly_hours_missing",
+    `Automatic statutory sick pay requires standard weekly hours or a schedule for ${employment.employmentNo}.`
+  );
+}
+
+function resolveAutomaticSwedishSickAbsenceHours({ employment, leaveDay, scheduledHours }) {
+  if (leaveDay.extentHours != null) {
+    return roundMoney(leaveDay.extentHours);
+  }
+  if (leaveDay.extentPercent == null) {
+    return 0;
+  }
+  if (scheduledHours == null) {
+    throw createError(
+      409,
+      "statutory_sick_pay_schedule_missing",
+      `Automatic statutory sick pay requires scheduled hours for ${employment.employmentNo} on ${leaveDay.date}.`
+    );
+  }
+  if (scheduledHours <= 0) {
+    return 0;
+  }
+  return roundMoney((scheduledHours * leaveDay.extentPercent) / 100);
+}
+
+function resolveAutomaticSwedishScheduledHoursForDate({ workDate, hrSnapshot = null, scheduleAssignment = null }) {
+  const scheduleDay = getAutomaticSwedishScheduleDayForDate(scheduleAssignment?.template || null, workDate);
+  if (scheduleDay) {
+    return roundMoney(Number(scheduleDay.plannedMinutes || 0) / 60);
+  }
+  if (scheduleAssignment?.template) {
+    return 0;
+  }
+
+  const standardWeeklyHours = Number(hrSnapshot?.activeSalaryBasis?.standardWeeklyHours || 0);
+  if (standardWeeklyHours > 0) {
+    return weekdayFromIsoDate(workDate) <= 5 ? roundMoney(standardWeeklyHours / 5) : 0;
+  }
+
+  return null;
+}
+
+function resolveAutomaticSwedishScheduledWeeklyHours(scheduleAssignment = null) {
+  const days = scheduleAssignment?.template?.days;
+  if (!Array.isArray(days) || days.length === 0) {
+    return 0;
+  }
+  return roundMoney(days.reduce((sum, day) => sum + Number(day?.plannedMinutes || 0), 0) / 60);
+}
+
+function resolveAutomaticSwedishVacationWorkingDaysPerWeek(scheduleAssignment = null) {
+  const days = scheduleAssignment?.template?.days;
+  if (!Array.isArray(days) || days.length === 0) {
+    return 5;
+  }
+  const workingDaysPerWeek = days.filter((day) => Number(day?.plannedMinutes || 0) > 0).length;
+  return workingDaysPerWeek > 0 ? workingDaysPerWeek : 5;
+}
+
+function resolveAutomaticSwedishVacationMonthlySalaryLiabilityDayAmount({
+  contract,
+  scheduleAssignment = null
+} = {}) {
+  if (contract?.monthlySalary == null) {
+    return 0;
+  }
+  const workingDaysPerWeek = resolveAutomaticSwedishVacationWorkingDaysPerWeek(scheduleAssignment);
+  return roundMoney((contract.monthlySalary * 12) / (52 * workingDaysPerWeek));
+}
+
+function resolveAutomaticSwedishLeaveDayUnitRate({ hourlyRate, scheduledHours, quantityDays, amount }) {
+  if (scheduledHours > 0) {
+    return roundMoney(hourlyRate * scheduledHours);
+  }
+  if (quantityDays > 0) {
+    return roundMoney(amount / quantityDays);
+  }
+  return roundMoney(amount);
+}
+
+function buildAutomaticSwedishVacationLeaveLines({
+  companyId,
+  employment,
+  contract,
+  period,
+  hrSnapshot = null,
+  employmentTimeBase = null,
+  leaveEntries,
+  agreementOverlay = null,
+  state
+}) {
+  const vacationBalance = employmentTimeBase?.vacationBalance || null;
+  if (!vacationBalance) {
+    throw createError(
+      409,
+      "statutory_vacation_balance_missing",
+      `Automatic statutory vacation requires a vacation balance profile for ${employment.employmentNo}.`
+    );
+  }
+  const ruleSelection = buildAutomaticSwedishVacationRuleSelection({
+    state,
+    companyId,
+    employment,
+    contract,
+    vacationBalance
+  });
+  if (!ruleSelection.ruleCode) {
+    throw createError(
+      409,
+      "statutory_vacation_salary_model_unsupported",
+      `Automatic statutory vacation requires a supported salary model for ${employment.employmentNo}.`
+    );
+  }
+
+  const dayRecords = buildAutomaticSwedishVacationLeaveDayRecords({
+    employment,
+    hrSnapshot,
+    scheduleAssignment: employmentTimeBase?.activeScheduleAssignment || null,
+    leaveEntries,
+    periodStartsOn: period.startsOn,
+    periodEndsOn: period.endsOn
+  });
+  if (dayRecords.length === 0) {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+
+  const allocations = allocateAutomaticSwedishVacationDays({
+    employment,
+    dayRecords,
+    vacationBalance
+  });
+  if (allocations.some((allocation) => allocation.balanceBucket === "unpaid")) {
+    throw createError(
+      409,
+      "statutory_vacation_balance_insufficient",
+      `Automatic statutory vacation exceeds the available paid and saved vacation balance for ${employment.employmentNo}.`
+    );
+  }
+
+  const paidDaysUsed = roundQuantity(
+    allocations
+      .filter((allocation) => allocation.balanceBucket === "paid")
+      .reduce((sum, allocation) => sum + Number(allocation.quantityDays || 0), 0)
+  );
+  const savedDaysUsed = roundQuantity(
+    allocations
+      .filter((allocation) => allocation.balanceBucket === "saved")
+      .reduce((sum, allocation) => sum + Number(allocation.quantityDays || 0), 0)
+  );
+  const previewBase = {
+    ruleCode: ruleSelection.ruleCode,
+    ruleReasonCode: ruleSelection.reasonCode,
+    requestedDays: roundQuantity(dayRecords.reduce((sum, record) => sum + Number(record.quantityDays || 0), 0)),
+    paidDaysAvailable: roundQuantity(vacationBalance.paidDays || 0),
+    savedDaysAvailable: roundQuantity(vacationBalance.savedDays || 0),
+    paidDaysUsed,
+    savedDaysUsed,
+    remainingPaidDays: roundQuantity(Number(vacationBalance.paidDays || 0) - paidDaysUsed),
+    remainingSavedDays: roundQuantity(Number(vacationBalance.savedDays || 0) - savedDaysUsed),
+    vacationYearStartDate: vacationBalance.vacationYearStartDate || null,
+    vacationYearEndDate: vacationBalance.vacationYearEndDate || null,
+    allocations: allocations.map((allocation) => ({
+      date: allocation.date,
+      quantityDays: allocation.quantityDays,
+      balanceBucket: allocation.balanceBucket,
+      sourceId: allocation.sourceId,
+      leaveEntryIds: allocation.leaveEntryIds
+    }))
+  };
+
+  if (ruleSelection.ruleCode === "sammaloneregeln") {
+    const supplementPayItem = getRequiredPayItemByCode(state, companyId, "VACATION_SUPPLEMENT");
+    const supplementUnitRate = resolveAutomaticSwedishVacationSupplementUnitRate({
+      companyId,
+      employment,
+      contract,
+      hrSnapshot,
+      agreementOverlay,
+      state
+    });
+    return {
+      lines: allocations.map((allocation) =>
+        createPayLine({
+          payItem: supplementPayItem,
+          employment,
+          quantity: allocation.quantityDays,
+          unitRate: supplementUnitRate,
+          amount: roundMoney(supplementUnitRate * allocation.quantityDays),
+          sourceType: "leave_entry",
+          sourceId: allocation.sourceId,
+          note: `Automatic statutory vacation supplement for ${allocation.date} (${allocation.balanceBucket} vacation day).`
+        })
+      ),
+      preview: {
+        ...previewBase,
+        supplementUnitRate,
+        supplementRateSource:
+          agreementOverlay?.rateComponents?.payItemRates?.VACATION_SUPPLEMENT?.autoGenerate === true
+            ? "agreement_overlay_auto"
+            : "statutory_0_43_percent",
+        variableVacationBasisAmount: ruleSelection.variableVacationPayBasisAmount,
+        totalVacationBasisAmount: ruleSelection.totalVacationPayBasisAmount,
+        variableSharePercent: ruleSelection.variableSharePercent,
+        earningYearStartDate: ruleSelection.earningYearStartDate,
+        earningYearEndDate: ruleSelection.earningYearEndDate
+      }
+    };
+  }
+
+  const percentageRuleModel = buildAutomaticSwedishPercentageVacationPayModel({
+    state,
+    companyId,
+    employment,
+    allocations,
+    ruleSelection
+  });
+
+  return {
+    lines: percentageRuleModel.lines,
+    preview: {
+      ...previewBase,
+      earningYearStartDate: percentageRuleModel.earningYearStartDate,
+      earningYearEndDate: percentageRuleModel.earningYearEndDate,
+      vacationEntitlementDays: percentageRuleModel.vacationEntitlementDays,
+      vacationPayBasisAmount: percentageRuleModel.vacationPayBasisAmount,
+      vacationPayPercent: percentageRuleModel.vacationPayPercent,
+      vacationPayTotalAmount: percentageRuleModel.vacationPayTotalAmount,
+      vacationPayPerDayAmount: percentageRuleModel.vacationPayPerDayAmount,
+      vacationPayBasisSource: "approved_pay_runs",
+      basisPayRunIds: percentageRuleModel.basisPayRunIds,
+      variableVacationBasisAmount: ruleSelection.variableVacationPayBasisAmount,
+      variableSharePercent: ruleSelection.variableSharePercent
+    }
+  };
+}
+
+function resolveAutomaticSwedishVacationRuleCode({ state, companyId, employment, contract, vacationBalance } = {}) {
+  return buildAutomaticSwedishVacationRuleSelection({
+    state,
+    companyId,
+    employment,
+    contract,
+    vacationBalance
+  }).ruleCode;
+}
+
+function buildAutomaticSwedishVacationRuleSelection({
+  state,
+  companyId,
+  employment,
+  contract,
+  vacationBalance
+} = {}) {
+  if (contract?.salaryModelCode === "monthly_salary" && contract?.monthlySalary != null) {
+    const earningYearStartDate = vacationBalance?.vacationYearStartDate
+      ? shiftIsoDateByYears(vacationBalance.vacationYearStartDate, -1)
+      : null;
+    const earningYearEndDate = vacationBalance?.vacationYearStartDate
+      ? shiftIsoDateByDays(vacationBalance.vacationYearStartDate, -1)
+      : null;
+    const basisModel =
+      earningYearStartDate && earningYearEndDate
+        ? buildAutomaticSwedishVacationPayBasisModel({
+            state,
+            companyId,
+            employmentId: employment?.employmentId,
+            earningYearStartDate,
+            earningYearEndDate
+          })
+        : {
+            totalVacationPayBasisAmount: 0,
+            variableVacationPayBasisAmount: 0,
+            basisPayRunIds: [],
+            variableBasisPayRunIds: []
+          };
+    const totalVacationPayBasisAmount = roundMoney(basisModel.totalVacationPayBasisAmount || 0);
+    const variableVacationPayBasisAmount = roundMoney(basisModel.variableVacationPayBasisAmount || 0);
+    const variableSharePercent =
+      totalVacationPayBasisAmount > 0
+        ? roundMoney((variableVacationPayBasisAmount / totalVacationPayBasisAmount) * 100)
+        : 0;
+
+    if (totalVacationPayBasisAmount > 0 && variableVacationPayBasisAmount >= roundMoney(totalVacationPayBasisAmount * 0.1)) {
+      return {
+        ruleCode: "procentregeln",
+        reasonCode: "monthly_variable_share_threshold",
+        earningYearStartDate,
+        earningYearEndDate,
+        totalVacationPayBasisAmount,
+        variableVacationPayBasisAmount,
+        variableSharePercent,
+        basisPayRunIds: basisModel.basisPayRunIds,
+        variableBasisPayRunIds: basisModel.variableBasisPayRunIds
+      };
+    }
+    return {
+      ruleCode: "sammaloneregeln",
+      reasonCode: "monthly_salary_fixed",
+      earningYearStartDate,
+      earningYearEndDate,
+      totalVacationPayBasisAmount,
+      variableVacationPayBasisAmount,
+      variableSharePercent,
+      basisPayRunIds: basisModel.basisPayRunIds,
+      variableBasisPayRunIds: basisModel.variableBasisPayRunIds
+    };
+  }
+  if (contract?.salaryModelCode === "hourly_salary" && contract?.hourlyRate != null) {
+    const earningYearStartDate = vacationBalance?.vacationYearStartDate
+      ? shiftIsoDateByYears(vacationBalance.vacationYearStartDate, -1)
+      : null;
+    const earningYearEndDate = vacationBalance?.vacationYearStartDate
+      ? shiftIsoDateByDays(vacationBalance.vacationYearStartDate, -1)
+      : null;
+    const basisModel =
+      earningYearStartDate && earningYearEndDate
+        ? buildAutomaticSwedishVacationPayBasisModel({
+            state,
+            companyId,
+            employmentId: employment?.employmentId,
+            earningYearStartDate,
+            earningYearEndDate
+          })
+        : {
+            totalVacationPayBasisAmount: 0,
+            variableVacationPayBasisAmount: 0,
+            basisPayRunIds: [],
+            variableBasisPayRunIds: []
+          };
+    return {
+      ruleCode: "procentregeln",
+      reasonCode: "hourly_salary",
+      earningYearStartDate,
+      earningYearEndDate,
+      totalVacationPayBasisAmount: roundMoney(basisModel.totalVacationPayBasisAmount || 0),
+      variableVacationPayBasisAmount: roundMoney(basisModel.variableVacationPayBasisAmount || 0),
+      variableSharePercent: 100,
+      basisPayRunIds: basisModel.basisPayRunIds,
+      variableBasisPayRunIds: basisModel.variableBasisPayRunIds
+    };
+  }
+  return {
+    ruleCode: null,
+    reasonCode: null,
+    earningYearStartDate: null,
+    earningYearEndDate: null,
+    totalVacationPayBasisAmount: 0,
+    variableVacationPayBasisAmount: 0,
+    variableSharePercent: 0,
+    basisPayRunIds: [],
+    variableBasisPayRunIds: []
+  };
+}
+
+function buildAutomaticSwedishPercentageVacationPayModel({
+  state,
+  companyId,
+  employment,
+  allocations,
+  ruleSelection
+}) {
+  const vacationEntitlementDays = resolveAutomaticSwedishVacationEntitlementDays();
+  const vacationPayPercent = resolveAutomaticSwedishVacationPayPercent(vacationEntitlementDays);
+  const vacationPayBasisAmount = roundMoney(ruleSelection?.totalVacationPayBasisAmount || 0);
+  const vacationPayTotalAmount = roundMoney((vacationPayBasisAmount * vacationPayPercent) / 100);
+  const vacationPayPerDayAmount =
+    vacationEntitlementDays > 0 ? roundMoney(vacationPayTotalAmount / vacationEntitlementDays) : 0;
+  const vacationPayItem = getRequiredPayItemByCode(state, companyId, "VACATION_PAY");
+
+  return {
+    earningYearStartDate: ruleSelection?.earningYearStartDate || null,
+    earningYearEndDate: ruleSelection?.earningYearEndDate || null,
+    vacationEntitlementDays,
+    vacationPayBasisAmount,
+    vacationPayPercent,
+    vacationPayTotalAmount,
+    vacationPayPerDayAmount,
+    basisPayRunIds: ruleSelection?.basisPayRunIds || [],
+    lines: allocations.map((allocation) =>
+      createPayLine({
+        payItem: vacationPayItem,
+        employment,
+        quantity: allocation.quantityDays,
+        unitRate: vacationPayPerDayAmount,
+        amount: roundMoney(vacationPayPerDayAmount * allocation.quantityDays),
+        sourceType: "leave_entry",
+        sourceId: allocation.sourceId,
+        note: `Automatic statutory vacation pay for ${allocation.date} (${allocation.balanceBucket} vacation day).`
+      })
+    )
+  };
+}
+
+function buildAutomaticSwedishVacationPayBasisModel({
+  state,
+  companyId,
+  employmentId,
+  earningYearStartDate,
+  earningYearEndDate
+}) {
+  let totalVacationPayBasisAmount = 0;
+  let variableVacationPayBasisAmount = 0;
+  const basisPayRunIds = [];
+  const variableBasisPayRunIds = [];
+
+  for (const payRunId of state.payRunIdsByCompany.get(companyId) || []) {
+    const payRun = state.payRuns.get(payRunId);
+    if (!payRun || payRun.status !== "approved" || !payRun.payDate) {
+      continue;
+    }
+    if (payRun.payDate < earningYearStartDate || payRun.payDate > earningYearEndDate) {
+      continue;
+    }
+    let payRunContributed = false;
+    for (const lineId of state.payRunLineIdsByRun.get(payRun.payRunId) || []) {
+      const line = state.payRunLines.get(lineId);
+      if (!line || line.employmentId !== employmentId || !countsTowardAutomaticSwedishVacationPayBasis(line)) {
+        continue;
+      }
+      const lineAmount = roundMoney(Math.max(0, directionalAmount(line)));
+      totalVacationPayBasisAmount = roundMoney(totalVacationPayBasisAmount + lineAmount);
+      payRunContributed = true;
+      if (isAutomaticSwedishVariableVacationBasisLine(line)) {
+        variableVacationPayBasisAmount = roundMoney(variableVacationPayBasisAmount + lineAmount);
+        variableBasisPayRunIds.push(payRun.payRunId);
+      }
+    }
+    if (payRunContributed) {
+      basisPayRunIds.push(payRun.payRunId);
+    }
+  }
+
+  return {
+    totalVacationPayBasisAmount,
+    variableVacationPayBasisAmount,
+    basisPayRunIds: [...new Set(basisPayRunIds)].sort(),
+    variableBasisPayRunIds: [...new Set(variableBasisPayRunIds)].sort()
+  };
+}
+
+function countsTowardAutomaticSwedishVacationPayBasis(line) {
+  if (!line || line.compensationBucket !== "gross_addition" || line.affectsVacationBasis !== true) {
+    return false;
+  }
+  if (line.agiMappingCode !== "cash_compensation" || line.taxTreatmentCode !== "taxable") {
+    return false;
+  }
+  return !["VACATION_PAY", "VACATION_SUPPLEMENT", "SICK_PAY", "FINAL_PAY"].includes(line.payItemCode);
+}
+
+function isAutomaticSwedishVariableVacationBasisLine(line) {
+  return ["OVERTIME", "ADDITIONAL_TIME", "OB", "JOUR", "STANDBY", "BONUS", "COMMISSION"].includes(line?.payItemCode);
+}
+
+function resolveAutomaticSwedishVacationEntitlementDays() {
+  return 25;
+}
+
+function resolveAutomaticSwedishVacationPayPercent(vacationEntitlementDays) {
+  const extraDays = Math.max(0, Number(vacationEntitlementDays || 0) - 25);
+  return roundMoney(12 + extraDays * 0.48);
+}
+
+function shiftIsoDateByYears(value, yearDelta) {
+  const date = new Date(`${normalizeRequiredDate(value, "automatic_vacation_reference_date_required")}T12:00:00Z`);
+  date.setUTCFullYear(date.getUTCFullYear() + yearDelta);
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftIsoDateByDays(value, dayDelta) {
+  const date = new Date(`${normalizeRequiredDate(value, "automatic_vacation_reference_date_required")}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + dayDelta);
+  return date.toISOString().slice(0, 10);
+}
+
+function shiftIsoDateByMonths(value, monthDelta) {
+  const date = new Date(`${normalizeRequiredDate(value, "automatic_vacation_reference_date_required")}T12:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + monthDelta);
+  return date.toISOString().slice(0, 10);
+}
+
+function buildAutomaticSwedishVariableVacationPaySettlement({
+  companyId,
+  employment,
+  contract,
+  period,
+  runType = "regular",
+  employmentTimeBase = null,
+  state
+}) {
+  if (runType !== "regular") {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+  const vacationBalance = employmentTimeBase?.vacationBalance || null;
+  if (!vacationBalance || !period?.payDate || period.payDate < vacationBalance.vacationYearStartDate) {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+  const ruleSelection = buildAutomaticSwedishVacationRuleSelection({
+    state,
+    companyId,
+    employment,
+    contract,
+    vacationBalance
+  });
+  if (ruleSelection.ruleCode !== "sammaloneregeln") {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+
+  const earningYearStartDate = ruleSelection.earningYearStartDate;
+  const earningYearEndDate = ruleSelection.earningYearEndDate;
+  const variableVacationPayBasisAmount = roundMoney(ruleSelection.variableVacationPayBasisAmount || 0);
+  if (!earningYearStartDate || !earningYearEndDate || variableVacationPayBasisAmount <= 0) {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+
+  const settlementSourceId = buildAutomaticSwedishVariableVacationSettlementSourceId({
+    employmentId: employment.employmentId,
+    earningYearStartDate,
+    earningYearEndDate
+  });
+  if (
+    hasApprovedAutomaticSwedishVariableVacationSettlement({
+      state,
+      companyId,
+      employmentId: employment.employmentId,
+      settlementSourceId
+    })
+  ) {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+
+  const variableVacationPayPercent = 12;
+  const variableVacationPayAmount = roundMoney((variableVacationPayBasisAmount * variableVacationPayPercent) / 100);
+  if (variableVacationPayAmount <= 0) {
+    return {
+      lines: [],
+      preview: null
+    };
+  }
+
+  const vacationPayItem = getRequiredPayItemByCode(state, companyId, "VACATION_PAY");
+  return {
+    lines: [
+      createPayLine({
+        payItem: vacationPayItem,
+        employment,
+        quantity: 1,
+        unitRate: variableVacationPayAmount,
+        amount: variableVacationPayAmount,
+        sourceType: "vacation_year_settlement",
+        sourceId: settlementSourceId,
+        note: `Automatic statutory vacation pay settlement for variable pay earned ${earningYearStartDate} to ${earningYearEndDate}.`
+      })
+    ],
+    preview: {
+      ruleCode: "sammaloneregeln",
+      earningYearStartDate,
+      earningYearEndDate,
+      variableVacationPayBasisAmount,
+      variableVacationPayPercent,
+      variableVacationPayAmount,
+      totalVacationBasisAmount: ruleSelection.totalVacationPayBasisAmount,
+      variableSharePercent: ruleSelection.variableSharePercent,
+      settlementSourceId,
+      settlementDueDate: shiftIsoDateByDays(shiftIsoDateByMonths(shiftIsoDateByDays(earningYearEndDate, 1), 1), -1),
+      basisPayRunIds: ruleSelection.variableBasisPayRunIds || []
+    }
+  };
+}
+
+function buildAutomaticSwedishVariableVacationSettlementSourceId({
+  employmentId,
+  earningYearStartDate,
+  earningYearEndDate
+} = {}) {
+  return buildSnapshotHash({
+    settlementType: "automatic_vacation_variable_pay",
+    employmentId,
+    earningYearStartDate,
+    earningYearEndDate
+  });
+}
+
+function hasApprovedAutomaticSwedishVariableVacationSettlement({ state, companyId, employmentId, settlementSourceId } = {}) {
+  for (const payRunId of state.payRunIdsByCompany.get(companyId) || []) {
+    const payRun = state.payRuns.get(payRunId);
+    if (!payRun || payRun.status !== "approved") {
+      continue;
+    }
+    for (const lineId of state.payRunLineIdsByRun.get(payRun.payRunId) || []) {
+      const line = state.payRunLines.get(lineId);
+      if (
+        line &&
+        line.employmentId === employmentId &&
+        line.payItemCode === "VACATION_PAY" &&
+        line.sourceType === "vacation_year_settlement" &&
+        line.sourceId === settlementSourceId
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function buildAutomaticSwedishVacationLeaveDayRecords({
+  employment,
+  hrSnapshot = null,
+  scheduleAssignment = null,
+  leaveEntries,
+  periodStartsOn,
+  periodEndsOn
+}) {
+  const grouped = new Map();
+
+  for (const entry of leaveEntries || []) {
+    for (const leaveDay of entry.days || []) {
+      if (!leaveDay?.date || leaveDay.date < periodStartsOn || leaveDay.date > periodEndsOn) {
+        continue;
+      }
+      const scheduledHours = resolveAutomaticSwedishScheduledHoursForDate({
+        workDate: leaveDay.date,
+        hrSnapshot,
+        scheduleAssignment
+      });
+      const absenceHours = resolveAutomaticSwedishVacationAbsenceHours({
+        employment,
+        leaveDay,
+        scheduledHours
+      });
+      if (absenceHours <= 0) {
+        continue;
+      }
+
+      const current = grouped.get(leaveDay.date) || {
+        date: leaveDay.date,
+        leaveEntryIds: [],
+        absenceHours: 0,
+        scheduledHours,
+        quantityDays: 0
+      };
+      current.leaveEntryIds.push(entry.leaveEntryId);
+      current.absenceHours = roundMoney(current.absenceHours + absenceHours);
+      current.scheduledHours =
+        current.scheduledHours == null
+          ? scheduledHours
+          : Math.max(Number(current.scheduledHours || 0), Number(scheduledHours || 0));
+      grouped.set(leaveDay.date, current);
+    }
+  }
+
+  return [...grouped.values()]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((dayRecord) => {
+      const scheduledHours = Number(dayRecord.scheduledHours || 0);
+      const cappedAbsenceHours =
+        scheduledHours > 0 ? roundMoney(Math.min(dayRecord.absenceHours, scheduledHours)) : roundMoney(dayRecord.absenceHours);
+      const quantityDays =
+        scheduledHours > 0 ? roundQuantity(cappedAbsenceHours / scheduledHours) : roundQuantity(cappedAbsenceHours > 0 ? 1 : 0);
+      return {
+        ...dayRecord,
+        leaveEntryIds: [...new Set(dayRecord.leaveEntryIds)].sort(),
+        absenceHours: cappedAbsenceHours,
+        quantityDays
+      };
+    })
+    .filter((dayRecord) => dayRecord.quantityDays > 0);
+}
+
+function resolveAutomaticSwedishVacationAbsenceHours({ employment, leaveDay, scheduledHours }) {
+  if (leaveDay.extentHours != null) {
+    return roundMoney(leaveDay.extentHours);
+  }
+  if (leaveDay.extentPercent == null) {
+    return 0;
+  }
+  if (scheduledHours == null) {
+    throw createError(
+      409,
+      "statutory_vacation_schedule_missing",
+      `Automatic statutory vacation requires scheduled hours for ${employment.employmentNo} on ${leaveDay.date}.`
+    );
+  }
+  if (scheduledHours <= 0) {
+    return 0;
+  }
+  return roundMoney((scheduledHours * leaveDay.extentPercent) / 100);
+}
+
+function allocateAutomaticSwedishVacationDays({ employment, dayRecords, vacationBalance }) {
+  let remainingPaidDays = roundQuantity(vacationBalance?.paidDays || 0);
+  let remainingSavedDays = roundQuantity(vacationBalance?.savedDays || 0);
+  const allocations = [];
+
+  for (const dayRecord of dayRecords) {
+    let remainingDayQuantity = roundQuantity(dayRecord.quantityDays || 0);
+    if (remainingDayQuantity <= 0) {
+      continue;
+    }
+    for (const bucket of ["paid", "saved"]) {
+      const remainingBucketQuantity = bucket === "paid" ? remainingPaidDays : remainingSavedDays;
+      if (remainingDayQuantity <= 0 || remainingBucketQuantity <= 0) {
+        continue;
+      }
+      const consumedQuantity = roundQuantity(Math.min(remainingDayQuantity, remainingBucketQuantity));
+      if (consumedQuantity <= 0) {
+        continue;
+      }
+      allocations.push({
+        date: dayRecord.date,
+        leaveEntryIds: dayRecord.leaveEntryIds,
+        quantityDays: consumedQuantity,
+        balanceBucket: bucket,
+        sourceId: buildAutomaticSwedishLeaveDaySourceId(dayRecord.leaveEntryIds, dayRecord.date)
+      });
+      remainingDayQuantity = roundQuantity(remainingDayQuantity - consumedQuantity);
+      if (bucket === "paid") {
+        remainingPaidDays = roundQuantity(remainingPaidDays - consumedQuantity);
+      } else {
+        remainingSavedDays = roundQuantity(remainingSavedDays - consumedQuantity);
+      }
+    }
+    if (remainingDayQuantity > 0) {
+      allocations.push({
+        date: dayRecord.date,
+        leaveEntryIds: dayRecord.leaveEntryIds,
+        quantityDays: remainingDayQuantity,
+        balanceBucket: "unpaid",
+        sourceId: buildAutomaticSwedishLeaveDaySourceId(dayRecord.leaveEntryIds, dayRecord.date)
+      });
+    }
+  }
+
+  return allocations;
+}
+
+function resolveAutomaticSwedishVacationSupplementUnitRate({
+  companyId,
+  employment,
+  contract,
+  hrSnapshot = null,
+  agreementOverlay = null,
+  state
+}) {
+  const payItem = getRequiredPayItemByCode(state, companyId, "VACATION_SUPPLEMENT");
+  const agreementRateComponent = normalizeAgreementRateComponent(
+    resolveAgreementPayItemRateComponent(agreementOverlay, payItem.payItemCode),
+    payItem.payItemCode
+  );
+  if (agreementRateComponent?.autoGenerate === true) {
+    const configured = buildConfiguredQuantityLine({
+      payItem,
+      employment,
+      contract,
+      hrSnapshot,
+      quantity: 1,
+      agreementRateComponent,
+      sourceType: "leave_entry",
+      sourceId: "automatic_vacation_supplement",
+      warnings: []
+    });
+    if (configured?.unitRate != null && configured.calculationStatus !== "rate_required") {
+      return roundMoney(configured.unitRate);
+    }
+  }
+  return roundMoney(Number(contract.monthlySalary || 0) * 0.0043);
+}
+
+function buildAutomaticSwedishLeaveDaySourceId(leaveEntryIds, workDate) {
+  return buildSnapshotHash({
+    leaveEntryIds: [...(leaveEntryIds || [])].filter(Boolean).sort(),
+    workDate
+  });
+}
+
+function getAutomaticSwedishScheduleDayForDate(template, workDate) {
+  if (!template || !Array.isArray(template.days)) {
+    return null;
+  }
+  const weekday = weekdayFromIsoDate(workDate);
+  return template.days.find((candidate) => candidate.weekday === weekday) || null;
+}
+
+function weekdayFromIsoDate(value) {
+  const date = new Date(`${value}T00:00:00Z`);
+  const weekday = date.getUTCDay();
+  return weekday === 0 ? 7 : weekday;
+}
+
+function addIsoDays(value, days) {
+  const date = new Date(`${value}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function diffIsoDates(startDate, endDate) {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  return Math.round((end.getTime() - start.getTime()) / 86400000);
 }
 
 function createRetroCorrectionLines({ companyId, employment, retroAdjustments, state }) {
@@ -6370,6 +9556,9 @@ function buildEmployerContributionPreview({
     rulePack,
     machineRules
   });
+  const appliedRulepackRef =
+    effectiveDecisionContext?.rulepackRef
+    || buildPayrollRulepackRefFromRulePack(rulePack, effectiveDate);
   const decisionObjectBase = {
     inputs_hash: buildSnapshotHash({
       contributionBase: normalizedContributionBase,
@@ -6379,11 +9568,11 @@ function buildEmployerContributionPreview({
       statutoryProfile: statutoryProfile || null,
       effectiveDecisionContext
     }),
-    rule_pack_id: rulePack.rulePackId,
-    rule_pack_code: rulePack.rulePackCode,
-    rule_pack_version: rulePack.version,
-    rule_pack_checksum: rulePack.checksum,
-    effective_date: effectiveDate,
+    rule_pack_id: appliedRulepackRef?.rulepackId || rulePack.rulePackId,
+    rule_pack_code: appliedRulepackRef?.rulepackCode || rulePack.rulePackCode,
+    rule_pack_version: appliedRulepackRef?.rulepackVersion || rulePack.version,
+    rule_pack_checksum: appliedRulepackRef?.rulepackChecksum || rulePack.checksum,
+    effective_date: appliedRulepackRef?.effectiveDate || effectiveDate,
     warnings: [],
     outputs: {
       contributionBase: normalizedContributionBase
@@ -6461,8 +9650,12 @@ function buildEmployerContributionPreview({
       ageBucket: effectiveDecisionContext.ageBucket || null,
       legalBasisCode: effectiveDecisionContext.legalBasisCode || null,
       fullRatePercent: effectiveDecisionContext.fullRate,
-      reducedRatePercent: effectiveDecisionContext.reducedRate,
-      baseLimit: effectiveDecisionContext.baseLimit,
+      reducedRatePercent: resolveEmployerContributionReducedRatePercent(effectiveDecisionContext),
+      baseLimit: resolveEmployerContributionThresholdAmount(effectiveDecisionContext),
+      thresholds: copy(effectiveDecisionContext.thresholds || {}),
+      reducedComponents: copy(effectiveDecisionContext.reducedComponents || []),
+      vaxaEligibilityProfile: copy(effectiveDecisionContext.vaxaEligibilityProfile || null),
+      rulepackRef: copy(appliedRulepackRef || null),
       specialConditions: copy(effectiveDecisionContext.specialConditions || {}),
       ratePercent: calculation.netRatePercent,
       grossRatePercent: calculation.grossRatePercent,
@@ -6476,8 +9669,8 @@ function buildEmployerContributionPreview({
       ...calculation.compatibilityOutputs
     },
     explanation: [
-      `rulePackId=${rulePack.rulePackId}`,
-      `rulePackChecksum=${rulePack.checksum}`,
+      `rulePackId=${appliedRulepackRef?.rulepackId || rulePack.rulePackId}`,
+      `rulePackChecksum=${appliedRulepackRef?.rulepackChecksum || rulePack.checksum}`,
       `decisionType=${effectiveDecisionContext.decisionType}`,
       `contributionClassCode=${contributionClassCode}`,
       `netRatePercent=${calculation.netRatePercent}`,
@@ -6847,12 +10040,19 @@ function resolveEffectiveEmployerContributionDecisionContext({
   machineRules
 }) {
   if (employerContributionDecisionSnapshot && decisionSnapshotCoversDate(employerContributionDecisionSnapshot, effectiveDate)) {
+    const canonicalSnapshot = applyEmployerContributionDecisionRulePackDefaults({
+      normalized: employerContributionDecisionSnapshot,
+      rulePack
+    });
     return {
-      ...copy(employerContributionDecisionSnapshot),
+      ...copy(canonicalSnapshot),
       sourceType: "employer_contribution_decision_snapshot",
       contributionClassCode:
         employerContributionDecisionSnapshot.contributionClassCode
-        || mapEmployerContributionDecisionTypeToClassCode(employerContributionDecisionSnapshot.decisionType)
+        || mapEmployerContributionDecisionTypeToClassCode(employerContributionDecisionSnapshot.decisionType),
+      rulepackRef:
+        canonicalSnapshot.rulepackRef
+        || buildPayrollRulepackRefFromRulePack(rulePack, effectiveDate)
     };
   }
   return buildAutomaticEmployerContributionDecisionContext({
@@ -6903,11 +10103,38 @@ function buildAutomaticEmployerContributionDecisionContext({
   if (contributionClassCode === "no_contribution") {
     specialConditions.eligibilityBirthYearOnOrBefore = classDefinition.eligibilityBirthYearOnOrBefore ?? null;
   }
+  const decisionType = mapEmployerContributionClassCodeToDecisionType(contributionClassCode);
+  const thresholds = buildEmployerContributionThresholds({
+    decisionType,
+    baseLimit:
+      contributionClassCode === "temporary_youth_reduction"
+        ? normalizeRequiredMoney(classDefinition.thresholdAmount ?? 0, "payroll_employer_contribution_threshold_invalid")
+        : null
+  });
+  const vaxaEligibilityProfile = decisionType === "vaxa"
+    ? buildEmployerContributionVaxaEligibilityProfile({
+      decisionType,
+      vaxaEligibilityProfile: {
+        supportWindowMonths: classDefinition.supportWindowMonths ?? null,
+        supportEmployeeCountLimit: classDefinition.supportEmployeeCountLimit ?? null,
+        supportMode: "tax_account_credit",
+        refundProcessCode: classDefinition.refundProcessCode || "tax_account_credit_2026"
+      },
+      specialConditions
+    })
+    : null;
+  const reducedComponents = buildEmployerContributionReducedComponents({
+    decisionType,
+    fullRate,
+    reducedRate: contributionClassCode === "full" ? null : reducedRate,
+    thresholds,
+    vaxaEligibilityProfile
+  });
   return {
     companyId: employee?.companyId || null,
     employmentId: employee?.employmentId || null,
     employerContributionDecisionSnapshotId: null,
-    decisionType: mapEmployerContributionClassCodeToDecisionType(contributionClassCode),
+    decisionType,
     contributionClassCode,
     ageBucket,
     legalBasisCode,
@@ -6919,6 +10146,10 @@ function buildAutomaticEmployerContributionDecisionContext({
         : null,
     fullRate,
     reducedRate: contributionClassCode === "full" ? null : reducedRate,
+    reducedComponents,
+    thresholds,
+    vaxaEligibilityProfile,
+    rulepackRef: buildPayrollRulepackRefFromRulePack(rulePack, effectiveDate),
     specialConditions,
     decisionSource: normalizeOptionalText(statutoryProfile?.contributionClassCode) ? "legacy_statutory_profile" : "rule_pack_auto",
     decisionReference: rulePack.rulePackId,
@@ -6958,12 +10189,14 @@ function calculateEmployerContributionDecisionAmount({ decisionContext, contribu
   const normalizedContributionBase = roundMoney(Math.max(0, contributionBase || 0));
   const fullRatePercent = roundMoney(
     decisionContext.fullRate
-      ?? decisionContext.reducedRate
+      ?? resolveEmployerContributionReducedRatePercent(decisionContext)
       ?? 0
   );
-  const reducedRatePercent = decisionContext.reducedRate == null ? null : roundMoney(decisionContext.reducedRate);
-  const baseLimit = decisionContext.baseLimit == null ? null : normalizeRequiredMoney(
-    decisionContext.baseLimit,
+  const resolvedReducedRatePercent = resolveEmployerContributionReducedRatePercent(decisionContext);
+  const reducedRatePercent = resolvedReducedRatePercent == null ? null : roundMoney(resolvedReducedRatePercent);
+  const resolvedThresholdAmount = resolveEmployerContributionThresholdAmount(decisionContext);
+  const baseLimit = resolvedThresholdAmount == null ? null : normalizeRequiredMoney(
+    resolvedThresholdAmount,
     "employer_contribution_decision_snapshot_base_limit_invalid"
   );
   let components = [];
@@ -7046,7 +10279,7 @@ function calculateEmployerContributionDecisionAmount({ decisionContext, contribu
   const referenceFullContributionAmount = roundMoney(normalizedContributionBase * (fullRatePercent / 100));
   const taxAccountReliefAmount = roundMoney(Math.max(0, Number(taxAccountConsequence?.creditAmount || 0)));
   const grossContributionAmount =
-    decisionContext.decisionType === "vaxa"
+      decisionContext.decisionType === "vaxa"
       ? referenceFullContributionAmount
       : netContributionAmount;
   const netRatePercent = normalizedContributionBase > 0 ? roundMoney((netContributionAmount / normalizedContributionBase) * 100) : 0;
@@ -7087,6 +10320,37 @@ function calculateEmployerContributionDecisionAmount({ decisionContext, contribu
   };
 }
 
+function resolveEmployerContributionThresholdAmount(decisionContext = {}) {
+  const thresholdSource = decisionContext.thresholds && typeof decisionContext.thresholds === "object"
+    ? decisionContext.thresholds
+    : {};
+  const candidate =
+    thresholdSource.baseLimitAmount
+    ?? thresholdSource.reducedRateBaseLimitAmount
+    ?? thresholdSource.monthlyBaseLimitAmount
+    ?? decisionContext.baseLimit;
+  return candidate == null ? null : normalizeRequiredMoney(candidate, "employer_contribution_decision_snapshot_base_limit_invalid");
+}
+
+function resolveEmployerContributionReducedRatePercent(decisionContext = {}) {
+  if (Array.isArray(decisionContext.reducedComponents) && decisionContext.reducedComponents.length > 0) {
+    const explicitReduced = decisionContext.reducedComponents.find((component) => component?.componentCode !== "standard_overflow_band");
+    if (explicitReduced?.ratePercent != null) {
+      return normalizeRequiredPercentage(
+        explicitReduced.ratePercent,
+        "employer_contribution_decision_snapshot_reduced_rate_invalid"
+      );
+    }
+  }
+  if (decisionContext.reducedRate == null) {
+    return null;
+  }
+  return normalizeRequiredPercentage(
+    decisionContext.reducedRate,
+    "employer_contribution_decision_snapshot_reduced_rate_invalid"
+  );
+}
+
 function buildSplitEmployerContributionComponents({
   contributionBase,
   reducedRatePercent,
@@ -7121,6 +10385,214 @@ function buildEmployerContributionComponent({ componentCode, baseAmount, ratePer
     ratePercent: normalizedRatePercent,
     amount: roundMoney(normalizedBaseAmount * (normalizedRatePercent / 100))
   };
+}
+
+function buildEmployerContributionThresholds({ decisionType, baseLimit = null, thresholds = null } = {}) {
+  if (thresholds && typeof thresholds === "object" && !Array.isArray(thresholds)) {
+    const baseLimitAmount =
+      thresholds.baseLimitAmount
+      ?? thresholds.reducedRateBaseLimitAmount
+      ?? thresholds.monthlyBaseLimitAmount
+      ?? baseLimit;
+    const normalizedBaseLimitAmount =
+      baseLimitAmount == null
+        ? null
+        : normalizeRequiredMoney(baseLimitAmount, "employer_contribution_decision_snapshot_base_limit_invalid");
+    return {
+      thresholdModeCode:
+        normalizeOptionalText(thresholds.thresholdModeCode)
+        || (normalizedBaseLimitAmount == null ? "none" : "monthly_base_limit"),
+      baseLimitAmount: normalizedBaseLimitAmount,
+      thresholdBasisCode:
+        normalizeOptionalText(thresholds.thresholdBasisCode)
+        || (normalizedBaseLimitAmount == null ? null : "employer_contribution_base"),
+      periodCode: normalizeOptionalText(thresholds.periodCode) || (normalizedBaseLimitAmount == null ? null : "month"),
+      currencyCode: normalizeOptionalText(thresholds.currencyCode) || (normalizedBaseLimitAmount == null ? null : "SEK")
+    };
+  }
+  const normalizedBaseLimit =
+    baseLimit == null ? null : normalizeRequiredMoney(baseLimit, "employer_contribution_decision_snapshot_base_limit_invalid");
+  return {
+    thresholdModeCode: normalizedBaseLimit == null ? "none" : "monthly_base_limit",
+    baseLimitAmount: normalizedBaseLimit,
+    thresholdBasisCode: normalizedBaseLimit == null ? null : "employer_contribution_base",
+    periodCode: normalizedBaseLimit == null ? null : "month",
+    currencyCode: normalizedBaseLimit == null ? null : "SEK",
+    decisionType: decisionType || null
+  };
+}
+
+function buildEmployerContributionReducedComponents({
+  decisionType,
+  fullRate,
+  reducedRate = null,
+  thresholds = null,
+  reducedComponents = null,
+  vaxaEligibilityProfile = null
+} = {}) {
+  if (Array.isArray(reducedComponents)) {
+    return reducedComponents.map((component) => ({
+      componentCode: requireText(component.componentCode, "employer_contribution_decision_snapshot_component_code_required"),
+      ratePercent: normalizeRequiredPercentage(
+        component.ratePercent,
+        "employer_contribution_decision_snapshot_component_rate_invalid"
+      ),
+      baseLimitAmount: normalizeOptionalMoney(
+        component.baseLimitAmount,
+        "employer_contribution_decision_snapshot_component_base_limit_invalid"
+      ),
+      appliesToCode: normalizeOptionalText(component.appliesToCode),
+      refundProcessCode: normalizeOptionalText(component.refundProcessCode)
+    }));
+  }
+  const thresholdAmount = thresholds?.baseLimitAmount ?? null;
+  switch (decisionType) {
+    case "reduced_age_pension_only":
+      return [{
+        componentCode: "age_pension_only",
+        ratePercent: normalizeRequiredPercentage(
+          reducedRate ?? fullRate ?? 0,
+          "employer_contribution_decision_snapshot_reduced_rate_invalid"
+        ),
+        baseLimitAmount: null,
+        appliesToCode: "entire_base",
+        refundProcessCode: null
+      }];
+    case "temporary_youth_reduction":
+      return [{
+        componentCode: "temporary_youth_reduction_band",
+        ratePercent: normalizeRequiredPercentage(
+          reducedRate ?? fullRate ?? 0,
+          "employer_contribution_decision_snapshot_reduced_rate_invalid"
+        ),
+        baseLimitAmount: thresholdAmount,
+        appliesToCode: "threshold_band",
+        refundProcessCode: null
+      }];
+    case "vaxa":
+      return [{
+        componentCode: "vaxa_reduced_band",
+        ratePercent: normalizeRequiredPercentage(
+          reducedRate ?? fullRate ?? 0,
+          "employer_contribution_decision_snapshot_reduced_rate_invalid"
+        ),
+        baseLimitAmount: thresholdAmount,
+        appliesToCode: "threshold_band",
+        refundProcessCode:
+          normalizeOptionalText(vaxaEligibilityProfile?.refundProcessCode)
+          || "tax_account_credit_2026"
+      }];
+    case "no_contribution":
+      return [{
+        componentCode: "no_contribution",
+        ratePercent: 0,
+        baseLimitAmount: null,
+        appliesToCode: "entire_base",
+        refundProcessCode: null
+      }];
+    case "emergency_manual":
+      if (thresholdAmount != null && reducedRate != null) {
+        return [{
+          componentCode: "manual_reduced_band",
+          ratePercent: normalizeRequiredPercentage(
+            reducedRate,
+            "employer_contribution_decision_snapshot_reduced_rate_invalid"
+          ),
+          baseLimitAmount: thresholdAmount,
+          appliesToCode: "threshold_band",
+          refundProcessCode: null
+        }];
+      }
+      if (reducedRate != null || fullRate != null) {
+        return [{
+          componentCode: "manual_override",
+          ratePercent: normalizeRequiredPercentage(
+            reducedRate ?? fullRate ?? 0,
+            "employer_contribution_decision_snapshot_reduced_rate_invalid"
+          ),
+          baseLimitAmount: null,
+          appliesToCode: "entire_base",
+          refundProcessCode: null
+        }];
+      }
+      return [];
+    default:
+      return [];
+  }
+}
+
+function buildEmployerContributionVaxaEligibilityProfile({
+  decisionType,
+  vaxaEligibilityProfile = null,
+  specialConditions = {}
+} = {}) {
+  if (decisionType !== "vaxa") {
+    return null;
+  }
+  const profile = vaxaEligibilityProfile && typeof vaxaEligibilityProfile === "object" && !Array.isArray(vaxaEligibilityProfile)
+    ? vaxaEligibilityProfile
+    : {};
+  const legacyConditions = specialConditions && typeof specialConditions === "object" && !Array.isArray(specialConditions)
+    ? specialConditions
+    : {};
+  return {
+    eligibilitySourceCode:
+      normalizeOptionalText(profile.eligibilitySourceCode)
+      || normalizeOptionalText(legacyConditions.eligibilitySourceCode)
+      || "manual_review",
+    supportWindowMonths:
+      profile.supportWindowMonths == null && legacyConditions.supportWindowMonths == null
+        ? null
+        : normalizeNonNegativeInteger(
+          profile.supportWindowMonths ?? legacyConditions.supportWindowMonths,
+          "employer_contribution_decision_snapshot_vaxa_support_window_invalid"
+        ),
+    supportEmployeeCountLimit:
+      profile.supportEmployeeCountLimit == null && legacyConditions.supportEmployeeCountLimit == null
+        ? null
+        : normalizeNonNegativeInteger(
+          profile.supportEmployeeCountLimit ?? legacyConditions.supportEmployeeCountLimit,
+          "employer_contribution_decision_snapshot_vaxa_support_employee_limit_invalid"
+        ),
+    supportMode:
+      normalizeOptionalText(profile.supportMode)
+      || normalizeOptionalText(legacyConditions.supportMode)
+      || "tax_account_credit",
+    refundProcessCode:
+      normalizeOptionalText(profile.refundProcessCode)
+      || normalizeOptionalText(legacyConditions.refundProcessCode)
+      || "tax_account_credit_2026",
+    deMinimisAidTracked: profile.deMinimisAidTracked === true || legacyConditions.deMinimisAidTracked === true
+  };
+}
+
+function augmentEmployerContributionSpecialConditions({
+  decisionType,
+  specialConditions = {},
+  thresholds = null,
+  vaxaEligibilityProfile = null,
+  classDefinition = null
+} = {}) {
+  const normalized = copy(specialConditions || {});
+  if (decisionType === "temporary_youth_reduction") {
+    normalized.eligibleAgeYears = copy(classDefinition?.eligibleAgeYears || normalized.eligibleAgeYears || {});
+    normalized.eligibilityFrom = classDefinition?.eligibilityFrom || normalized.eligibilityFrom || null;
+    normalized.eligibilityTo = classDefinition?.eligibilityTo || normalized.eligibilityTo || null;
+  }
+  if (decisionType === "no_contribution") {
+    normalized.eligibilityBirthYearOnOrBefore =
+      classDefinition?.eligibilityBirthYearOnOrBefore
+      ?? normalized.eligibilityBirthYearOnOrBefore
+      ?? null;
+  }
+  if (decisionType === "vaxa" && vaxaEligibilityProfile) {
+    normalized.supportWindowMonths = vaxaEligibilityProfile.supportWindowMonths;
+    normalized.supportEmployeeCountLimit = vaxaEligibilityProfile.supportEmployeeCountLimit;
+    normalized.supportMode = vaxaEligibilityProfile.supportMode;
+    normalized.refundProcessCode = vaxaEligibilityProfile.refundProcessCode;
+    normalized.baseLimitAmount = thresholds?.baseLimitAmount ?? normalized.baseLimitAmount ?? null;
+  }
+  return normalized;
 }
 
 function resolveEmployerContributionDecisionCode(decisionType) {
@@ -7227,6 +10699,8 @@ function summarizeTotals({ lines, preliminaryTax, employerContributionPreviewAmo
   const grossAfterDeductions = roundMoney(grossEarnings - grossDeductions);
   const netPay =
     preliminaryTax == null ? null : roundMoney(grossAfterDeductions - preliminaryTax - netDeductions);
+  const cashNetPayAmount = netPay == null ? null : roundMoney(Math.max(0, netPay));
+  const employeeReceivableAmount = netPay == null ? null : roundMoney(Math.max(0, -netPay));
 
   return {
     grossEarnings,
@@ -7235,6 +10709,8 @@ function summarizeTotals({ lines, preliminaryTax, employerContributionPreviewAmo
     preliminaryTax,
     netDeductions,
     netPay,
+    cashNetPayAmount,
+    employeeReceivableAmount,
     employerContributionPreviewAmount: employerContributionPreviewAmount ?? null
   };
 }
@@ -7451,6 +10927,28 @@ function resolvePayrollMigrationContext({ companyId, sessionToken, migrationBatc
   };
 }
 
+function resolvePayrollRegulatedSubmissionsPlatform({ getRegulatedSubmissionsPlatform = null, getCorePlatform = null } = {}) {
+  const candidates = [
+    typeof getRegulatedSubmissionsPlatform === "function" ? getRegulatedSubmissionsPlatform() : null,
+    typeof getCorePlatform === "function" ? getCorePlatform() : null
+  ];
+  for (const candidate of candidates) {
+    if (
+      candidate
+      && typeof candidate.prepareAuthoritySubmission === "function"
+      && typeof candidate.signAuthoritySubmission === "function"
+      && typeof candidate.getAuthoritySubmission === "function"
+      && typeof candidate.executeAuthoritySubmissionTransport === "function"
+      && typeof candidate.executeSubmissionReceiptCollection === "function"
+      && typeof candidate.registerSubmissionReceipt === "function"
+      && typeof candidate.openSubmissionCorrection === "function"
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function rebuildPayrollExceptions({
   state,
   run,
@@ -7598,9 +11096,10 @@ function rebuildPayrollExceptions({
         employmentId,
         employeeId,
         code: "negative_net_pay",
-        message: `Employment ${employmentId} resulted in negative net pay and cannot be approved.`,
+        message: `Employment ${employmentId} resulted in negative net pay and will create an employee receivable on approval.`,
         details: {
-          netPay: roundMoney(netPay)
+          netPay: roundMoney(netPay),
+          employeeReceivableAmount: roundMoney(Math.abs(netPay))
         }
       });
     }
@@ -7838,6 +11337,55 @@ function registerExternalPayrollConsumption({
   }
 }
 
+function applyApprovedVacationBalanceConsumptions({ state, payRun, actorId = "system", balancesPlatform = null }) {
+  if (!balancesPlatform?.recordBalanceTransaction || !payRun?.payrollInputSnapshotId) {
+    return;
+  }
+  const payrollInputSnapshot = state.payrollInputSnapshots.get(payRun.payrollInputSnapshotId);
+  const sourceSnapshot = payrollInputSnapshot?.sourceSnapshot;
+  if (!sourceSnapshot || typeof sourceSnapshot !== "object") {
+    return;
+  }
+
+  for (const [employmentId, employmentSnapshot] of Object.entries(sourceSnapshot)) {
+    const vacationComputation = employmentSnapshot?.vacationPayrollComputation;
+    const vacationBalance = employmentSnapshot?.vacationBalance;
+    if (!vacationComputation || !vacationBalance || !Array.isArray(vacationComputation.allocations)) {
+      continue;
+    }
+    for (const allocation of vacationComputation.allocations) {
+      if (!allocation || !["paid", "saved"].includes(allocation.balanceBucket) || Number(allocation.quantityDays || 0) <= 0) {
+        continue;
+      }
+      const balanceAccountId =
+        allocation.balanceBucket === "paid"
+          ? vacationBalance.paidDaysBalanceAccountId
+          : vacationBalance.savedDaysBalanceAccountId;
+      if (!balanceAccountId) {
+        throw createError(
+          409,
+          "vacation_balance_account_missing",
+          `Vacation ${allocation.balanceBucket} day balance account is missing for ${employmentId}.`
+        );
+      }
+      balancesPlatform.recordBalanceTransaction({
+        companyId: payRun.companyId,
+        balanceAccountId,
+        effectiveDate: allocation.date,
+        transactionTypeCode: "spend",
+        quantityDelta: roundQuantity(-Number(allocation.quantityDays || 0)),
+        sourceDomainCode: "PAYROLL",
+        sourceObjectType: "pay_run",
+        sourceObjectId: payRun.payRunId,
+        sourceReference: `vacation_${allocation.balanceBucket}:${allocation.date}`,
+        idempotencyKey: `${payRun.payRunId}:${employmentId}:${allocation.balanceBucket}:${allocation.date}:${roundQuantity(allocation.quantityDays)}`,
+        explanation: `Approved payroll consumed ${allocation.quantityDays} ${allocation.balanceBucket} vacation day(s) for ${allocation.date}.`,
+        actorId
+      });
+    }
+  }
+}
+
 function registerDocumentClassificationPayrollConsumption({
   state,
   clock,
@@ -8052,6 +11600,24 @@ function requireRemittanceInstruction(state, companyId, remittanceInstructionId)
   );
   if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
     throw createError(404, "remittance_instruction_not_found", "Remittance instruction was not found.");
+  }
+  return record;
+}
+
+function requireEmployeeReceivable(state, companyId, employeeReceivableId) {
+  const record = state.employeeReceivables.get(requireText(employeeReceivableId, "employee_receivable_id_required"));
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "employee_receivable_not_found", "Employee receivable was not found.");
+  }
+  return record;
+}
+
+function requireReceivableWriteOffDecision(state, companyId, receivableWriteOffDecisionId) {
+  const record = state.receivableWriteOffDecisions.get(
+    requireText(receivableWriteOffDecisionId, "receivable_write_off_decision_id_required")
+  );
+  if (!record || record.companyId !== requireText(companyId, "company_id_required")) {
+    throw createError(404, "receivable_write_off_decision_not_found", "Employee receivable write-off decision was not found.");
   }
   return record;
 }
@@ -8417,12 +11983,33 @@ function enrichPayRun(state, payRun, { evidencePlatform = null } = {}) {
     .filter(Boolean)
     .sort((left, right) => left.employmentId.localeCompare(right.employmentId) || left.createdAt.localeCompare(right.createdAt))
     .map((record) => presentRemittanceInstruction(state, record));
+  const employeeReceivables = (state.employeeReceivableIdsByRun.get(payRun.payRunId) || [])
+    .map((employeeReceivableId) => state.employeeReceivables.get(employeeReceivableId))
+    .filter(Boolean)
+    .sort((left, right) => left.employmentId.localeCompare(right.employmentId) || left.createdAt.localeCompare(right.createdAt))
+    .map((record) => presentEmployeeReceivable(state, record));
+  const receivableSettlementPlans = employeeReceivables
+    .map((receivable) => state.receivableSettlementPlanIdByReceivable.get(receivable.employeeReceivableId))
+    .filter(Boolean)
+    .map((receivableSettlementPlanId) => state.receivableSettlementPlans.get(receivableSettlementPlanId))
+    .filter(Boolean)
+    .map((record) => presentReceivableSettlementPlan(state, record));
+  const receivableOffsetDecisions = (state.receivableOffsetDecisionIdsByCompany.get(payRun.companyId) || [])
+    .map((receivableOffsetDecisionId) => state.receivableOffsetDecisions.get(receivableOffsetDecisionId))
+    .filter(Boolean)
+    .filter((record) => record.executedPayRunId === payRun.payRunId || record.reportingPeriod === payRun.reportingPeriod)
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+    .map(copy);
   return {
     ...copy(payRun),
     approvalEvidenceBundle,
     payrollInputSnapshot: payrollInputSnapshot ? copy(payrollInputSnapshot) : null,
     exceptionSummary: summarizePayrollExceptions(exceptions),
     exceptions,
+    employeeReceivables,
+    employeeReceivableSummary: summarizeEmployeeReceivables(employeeReceivables),
+    receivableSettlementPlans,
+    receivableOffsetDecisions,
     events: (state.payRunEventIdsByRun.get(payRun.payRunId) || [])
       .map((eventId) => state.payRunEvents.get(eventId))
       .filter(Boolean)
@@ -8593,28 +12180,143 @@ function aggregateLeaveEntries(leaveEntries) {
 function aggregateTimeEntriesByDimensions(timeEntries) {
   const groups = new Map();
   for (const entry of Array.isArray(timeEntries) ? timeEntries : []) {
-    const dimensionJson = normalizePayrollDimensions({
-      projectId: entry.projectId
-    });
-    const key = stableStringify(dimensionJson);
-    const current = groups.get(key) || {
-      dimensionJson,
-      timeEntryIds: [],
-      workedMinutes: 0,
-      overtimeMinutes: 0,
-      obMinutes: 0,
-      jourMinutes: 0,
-      standbyMinutes: 0
-    };
-    current.timeEntryIds.push(entry.timeEntryId);
-    current.workedMinutes += Number(entry.workedMinutes || 0);
-    current.overtimeMinutes += Number(entry.overtimeMinutes || 0);
-    current.obMinutes += Number(entry.obMinutes || 0);
-    current.jourMinutes += Number(entry.jourMinutes || 0);
-    current.standbyMinutes += Number(entry.standbyMinutes || 0);
-    groups.set(key, current);
+    for (const fragment of splitTimeEntryByPayrollDimensions(entry)) {
+      const key = stableStringify(fragment.dimensionJson);
+      const current = groups.get(key) || {
+        dimensionJson: fragment.dimensionJson,
+        timeEntryIds: [],
+        workedMinutes: 0,
+        overtimeMinutes: 0,
+        obMinutes: 0,
+        jourMinutes: 0,
+        standbyMinutes: 0
+      };
+      current.timeEntryIds.push(...fragment.timeEntryIds);
+      current.workedMinutes += fragment.workedMinutes;
+      current.overtimeMinutes += fragment.overtimeMinutes;
+      current.obMinutes += fragment.obMinutes;
+      current.jourMinutes += fragment.jourMinutes;
+      current.standbyMinutes += fragment.standbyMinutes;
+      groups.set(key, current);
+    }
   }
-  return [...groups.values()].sort((left, right) => stableStringify(left.dimensionJson).localeCompare(stableStringify(right.dimensionJson)));
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      timeEntryIds: [...new Set(group.timeEntryIds)].sort()
+    }))
+    .sort((left, right) => stableStringify(left.dimensionJson).localeCompare(stableStringify(right.dimensionJson)));
+}
+
+function splitTimeEntryByPayrollDimensions(entry) {
+  const workedMinutes = toNonNegativePayrollMinuteValue(entry?.workedMinutes);
+  const dimensionAllocations = listTimeEntryPayrollDimensionAllocations(entry);
+  if (dimensionAllocations.length === 0 || workedMinutes <= 0) {
+    return [{
+      dimensionJson: normalizePayrollDimensions({
+        projectId: entry?.projectId
+      }),
+      timeEntryIds: [entry?.timeEntryId].filter(Boolean),
+      workedMinutes,
+      overtimeMinutes: toNonNegativePayrollMinuteValue(entry?.overtimeMinutes),
+      obMinutes: toNonNegativePayrollMinuteValue(entry?.obMinutes),
+      jourMinutes: toNonNegativePayrollMinuteValue(entry?.jourMinutes),
+      standbyMinutes: toNonNegativePayrollMinuteValue(entry?.standbyMinutes)
+    }];
+  }
+
+  const workedDistribution = distributePayrollMinutesByDimension(dimensionAllocations, workedMinutes);
+  const overtimeDistribution = distributePayrollMinutesByDimension(
+    dimensionAllocations,
+    toNonNegativePayrollMinuteValue(entry?.overtimeMinutes)
+  );
+  const obDistribution = distributePayrollMinutesByDimension(
+    dimensionAllocations,
+    toNonNegativePayrollMinuteValue(entry?.obMinutes)
+  );
+  const jourDistribution = distributePayrollMinutesByDimension(
+    dimensionAllocations,
+    toNonNegativePayrollMinuteValue(entry?.jourMinutes)
+  );
+  const standbyDistribution = distributePayrollMinutesByDimension(
+    dimensionAllocations,
+    toNonNegativePayrollMinuteValue(entry?.standbyMinutes)
+  );
+
+  return dimensionAllocations.map((allocation, index) => ({
+    dimensionJson: allocation.dimensionJson,
+    timeEntryIds: [entry?.timeEntryId].filter(Boolean),
+    workedMinutes: workedDistribution[index] || 0,
+    overtimeMinutes: overtimeDistribution[index] || 0,
+    obMinutes: obDistribution[index] || 0,
+    jourMinutes: jourDistribution[index] || 0,
+    standbyMinutes: standbyDistribution[index] || 0
+  }));
+}
+
+function listTimeEntryPayrollDimensionAllocations(entry) {
+  const allocationRefs = Array.isArray(entry?.allocationRefs) ? entry.allocationRefs : [];
+  const allocations = allocationRefs
+    .map((allocationRef, index) => ({
+      allocationRefId: normalizeOptionalText(allocationRef?.allocationRefId) || `ALLOC-${index + 1}`,
+      dimensionJson: normalizePayrollDimensions({
+        projectId: allocationRef?.projectId
+      }),
+      allocationMinutes: toNonNegativePayrollMinuteValue(allocationRef?.allocationMinutes)
+    }))
+    .filter((allocation) => allocation.allocationMinutes > 0);
+  return allocations.sort(
+    (left, right) =>
+      stableStringify(left.dimensionJson).localeCompare(stableStringify(right.dimensionJson))
+      || left.allocationRefId.localeCompare(right.allocationRefId)
+  );
+}
+
+function distributePayrollMinutesByDimension(dimensionAllocations, totalMinutes) {
+  const resolvedTotalMinutes = toNonNegativePayrollMinuteValue(totalMinutes);
+  if (resolvedTotalMinutes <= 0) {
+    return dimensionAllocations.map(() => 0);
+  }
+  if (!Array.isArray(dimensionAllocations) || dimensionAllocations.length === 0) {
+    return [];
+  }
+  if (dimensionAllocations.length === 1) {
+    return [resolvedTotalMinutes];
+  }
+  const allocationTotalMinutes = dimensionAllocations.reduce((sum, allocation) => sum + allocation.allocationMinutes, 0);
+  if (allocationTotalMinutes <= 0) {
+    return [resolvedTotalMinutes, ...dimensionAllocations.slice(1).map(() => 0)];
+  }
+  const provisional = dimensionAllocations.map((allocation, index) => {
+    const rawMinutes = (resolvedTotalMinutes * allocation.allocationMinutes) / allocationTotalMinutes;
+    const assignedMinutes = Math.floor(rawMinutes);
+    return {
+      index,
+      assignedMinutes,
+      fractionalRemainder: rawMinutes - assignedMinutes,
+      sortKey: `${stableStringify(allocation.dimensionJson)}:${allocation.allocationRefId}`
+    };
+  });
+  let remainder = resolvedTotalMinutes - provisional.reduce((sum, allocation) => sum + allocation.assignedMinutes, 0);
+  provisional.sort(
+    (left, right) =>
+      right.fractionalRemainder - left.fractionalRemainder
+      || left.sortKey.localeCompare(right.sortKey)
+  );
+  for (let index = 0; index < provisional.length && remainder > 0; index += 1) {
+    provisional[index].assignedMinutes += 1;
+    remainder -= 1;
+  }
+  provisional.sort((left, right) => left.index - right.index);
+  return provisional.map((allocation) => allocation.assignedMinutes);
+}
+
+function toNonNegativePayrollMinuteValue(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return Math.round(numeric);
 }
 
 function buildConfiguredQuantityLine({
@@ -8996,6 +12698,28 @@ function createPayLine({
       ...(dimensionJson || {})
     })
   };
+}
+
+function snapshotExternalPayrollLinePayloads(payloads) {
+  return (Array.isArray(payloads) ? payloads : [])
+    .map((payload) => ({
+      processingStep: payload?.processingStep == null ? null : Number(payload.processingStep),
+      payItemCode: normalizeOptionalText(payload?.payItemCode),
+      quantity: payload?.quantity == null ? null : roundQuantity(payload.quantity),
+      unitRate: payload?.unitRate == null ? null : roundMoney(payload.unitRate),
+      amount: roundMoney(Number(payload?.amount || 0)),
+      sourceType: normalizeOptionalText(payload?.sourceType),
+      sourceId: normalizeOptionalText(payload?.sourceId),
+      sourcePeriod: normalizeOptionalReportingPeriod(payload?.sourcePeriod),
+      note: normalizeOptionalText(payload?.note),
+      dimensionJson: normalizePayrollDimensions(payload?.dimensionJson || {}),
+      overrides: copy(payload?.overrides || {})
+    }))
+    .sort((left, right) => {
+      const leftKey = `${left.processingStep ?? ""}:${left.payItemCode || ""}:${left.sourceType || ""}:${left.sourceId || ""}:${stableStringify(left.dimensionJson)}`;
+      const rightKey = `${right.processingStep ?? ""}:${right.payItemCode || ""}:${right.sourceType || ""}:${right.sourceId || ""}:${stableStringify(right.dimensionJson)}`;
+      return leftKey.localeCompare(rightKey);
+    });
 }
 
 function createStepLinesFromPayloads({ processingStep, employment, payloads, state }) {
@@ -9441,6 +13165,253 @@ function normalizeEmployerContributionDecisionSnapshots(employerContributionDeci
   return map;
 }
 
+function normalizeOptionalPayrollRulepackRef(rulepackRef, codePrefix) {
+  if (rulepackRef == null || rulepackRef === "") {
+    return null;
+  }
+  if (typeof rulepackRef !== "object" || Array.isArray(rulepackRef)) {
+    throw createError(400, `${codePrefix}_rulepack_ref_invalid`, "rulepackRef must be an object.");
+  }
+  const normalized = {
+    rulepackId: normalizeOptionalText(rulepackRef.rulepackId ?? rulepackRef.rulePackId),
+    rulepackCode: normalizeOptionalText(rulepackRef.rulepackCode ?? rulepackRef.rulePackCode),
+    rulepackVersion: normalizeOptionalText(rulepackRef.rulepackVersion ?? rulepackRef.rulePackVersion),
+    rulepackChecksum: normalizeOptionalText(rulepackRef.rulepackChecksum ?? rulepackRef.rulePackChecksum),
+    effectiveDate: normalizeOptionalDate(
+      rulepackRef.effectiveDate,
+      `${codePrefix}_rulepack_effective_date_invalid`
+    )
+  };
+  if (
+    !normalized.rulepackId
+    && !normalized.rulepackCode
+    && !normalized.rulepackVersion
+    && !normalized.rulepackChecksum
+    && !normalized.effectiveDate
+  ) {
+    return null;
+  }
+  if (!normalized.rulepackId || !normalized.rulepackCode || !normalized.rulepackVersion || !normalized.rulepackChecksum) {
+    throw createError(
+      400,
+      `${codePrefix}_rulepack_ref_incomplete`,
+      "rulepackRef must carry rulepackId, rulepackCode, rulepackVersion and rulepackChecksum."
+    );
+  }
+  return normalized;
+}
+
+function resolveEmployerContributionRulePackForSnapshot({ validFrom, fallbackRulepackRef = null, rules }) {
+  if (rules && typeof rules.resolveRulePack === "function") {
+    return rules.resolveRulePack({
+      rulePackCode: PAYROLL_EMPLOYER_CONTRIBUTION_RULE_PACK_CODE,
+      domain: "payroll",
+      jurisdiction: "SE",
+      effectiveDate: validFrom
+    });
+  }
+  if (!fallbackRulepackRef) {
+    return null;
+  }
+  return {
+    rulePackId: fallbackRulepackRef.rulepackId,
+    rulePackCode: fallbackRulepackRef.rulepackCode,
+    version: fallbackRulepackRef.rulepackVersion,
+    checksum: fallbackRulepackRef.rulepackChecksum,
+    effectiveFrom: fallbackRulepackRef.effectiveDate || validFrom,
+    machineReadableRules: {
+      contributionClasses: {}
+    }
+  };
+}
+
+function resolveEmployerContributionRuleClassDefinitionForDecision({ decisionType, machineRules = {} } = {}) {
+  switch (decisionType) {
+    case "full":
+      return machineRules.full || null;
+    case "reduced_age_pension_only":
+      return machineRules.reduced_age_pension_only || null;
+    case "temporary_youth_reduction":
+      return machineRules.temporary_youth_reduction || null;
+    case "vaxa":
+      return machineRules.vaxa || null;
+    case "no_contribution":
+      return machineRules.no_contribution || null;
+    default:
+      return null;
+  }
+}
+
+function applyEmployerContributionDecisionRulePackDefaults({ normalized, rulePack } = {}) {
+  const decisionContext = copy(normalized || {});
+  const machineRules = rulePack?.machineReadableRules?.contributionClasses || {};
+  const classDefinition = resolveEmployerContributionRuleClassDefinitionForDecision({
+    decisionType: decisionContext.decisionType,
+    machineRules
+  });
+  const fallbackFullRate = normalizeOptionalPercentage(
+    machineRules.full?.ratePercent ?? classDefinition?.standardRatePercent ?? classDefinition?.ratePercent,
+    "employer_contribution_decision_snapshot_full_rate_invalid"
+  );
+  const fallbackReducedRate = normalizeOptionalPercentage(
+    classDefinition?.reducedRatePercent
+    ?? classDefinition?.ratePercent
+    ?? (decisionContext.decisionType === "vaxa" ? machineRules.reduced_age_pension_only?.ratePercent : null),
+    "employer_contribution_decision_snapshot_reduced_rate_invalid"
+  );
+  const fallbackBaseLimit = normalizeOptionalMoney(
+    classDefinition?.thresholdAmount,
+    "employer_contribution_decision_snapshot_base_limit_invalid"
+  );
+  const fullRate = decisionContext.fullRate ?? fallbackFullRate;
+  const thresholds = buildEmployerContributionThresholds({
+    decisionType: decisionContext.decisionType,
+    baseLimit: resolveEmployerContributionThresholdAmount(decisionContext) ?? fallbackBaseLimit,
+    thresholds: decisionContext.thresholds || null
+  });
+  const vaxaEligibilityProfile = buildEmployerContributionVaxaEligibilityProfile({
+    decisionType: decisionContext.decisionType,
+    vaxaEligibilityProfile: decisionContext.vaxaEligibilityProfile || null,
+    specialConditions: decisionContext.specialConditions || {}
+  });
+  const reducedRate =
+    resolveEmployerContributionReducedRatePercent(decisionContext)
+    ?? fallbackReducedRate;
+  const reducedComponents = buildEmployerContributionReducedComponents({
+    decisionType: decisionContext.decisionType,
+    fullRate,
+    reducedRate,
+    thresholds,
+    reducedComponents: decisionContext.reducedComponents || null,
+    vaxaEligibilityProfile
+  });
+  const canonical = {
+    ...decisionContext,
+    fullRate,
+    reducedRate,
+    baseLimit: thresholds.baseLimitAmount,
+    thresholds,
+    reducedComponents,
+    vaxaEligibilityProfile,
+    rulepackRef:
+      decisionContext.rulepackRef
+      || buildPayrollRulepackRefFromRulePack(rulePack, decisionContext.validFrom || rulePack?.effectiveFrom || null)
+  };
+  canonical.specialConditions = augmentEmployerContributionSpecialConditions({
+    decisionType: canonical.decisionType,
+    specialConditions: canonical.specialConditions,
+    thresholds: canonical.thresholds,
+    vaxaEligibilityProfile: canonical.vaxaEligibilityProfile,
+    classDefinition
+  });
+  assertEmployerContributionDecisionMatchesRulePack({
+    normalized: canonical,
+    rulePack,
+    classDefinition,
+    machineRules
+  });
+  return canonical;
+}
+
+function assertEmployerContributionDecisionMatchesRulePack({
+  normalized,
+  rulePack,
+  classDefinition = null,
+  machineRules = {}
+} = {}) {
+  if (!normalized || normalized.decisionType === "emergency_manual" || !rulePack) {
+    return;
+  }
+  const fullRateReference = normalizeOptionalPercentage(
+    machineRules.full?.ratePercent,
+    "employer_contribution_decision_snapshot_full_rate_invalid"
+  );
+  if (fullRateReference != null && roundMoney(normalized.fullRate ?? 0) !== roundMoney(fullRateReference)) {
+    throw createError(
+      400,
+      "employer_contribution_decision_snapshot_full_rate_mismatch",
+      "Employer contribution decision fullRate must match the official 2026 rule pack."
+    );
+  }
+  const reducedRate = resolveEmployerContributionReducedRatePercent(normalized);
+  const baseLimit = resolveEmployerContributionThresholdAmount(normalized);
+  switch (normalized.decisionType) {
+    case "reduced_age_pension_only":
+      if (roundMoney(reducedRate ?? -1) !== roundMoney(classDefinition?.ratePercent ?? -2)) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_reduced_rate_mismatch",
+          "Reduced-age employer contribution decisions must match the official reduced rate."
+        );
+      }
+      return;
+    case "temporary_youth_reduction":
+      if (roundMoney(reducedRate ?? -1) !== roundMoney(classDefinition?.reducedRatePercent ?? -2)) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_reduced_rate_mismatch",
+          "Temporary youth employer contribution decisions must match the official reduced rate."
+        );
+      }
+      if (roundMoney(baseLimit ?? -1) !== roundMoney(classDefinition?.thresholdAmount ?? -2)) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_base_limit_mismatch",
+          "Temporary youth employer contribution decisions must match the official monthly threshold."
+        );
+      }
+      if (classDefinition?.eligibilityFrom && normalized.validFrom < classDefinition.eligibilityFrom) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_effective_window_invalid",
+          "Temporary youth employer contribution decisions may not start before the official eligibility window."
+        );
+      }
+      if (classDefinition?.eligibilityTo && normalized.validTo && normalized.validTo > classDefinition.eligibilityTo) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_effective_window_invalid",
+          "Temporary youth employer contribution decisions may not extend beyond the official eligibility window."
+        );
+      }
+      return;
+    case "vaxa":
+      if (roundMoney(reducedRate ?? -1) !== roundMoney(classDefinition?.reducedRatePercent ?? -2)) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_reduced_rate_mismatch",
+          "Vaxa employer contribution decisions must match the official reduced rate."
+        );
+      }
+      if (roundMoney(baseLimit ?? -1) !== roundMoney(classDefinition?.thresholdAmount ?? -2)) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_base_limit_mismatch",
+          "Vaxa employer contribution decisions must match the official monthly threshold."
+        );
+      }
+      if (!normalized.vaxaEligibilityProfile) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_vaxa_profile_required",
+          "Vaxa employer contribution decisions require vaxaEligibilityProfile."
+        );
+      }
+      return;
+    case "no_contribution":
+      if (roundMoney(reducedRate ?? -1) !== 0) {
+        throw createError(
+          400,
+          "employer_contribution_decision_snapshot_reduced_rate_mismatch",
+          "No-contribution employer contribution decisions must carry a 0 percent reduced rate."
+        );
+      }
+      return;
+    default:
+      return;
+  }
+}
+
 function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
   const decisionType = assertAllowed(
     normalizeOptionalText(snapshot.decisionType),
@@ -9486,7 +13457,10 @@ function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
       snapshot.baseLimit,
       "employer_contribution_decision_snapshot_base_limit_invalid"
     ),
-    fullRate: normalizeRequiredPercentage(snapshot.fullRate, "employer_contribution_decision_snapshot_full_rate_invalid"),
+    fullRate: normalizeOptionalPercentage(
+      snapshot.fullRate,
+      "employer_contribution_decision_snapshot_full_rate_invalid"
+    ),
     reducedRate: normalizeOptionalPercentage(
       snapshot.reducedRate,
       "employer_contribution_decision_snapshot_reduced_rate_invalid"
@@ -9501,8 +13475,42 @@ function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
       "employer_contribution_decision_snapshot_decision_reference_required"
     ),
     evidenceRef: requireText(snapshot.evidenceRef, "employer_contribution_decision_snapshot_evidence_ref_required"),
-    reasonCode: normalizeOptionalText(snapshot.reasonCode)
+    reasonCode: normalizeOptionalText(snapshot.reasonCode),
+    rulepackRef: normalizeOptionalPayrollRulepackRef(
+      snapshot.rulepackRef || (
+        snapshot.rule_pack_id || snapshot.rule_pack_code || snapshot.rule_pack_version || snapshot.rule_pack_checksum
+          ? {
+            rulepackId: snapshot.rule_pack_id,
+            rulepackCode: snapshot.rule_pack_code,
+            rulepackVersion: snapshot.rule_pack_version,
+            rulepackChecksum: snapshot.rule_pack_checksum,
+            effectiveDate: snapshot.effective_date || snapshot.rule_pack_effective_date || null
+          }
+          : null
+      ),
+      "employer_contribution_decision_snapshot"
+    )
   };
+  normalized.thresholds = buildEmployerContributionThresholds({
+    decisionType,
+    baseLimit: normalized.baseLimit,
+    thresholds: snapshot.thresholds || null
+  });
+  normalized.vaxaEligibilityProfile = buildEmployerContributionVaxaEligibilityProfile({
+    decisionType,
+    vaxaEligibilityProfile: snapshot.vaxaEligibilityProfile || null,
+    specialConditions: normalized.specialConditions
+  });
+  normalized.reducedComponents = buildEmployerContributionReducedComponents({
+    decisionType,
+    fullRate: normalized.fullRate,
+    reducedRate: normalized.reducedRate,
+    thresholds: normalized.thresholds,
+    reducedComponents: snapshot.reducedComponents || null,
+    vaxaEligibilityProfile: normalized.vaxaEligibilityProfile
+  });
+  normalized.baseLimit = resolveEmployerContributionThresholdAmount(normalized);
+  normalized.reducedRate = resolveEmployerContributionReducedRatePercent(normalized);
 
   if (decisionType === "temporary_youth_reduction" || decisionType === "vaxa") {
     if (normalized.reducedRate == null || normalized.baseLimit == null) {
@@ -9524,8 +13532,13 @@ function normalizeEmployerContributionDecisionSnapshot(snapshot = {}) {
 
   if (decisionType === "no_contribution") {
     normalized.reducedRate = 0;
-    normalized.fullRate = 0;
   }
+  normalized.specialConditions = augmentEmployerContributionSpecialConditions({
+    decisionType,
+    specialConditions: normalized.specialConditions,
+    thresholds: normalized.thresholds,
+    vaxaEligibilityProfile: normalized.vaxaEligibilityProfile
+  });
 
   if (decisionType === "emergency_manual") {
     if (!normalized.reasonCode) {
@@ -10014,6 +14027,7 @@ function resolveDefaultLedgerAccountCode(payItemCode) {
     case "VACATION_SUPPLEMENT":
     case "VACATION_DEDUCTION":
       return "7070";
+    case "SICK_ABSENCE_DEDUCTION":
     case "SICK_PAY":
       return "7080";
     case "QUALIFYING_DEDUCTION":
@@ -10230,8 +14244,42 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+function truncateKronaAmount(value) {
+  return Math.trunc(Number(value || 0));
+}
+
 function roundQuantity(value) {
   return Math.round(Number(value || 0) * 10000) / 10000;
+}
+
+function normalizeAgiSpecificationNumber(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    return null;
+  }
+  return normalized;
+}
+
+function requireAgiSpecificationNumber(value) {
+  const specificationNumber = normalizeAgiSpecificationNumber(value);
+  if (specificationNumber == null) {
+    throw createError(400, "agi_specification_number_invalid", "AGI specification number must be a positive integer.");
+  }
+  return specificationNumber;
+}
+
+function normalizeAgiWholeKronaAmount(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized < 0) {
+    return null;
+  }
+  return normalized;
 }
 
 function nowIso(clock) {

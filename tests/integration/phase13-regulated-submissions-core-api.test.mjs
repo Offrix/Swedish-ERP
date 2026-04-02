@@ -324,12 +324,28 @@ function prepareSignedTaxDeclarationPackage(platform) {
     companyUserId: DEMO_IDS.companyUserId,
     signatoryRole: "ceo"
   });
+  platform.inviteAnnualReportSignatory({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "board_member"
+  });
   const signedPackage = platform.signAnnualReportVersion({
     companyId: DEMO_IDS.companyId,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
     actorId: DEMO_IDS.userId,
     comment: "Signed annual package for regulated submission fallback."
+  });
+  const fiscalYearId = platform.listFiscalYears({ companyId: DEMO_IDS.companyId }).find((candidate) => candidate.startDate === "2026-01-01")?.fiscalYearId;
+  platform.createYearEndTransferBatch({
+    companyId: DEMO_IDS.companyId,
+    fiscalYearId,
+    transferKind: "RESULT_TRANSFER",
+    sourceCode: "ANNUAL_REPORTING_CLOSE",
+    actorId: DEMO_IDS.userId,
+    idempotencyKey: `result-transfer:${DEMO_IDS.companyId}:2026:phase13-3`
   });
   return platform.createTaxDeclarationPackage({
     companyId: DEMO_IDS.companyId,

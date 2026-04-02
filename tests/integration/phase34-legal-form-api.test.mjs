@@ -98,7 +98,12 @@ test("Step 34-35 API creates legal-form profiles, approves obligations and expos
         accountingPeriodId: period.accountingPeriodId,
         profileCode: "k2",
         textSections: {
-          management_report: "Legal-form API annual package"
+          management_report: "Legal-form API annual package",
+          accounting_policies: "Legal-form API K2 policies"
+        },
+        noteSections: {
+          notes_bundle: "Legal-form API notes",
+          simplified_notes: "Legal-form API simplified notes"
         }
       }
     });
@@ -112,7 +117,12 @@ test("Step 34-35 API creates legal-form profiles, approves obligations and expos
       body: {
         companyId: DEMO_IDS.companyId,
         textSections: {
-          management_report: "Legal-form API correction"
+          management_report: "Legal-form API correction",
+          accounting_policies: "Legal-form API K2 correction policies"
+        },
+        noteSections: {
+          notes_bundle: "Legal-form API correction notes",
+          simplified_notes: "Legal-form API correction simplified notes"
         }
       }
     });

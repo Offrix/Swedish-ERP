@@ -12,6 +12,14 @@ export const TIME_ENTRY_SOURCE_TYPES = Object.freeze(["manual", "clock", "import
 export const TIME_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
 export const APPROVED_TIME_SET_STATUSES = Object.freeze(["approved", "locked"]);
 export const LEAVE_SIGNAL_TYPES = Object.freeze(["none", "parental_benefit", "temporary_parental_benefit"]);
+export const LEAVE_PAYROLL_TREATMENT_CODES = Object.freeze([
+  "none",
+  "sick_leave",
+  "vacation",
+  "care_of_child",
+  "parental_leave",
+  "leave_without_pay"
+]);
 export const LEAVE_ENTRY_STATUSES = Object.freeze(["draft", "submitted", "approved", "rejected"]);
 export const LEAVE_SIGNAL_LOCK_STATES = Object.freeze(["ready_for_sign", "signed", "submitted"]);
 
@@ -70,6 +78,7 @@ export function createTimeEngine({
     timeEntryStatuses: TIME_ENTRY_STATUSES,
     approvedTimeSetStatuses: APPROVED_TIME_SET_STATUSES,
     leaveSignalTypes: LEAVE_SIGNAL_TYPES,
+    leavePayrollTreatmentCodes: LEAVE_PAYROLL_TREATMENT_CODES,
     leaveEntryStatuses: LEAVE_ENTRY_STATUSES,
     leaveSignalLockStates: LEAVE_SIGNAL_LOCK_STATES,
     listScheduleTemplates,
@@ -919,6 +928,7 @@ export function createTimeEngine({
     leaveTypeCode = null,
     displayName,
     signalType = "none",
+    payrollTreatmentCode = "none",
     requiresManagerApproval = true,
     requiresSupportingDocument = false,
     active = true,
@@ -941,6 +951,11 @@ export function createTimeEngine({
       leaveTypeCode: resolvedCode,
       displayName: requireText(displayName, "leave_type_display_name_required"),
       signalType: assertAllowed(signalType || "none", LEAVE_SIGNAL_TYPES, "leave_signal_type_invalid"),
+      payrollTreatmentCode: assertAllowed(
+        payrollTreatmentCode || "none",
+        LEAVE_PAYROLL_TREATMENT_CODES,
+        "leave_payroll_treatment_code_invalid"
+      ),
       requiresManagerApproval: requiresManagerApproval !== false,
       requiresSupportingDocument: requiresSupportingDocument === true,
       active: active !== false,
@@ -1021,6 +1036,7 @@ export function createTimeEngine({
       employmentId: employment.employmentId,
       leaveTypeId: leaveType.leaveTypeId,
       leaveTypeCode: leaveType.leaveTypeCode,
+      payrollTreatmentCode: leaveType.payrollTreatmentCode,
       status: "draft",
       startDate: resolvedStartDate,
       endDate: resolvedEndDate,
@@ -1899,6 +1915,7 @@ function upsertAbsenceDecision({ state, entry, leaveType, decisionStatus, actorI
     leaveEntryId: entry.leaveEntryId,
     leaveTypeId: entry.leaveTypeId,
     leaveTypeCode: leaveType.leaveTypeCode,
+    payrollTreatmentCode: leaveType.payrollTreatmentCode,
     decisionStatus: requireText(decisionStatus, "absence_decision_status_required"),
     reportingPeriod: entry.reportingPeriod,
     signalType: leaveType.signalType,

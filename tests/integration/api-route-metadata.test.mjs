@@ -283,7 +283,11 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/payroll/garnishment-remittances/:remittanceInstructionId",
   "/v1/payroll/garnishment-remittances/:remittanceInstructionId/settle",
   "/v1/payroll/garnishment-remittances/:remittanceInstructionId/return",
-  "/v1/payroll/garnishment-remittances/:remittanceInstructionId/correct"
+  "/v1/payroll/garnishment-remittances/:remittanceInstructionId/correct",
+  "/v1/payroll/receivable-settlement-plans",
+  "/v1/payroll/receivable-offset-decisions",
+  "/v1/payroll/receivable-write-offs",
+  "/v1/payroll/receivable-write-offs/:receivableWriteOffDecisionId/approve"
 ]);
 
 function parseRoutesFromSource(sourceText) {

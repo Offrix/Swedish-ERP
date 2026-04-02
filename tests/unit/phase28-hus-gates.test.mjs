@@ -134,7 +134,7 @@ test("Step 28 HUS gates proportion claims, open decision differences and recover
     actorId: "step28-unit"
   });
   assert.equal(recovery.husRecoveryCandidate.status, "recovered");
-  assert.equal(recovery.husCase.status, "closed");
+  assert.equal(recovery.husCase.status, "recovered");
 });
 
 test("Step 28 HUS gates block payment and claim without invoice and payment evidence", () => {

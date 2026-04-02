@@ -78,6 +78,7 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   });
   assert.equal(authorityOverview.vat.runCount, 1);
   assert.equal(authorityOverview.agi.submissionCount, 1);
+  assert.equal(authorityOverview.agi.totalEmployerContributionAmount > 0, true);
   assert.equal(authorityOverview.hus.claimCount, 1);
   assert.equal(authorityOverview.hus.totalApprovedAmount, 3000);
   assert.equal(authorityOverview.specialPayrollTax.snapshotCount, 1);
@@ -108,6 +109,17 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   const signedAnnualPackage = signAnnualPackage(platform, annualPackage);
   assert.equal(typeof signedAnnualPackage.currentVersion.lockedAt, "string");
   assert.equal(signedAnnualPackage.currentVersion.signoffHash, signedAnnualPackage.currentVersion.checksum);
+  assert.throws(
+    () =>
+      platform.createTaxDeclarationPackage({
+        companyId: COMPANY_ID,
+        packageId: signedAnnualPackage.packageId,
+        actorId: DEMO_IDS.userId
+      }),
+    (error) => error?.code === "current_tax_closing_journal_missing"
+  );
+
+  postResultTransfer(platform, "phase12-2-unit");
 
   const taxPackage = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
@@ -133,6 +145,10 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   );
   assert.equal(
     taxPackage.exports.find((entry) => entry.exportCode === "agi_audit_overview_json").payload.overview.totalCashCompensationAmount > 0,
+    true
+  );
+  assert.equal(
+    taxPackage.exports.find((entry) => entry.exportCode === "agi_audit_overview_json").payload.overview.totalEmployerContributionAmount > 0,
     true
   );
   assert.deepEqual(
@@ -163,6 +179,15 @@ test("Phase 12.2 builds tax declaration underlag and authority overviews from lo
   assert.equal(taxPackage.filingProfileCode, "AB_ANNUAL_REPORT_AND_INK2");
   assert.equal(taxPackage.annualReportVersionChecksum, signedAnnualPackage.currentVersion.checksum);
   assert.equal(taxPackage.annualReportVersionSignoffHash, signedAnnualPackage.currentVersion.checksum);
+  assert.equal(taxPackage.currentTaxComputation.taxRatePercent, 20.6);
+  assert.equal(taxPackage.currentTaxComputation.determinationStatus, "computed");
+  assert.equal(taxPackage.currentTaxComputation.currentTaxAmount > 0, true);
+  assert.equal(taxPackage.currentTaxComputation.closingJournalRefs.length, 1);
+  assert.equal(taxPackage.currentTaxComputation.closingJournalRefs[0].transferKind, "RESULT_TRANSFER");
+  assert.equal(
+    taxPackage.exports.find((entry) => entry.exportCode === "ink2_support_json").payload.currentTaxComputation.currentTaxAmount,
+    taxPackage.currentTaxComputation.currentTaxAmount
+  );
 
   const second = platform.createTaxDeclarationPackage({
     companyId: COMPANY_ID,
@@ -732,12 +757,31 @@ function signAnnualPackage(platform, annualPackage) {
     companyUserId: DEMO_IDS.companyUserId,
     signatoryRole: "ceo"
   });
+  platform.inviteAnnualReportSignatory({
+    companyId: COMPANY_ID,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "board_member"
+  });
   return platform.signAnnualReportVersion({
     companyId: COMPANY_ID,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
     actorId: DEMO_IDS.userId,
     comment: "Annual package signed for filing."
+  });
+}
+
+function postResultTransfer(platform, actorId) {
+  const fiscalYearId = platform.listFiscalYears({ companyId: COMPANY_ID }).find((candidate) => candidate.startDate === "2026-01-01")?.fiscalYearId;
+  return platform.createYearEndTransferBatch({
+    companyId: COMPANY_ID,
+    fiscalYearId,
+    transferKind: "RESULT_TRANSFER",
+    sourceCode: "ANNUAL_REPORTING_CLOSE",
+    actorId,
+    idempotencyKey: `result-transfer:${COMPANY_ID}:2026`
   });
 }
 

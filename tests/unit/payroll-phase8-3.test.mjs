@@ -245,7 +245,11 @@ test("Phase 8.3 payroll posting preserves dimensions, exports payouts and reprod
     actorId: "unit-test"
   });
   assert.equal(repeatedSnapshot.vacationLiabilitySnapshotId, snapshot.vacationLiabilitySnapshotId);
-  assert.equal(snapshot.totals.liabilityAmount > 0, true);
+  assert.equal(snapshot.employeeSnapshots.length, 1);
+  assert.equal(snapshot.employeeSnapshots[0].remainingDays, 0);
+  assert.equal(snapshot.totals.liabilityAmount, 0);
+  assert.equal(snapshot.totals.employerContributionLiabilityAmount, 0);
+  assert.equal(snapshot.totals.totalLiabilityAmount, 0);
 });
 
 test("Phase 5.4 payroll calculation fails if AGI provider baseline pinning is unavailable", () => {

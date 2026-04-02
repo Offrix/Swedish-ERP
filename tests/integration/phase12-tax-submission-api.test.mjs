@@ -44,6 +44,20 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     });
     assert.equal(authorityOverview.companyId, DEMO_IDS.companyId);
     assert.equal(authorityOverview.fiscalYear, "2026");
+    assert.equal(authorityOverview.agi.totalEmployerContributionAmount > 0, true);
+
+    const missingClosingJournal = await requestJson(`${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations`, {
+      method: "POST",
+      token: adminToken,
+      expectedStatus: 409,
+      body: {
+        companyId: DEMO_IDS.companyId,
+        versionId: annualPackage.currentVersion.versionId
+      }
+    });
+    assert.equal(missingClosingJournal.error, "current_tax_closing_journal_missing");
+
+    postResultTransfer(platform, "phase12-2-api");
 
     const taxPackage = await requestJson(`${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations`, {
       method: "POST",
@@ -56,9 +70,22 @@ test("Phase 12.2 API builds declaration packages, logs receipts and routes failu
     });
     assert.equal(taxPackage.exports.every((entry) => entry.allChecksPassed), true);
     assert.equal(taxPackage.exports.some((entry) => entry.exportCode === "sru_rows_csv"), true);
+    assert.equal(
+      taxPackage.exports.find((entry) => entry.exportCode === "agi_audit_overview_json").payload.overview.totalEmployerContributionAmount > 0,
+      true
+    );
     assert.deepEqual(
       taxPackage.rulepackRefs.map((entry) => entry.rulepackCode).sort(),
       ["RP-ANNUAL-FILING-SE", "RP-LEGAL-FORM-SE"]
+    );
+    assert.equal(taxPackage.currentTaxComputation.taxRatePercent, 20.6);
+    assert.equal(taxPackage.currentTaxComputation.determinationStatus, "computed");
+    assert.equal(taxPackage.currentTaxComputation.currentTaxAmount > 0, true);
+    assert.equal(taxPackage.currentTaxComputation.closingJournalRefs.length, 1);
+    assert.equal(taxPackage.currentTaxComputation.closingJournalRefs[0].transferKind, "RESULT_TRANSFER");
+    assert.equal(
+      taxPackage.exports.find((entry) => entry.exportCode === "ink2_support_json").payload.currentTaxComputation.currentTaxAmount,
+      taxPackage.currentTaxComputation.currentTaxAmount
     );
 
     const forbiddenTaxDeclarations = await fetch(
@@ -357,6 +384,7 @@ test("Phase 12.2 API opens submission corrections with preserved receipt evidenc
       email: DEMO_ADMIN_EMAIL
     });
     const annualPackage = prepareAnnualPackage(platform);
+    postResultTransfer(platform, "phase12-2-api");
 
     const taxPackage = await requestJson(`${baseUrl}/v1/annual-reporting/packages/${annualPackage.packageId}/tax-declarations`, {
       method: "POST",
@@ -622,6 +650,7 @@ function prepareUnsignedAnnualPackage(platform) {
     approvedByActorId: DEMO_IDS.userId,
     approvedByRoleCode: "company_admin"
   });
+  materializePayrollAndAgiOverview(platform);
   return platform.createAnnualReportPackage({
     companyId: DEMO_IDS.companyId,
     accountingPeriodId: period.accountingPeriodId,
@@ -648,12 +677,117 @@ function signAnnualPackage(platform, annualPackage) {
     companyUserId: DEMO_IDS.companyUserId,
     signatoryRole: "ceo"
   });
+  platform.inviteAnnualReportSignatory({
+    companyId: DEMO_IDS.companyId,
+    packageId: annualPackage.packageId,
+    versionId: annualPackage.currentVersion.versionId,
+    companyUserId: DEMO_IDS.companyUserId,
+    signatoryRole: "board_member"
+  });
   return platform.signAnnualReportVersion({
     companyId: DEMO_IDS.companyId,
     packageId: annualPackage.packageId,
     versionId: annualPackage.currentVersion.versionId,
     actorId: DEMO_IDS.userId,
     comment: "Signed annual package for API flow."
+  });
+}
+
+function postResultTransfer(platform, actorId) {
+  const fiscalYearId = platform.listFiscalYears({ companyId: DEMO_IDS.companyId }).find((candidate) => candidate.startDate === "2026-01-01")?.fiscalYearId;
+  return platform.createYearEndTransferBatch({
+    companyId: DEMO_IDS.companyId,
+    fiscalYearId,
+    transferKind: "RESULT_TRANSFER",
+    sourceCode: "ANNUAL_REPORTING_CLOSE",
+    actorId,
+    idempotencyKey: `result-transfer:${DEMO_IDS.companyId}:2026`
+  });
+}
+
+function materializePayrollAndAgiOverview(platform) {
+  const employee = platform.createEmployee({
+    companyId: DEMO_IDS.companyId,
+    givenName: "Api",
+    familyName: "Annual",
+    identityType: "personnummer",
+    identityValue: "19850412-1230",
+    workEmail: "api.annual@example.com",
+    actorId: "phase12-2-api"
+  });
+  const employment = platform.createEmployment({
+    companyId: DEMO_IDS.companyId,
+    employeeId: employee.employeeId,
+    employmentTypeCode: "permanent",
+    jobTitle: "Controller",
+    payModelCode: "monthly_salary",
+    startDate: "2025-01-01",
+    actorId: "phase12-2-api"
+  });
+  platform.addEmploymentContract({
+    companyId: DEMO_IDS.companyId,
+    employeeId: employee.employeeId,
+    employmentId: employment.employmentId,
+    validFrom: "2025-01-01",
+    salaryModelCode: "monthly_salary",
+    monthlySalary: 42000,
+    currencyCode: "SEK",
+    actorId: "phase12-2-api"
+  });
+  platform.addEmployeeBankAccount({
+    companyId: DEMO_IDS.companyId,
+    employeeId: employee.employeeId,
+    payoutMethod: "domestic_account",
+    accountHolderName: "Api Annual",
+    clearingNumber: "5000",
+    accountNumber: "1234500002",
+    bankName: "Phase 12 Test Bank",
+    primaryAccount: true,
+    actorId: "phase12-2-api"
+  });
+  platform.upsertEmploymentStatutoryProfile({
+    companyId: DEMO_IDS.companyId,
+    employmentId: employment.employmentId,
+    taxMode: "manual_rate",
+    manualRateReasonCode: "emergency_manual_transition",
+    taxRatePercent: 30,
+    contributionClassCode: "full",
+    actorId: "phase12-2-api"
+  });
+
+  const payCalendar = platform.listPayCalendars({ companyId: DEMO_IDS.companyId })[0];
+  const payRun = platform.createPayRun({
+    companyId: DEMO_IDS.companyId,
+    payCalendarId: payCalendar.payCalendarId,
+    reportingPeriod: "202603",
+    employmentIds: [employment.employmentId],
+    actorId: "phase12-2-api"
+  });
+  platform.approvePayRun({
+    companyId: DEMO_IDS.companyId,
+    payRunId: payRun.payRunId,
+    actorId: "phase12-2-api"
+  });
+
+  const agiSubmission = platform.createAgiSubmission({
+    companyId: DEMO_IDS.companyId,
+    reportingPeriod: "202603",
+    actorId: "phase12-2-api"
+  });
+  platform.validateAgiSubmission({
+    companyId: DEMO_IDS.companyId,
+    agiSubmissionId: agiSubmission.agiSubmissionId
+  });
+  platform.markAgiSubmissionReadyForSign({
+    companyId: DEMO_IDS.companyId,
+    agiSubmissionId: agiSubmission.agiSubmissionId,
+    actorId: "phase12-2-api"
+  });
+  platform.submitAgiSubmission({
+    companyId: DEMO_IDS.companyId,
+    agiSubmissionId: agiSubmission.agiSubmissionId,
+    actorId: "phase12-2-api",
+    simulatedOutcome: "accepted"
   });
 }
 
