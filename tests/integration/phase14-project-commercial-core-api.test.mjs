@@ -29,6 +29,7 @@ test("Phase 14.1 API exposes general project commercial core routes and workflow
 
     const root = await requestJson(baseUrl, "/", { token: sessionToken });
     for (const route of [
+      "/v1/projects/:projectId/agreements",
       "/v1/projects/:projectId/engagements",
       "/v1/projects/:projectId/work-models",
       "/v1/projects/:projectId/work-packages",
@@ -65,6 +66,32 @@ test("Phase 14.1 API exposes general project commercial core routes and workflow
       }
     });
 
+    const blockedProfitabilitySnapshot = await requestJson(baseUrl, `/v1/projects/${project.projectId}/profitability-snapshots`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        cutoffDate: "2026-04-30"
+      }
+    });
+    assert.deepEqual(
+      blockedProfitabilitySnapshot.blockerRefs,
+      ["agreement_missing", "approved_revenue_plan_missing"]
+    );
+
+    const agreement = await requestJson(baseUrl, `/v1/projects/${project.projectId}/agreements`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 201,
+      body: {
+        companyId: COMPANY_ID,
+        title: "API project signed agreement",
+        signedOn: "2026-04-01",
+        effectiveFrom: "2026-04-01"
+      }
+    });
+
     const engagement = await requestJson(baseUrl, `/v1/projects/${project.projectId}/engagements`, {
       method: "POST",
       token: sessionToken,
@@ -72,11 +99,26 @@ test("Phase 14.1 API exposes general project commercial core routes and workflow
       body: {
         companyId: COMPANY_ID,
         displayName: "API consulting engagement",
+        projectAgreementId: agreement.projectAgreementId,
         workModelCode: "time_only",
         startsOn: "2026-04-01",
         status: "active"
       }
     });
+    assert.equal(engagement.projectAgreementId, agreement.projectAgreementId);
+
+    const invalidVerticalWorkModel = await requestJson(baseUrl, `/v1/projects/${project.projectId}/work-models`, {
+      method: "POST",
+      token: sessionToken,
+      expectedStatus: 400,
+      body: {
+        companyId: COMPANY_ID,
+        projectEngagementId: engagement.projectEngagementId,
+        modelCode: "service_order",
+        title: "Invalid vertical leakage"
+      }
+    });
+    assert.equal(invalidVerticalWorkModel.error, "project_vertical_work_model_requires_vertical_pack");
 
     const workModel = await requestJson(baseUrl, `/v1/projects/${project.projectId}/work-models`, {
       method: "POST",
@@ -180,6 +222,14 @@ test("Phase 14.1 API exposes general project commercial core routes and workflow
         cutoffDate: "2026-04-30"
       }
     });
+    assert.deepEqual(profitabilitySnapshot.blockerRefs, []);
+    assert.equal(profitabilitySnapshot.projectAgreementId, agreement.projectAgreementId);
+
+    const agreements = await requestJson(baseUrl, `/v1/projects/${project.projectId}/agreements?companyId=${COMPANY_ID}`, {
+      token: sessionToken
+    });
+    assert.equal(agreements.items.length, 1);
+    assert.equal(agreements.items[0].projectAgreementId, agreement.projectAgreementId);
 
     const engagements = await requestJson(baseUrl, `/v1/projects/${project.projectId}/engagements?companyId=${COMPANY_ID}`, {
       token: sessionToken
@@ -193,9 +243,9 @@ test("Phase 14.1 API exposes general project commercial core routes and workflow
         token: sessionToken
       }
     );
-    assert.equal(profitabilitySnapshots.items.length, 1);
+    assert.equal(profitabilitySnapshots.items.length, 2);
     assert.equal(
-      profitabilitySnapshots.items[0].projectProfitabilitySnapshotId,
+      profitabilitySnapshots.items.at(-1).projectProfitabilitySnapshotId,
       profitabilitySnapshot.projectProfitabilitySnapshotId
     );
 
@@ -206,18 +256,29 @@ test("Phase 14.1 API exposes general project commercial core routes and workflow
         token: sessionToken
       }
     );
+    assert.equal(workspace.agreementCount, 1);
+    assert.equal(workspace.signedAgreementCount, 1);
     assert.equal(workspace.engagementCount, 1);
     assert.equal(workspace.workModelCount, 1);
     assert.equal(workspace.workPackageCount, 1);
     assert.equal(workspace.deliveryMilestoneCount, 1);
     assert.equal(workspace.approvedRevenuePlanCount, 1);
+    assert.equal(workspace.currentProjectAgreementId, agreement.projectAgreementId);
     assert.equal(workspace.currentProfitabilitySnapshotId, profitabilitySnapshot.projectProfitabilitySnapshotId);
     assert.equal(workspace.warningCodes.includes("engagement_missing"), false);
     assert.equal(workspace.warningCodes.includes("work_model_missing"), false);
+    assert.equal(workspace.warningCodes.includes("agreement_missing"), false);
+    assert.equal(workspace.warningCodes.includes("engagement_agreement_missing"), false);
     assert.equal(workspace.warningCodes.includes("approved_revenue_plan_missing"), false);
     assert.equal(
       workspace.complianceIndicatorStrip.some(
         (indicator) => indicator.indicatorCode === "commercial_core" && indicator.status === "ok" && indicator.count === 2
+      ),
+      true
+    );
+    assert.equal(
+      workspace.complianceIndicatorStrip.some(
+        (indicator) => indicator.indicatorCode === "commercial_agreement" && indicator.status === "ok" && indicator.count === 1
       ),
       true
     );

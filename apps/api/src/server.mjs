@@ -892,6 +892,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/projects/:projectId",
               "/v1/projects/:projectId/opportunity-links",
               "/v1/projects/:projectId/quote-links",
+              "/v1/projects/:projectId/agreements",
               "/v1/projects/:projectId/engagements",
               "/v1/projects/:projectId/work-models",
               "/v1/projects/:projectId/work-packages",
@@ -13848,6 +13849,74 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
     return;
   }
 
+  const projectAgreementsMatch = matchPath(path, "/v1/projects/:projectId/agreements");
+  if (projectAgreementsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_agreement",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectAgreements({
+        companyId,
+        projectId: projectAgreementsMatch.projectId,
+        status: url.searchParams.get("status") || null
+      })
+    });
+    return;
+  }
+
+  if (projectAgreementsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_agreement",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.createProjectAgreement({
+        companyId,
+        projectId: projectAgreementsMatch.projectId,
+        projectAgreementId: body.projectAgreementId ?? null,
+        projectQuoteLinkId: body.projectQuoteLinkId ?? null,
+        agreementNo: body.agreementNo ?? null,
+        title: body.title ?? null,
+        status: body.status ?? "signed",
+        commercialModelCode: body.commercialModelCode ?? null,
+        billingModelCode: body.billingModelCode ?? null,
+        revenueRecognitionModelCode: body.revenueRecognitionModelCode ?? null,
+        signedOn: body.signedOn ?? null,
+        effectiveFrom: body.effectiveFrom ?? null,
+        effectiveTo: body.effectiveTo ?? null,
+        contractValueAmount: body.contractValueAmount ?? null,
+        currencyCode: body.currencyCode ?? null,
+        customerId: body.customerId ?? null,
+        sourceQuoteId: body.sourceQuoteId ?? null,
+        sourceQuoteVersionId: body.sourceQuoteVersionId ?? null,
+        sourceAgreementRef: body.sourceAgreementRef ?? null,
+        evidenceRef: body.evidenceRef ?? null,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
   const projectEngagementsMatch = matchPath(path, "/v1/projects/:projectId/engagements");
   if (projectEngagementsMatch && req.method === "GET") {
     const companyId = requireText(
@@ -13894,6 +13963,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
         projectEngagementId: body.projectEngagementId ?? null,
         engagementCode: body.engagementCode ?? null,
         displayName: body.displayName,
+        projectAgreementId: body.projectAgreementId ?? null,
         customerId: body.customerId ?? null,
         workModelCode: body.workModelCode,
         startsOn: body.startsOn ?? null,

@@ -188,18 +188,25 @@ export const PROJECT_REVENUE_RECOGNITION_MODEL_CODES = Object.freeze([
   "deferred_until_milestone"
 ]);
 export const PROJECT_ENGAGEMENT_STATUSES = Object.freeze(["draft", "active", "paused", "closed", "cancelled"]);
-export const PROJECT_WORK_MODEL_CODES = Object.freeze([
+export const PROJECT_GENERAL_WORK_MODEL_CODES = Object.freeze([
   "time_only",
   "milestone_only",
   "retainer_capacity",
   "fixed_scope",
   "subscription_service",
+  "internal_delivery"
+]);
+export const PROJECT_VERTICAL_WORK_MODEL_CODES = Object.freeze([
   "field_service_optional",
   "service_order",
   "work_order",
-  "construction_stage",
-  "internal_delivery"
+  "construction_stage"
 ]);
+export const PROJECT_WORK_MODEL_CODES = Object.freeze([
+  ...PROJECT_GENERAL_WORK_MODEL_CODES,
+  ...PROJECT_VERTICAL_WORK_MODEL_CODES
+]);
+export const PROJECT_AGREEMENT_STATUSES = Object.freeze(["draft", "signed", "superseded", "terminated"]);
 export const PROJECT_WORK_PACKAGE_STATUSES = Object.freeze(["draft", "active", "completed", "cancelled"]);
 export const PROJECT_DELIVERY_MILESTONE_STATUSES = Object.freeze(["planned", "ready", "achieved", "accepted", "cancelled"]);
 export const PROJECT_WORK_LOG_STATUSES = Object.freeze(["recorded", "approved", "rejected"]);
@@ -318,7 +325,11 @@ export function createProjectEngine({
     projectBillingModelCodes: PROJECT_BILLING_MODEL_CODES,
     projectRevenueRecognitionModelCodes: PROJECT_REVENUE_RECOGNITION_MODEL_CODES,
     projectEngagementStatuses: PROJECT_ENGAGEMENT_STATUSES,
-    projectWorkModelCodes: PROJECT_WORK_MODEL_CODES,
+    projectWorkModelCodes: PROJECT_GENERAL_WORK_MODEL_CODES,
+    projectGeneralWorkModelCodes: PROJECT_GENERAL_WORK_MODEL_CODES,
+    projectVerticalWorkModelCodes: PROJECT_VERTICAL_WORK_MODEL_CODES,
+    projectAllWorkModelCodes: PROJECT_WORK_MODEL_CODES,
+    projectAgreementStatuses: PROJECT_AGREEMENT_STATUSES,
     projectWorkPackageStatuses: PROJECT_WORK_PACKAGE_STATUSES,
     projectDeliveryMilestoneStatuses: PROJECT_DELIVERY_MILESTONE_STATUSES,
     projectWorkLogStatuses: PROJECT_WORK_LOG_STATUSES,
@@ -358,6 +369,8 @@ export function createProjectEngine({
     createProjectOpportunityLink,
     listProjectQuoteLinks,
     createProjectQuoteLink,
+    listProjectAgreements,
+    createProjectAgreement,
     listProjectEngagements,
     createProjectEngagement,
     listProjectWorkModels,
@@ -466,6 +479,8 @@ export function createProjectEngine({
     const revenuePlans = listProjectRevenuePlans({ companyId: project.companyId, projectId: project.projectId });
     const opportunityLinks = listProjectOpportunityLinks({ companyId: project.companyId, projectId: project.projectId });
     const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
+    const agreements = listProjectAgreements({ companyId: project.companyId, projectId: project.projectId });
+    const signedAgreements = agreements.filter((record) => record.status === "signed");
     const billingPlans = listProjectBillingPlans({ companyId: project.companyId, projectId: project.projectId });
     const statusUpdates = listProjectStatusUpdates({ companyId: project.companyId, projectId: project.projectId });
     const currentStatusUpdate = selectWorkspaceSnapshot(statusUpdates, cutoffDate, "statusDate");
@@ -475,6 +490,10 @@ export function createProjectEngine({
     const assignmentPlans = listProjectAssignmentPlans({ companyId: project.companyId, projectId: project.projectId });
     const projectRisks = listProjectRisks({ companyId: project.companyId, projectId: project.projectId });
     const openProjectRisks = projectRisks.filter((risk) => risk.status !== "closed");
+    const currentProjectAgreement = selectCurrentProjectAgreement({
+      agreements: signedAgreements,
+      cutoffDate
+    });
     const currentBillingPlan = billingPlans.filter((record) => record.status === "active").pop() || billingPlans.at(-1) || null;
     const currentInvoiceReadinessAssessment = selectWorkspaceSnapshot(invoiceReadinessAssessments, cutoffDate, "assessedAt");
     const customerContext = summarizeProjectCustomerContext({
@@ -582,6 +601,12 @@ export function createProjectEngine({
     if (workModels.length === 0) {
       warningCodes.push("work_model_missing");
     }
+    if (project.status === "active" && signedAgreements.length === 0) {
+      warningCodes.push("agreement_missing");
+    }
+    if (engagements.some((record) => !record.projectAgreementId)) {
+      warningCodes.push("engagement_agreement_missing");
+    }
     if (revenuePlans.filter((record) => record.status === "approved").length === 0) {
       warningCodes.push("approved_revenue_plan_missing");
     }
@@ -629,12 +654,15 @@ export function createProjectEngine({
       currentWipSnapshotId: currentWipSnapshot?.projectWipSnapshotId || null,
       currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
       currentProfitabilitySnapshotId: currentProfitabilitySnapshot?.projectProfitabilitySnapshotId || null,
+      currentProjectAgreementId: currentProjectAgreement?.projectAgreementId || null,
       currentBillingPlanId: currentBillingPlan?.projectBillingPlanId || null,
       currentInvoiceReadinessAssessmentId: currentInvoiceReadinessAssessment?.projectInvoiceReadinessAssessmentId || null,
       latestEstimateVersionId: kalkylSummary.latestEstimateVersionId,
       latestEstimateStatus: kalkylSummary.latestEstimateStatus,
       opportunityLinkCount: opportunityLinks.length,
       quoteLinkCount: quoteLinks.length,
+      agreementCount: agreements.length,
+      signedAgreementCount: signedAgreements.length,
       billingPlanCount: billingPlans.length,
       profitabilityAdjustmentCount: profitabilityAdjustments.length,
       invoiceReadinessAssessmentCount: invoiceReadinessAssessments.length,
@@ -670,18 +698,21 @@ export function createProjectEngine({
       egenkontrollSummary,
       kalkylSummary,
       customerContext,
+      verticalIsolationSummary: buildProjectVerticalIsolationSummary({ workModels }),
       latestStatusUpdate: currentStatusUpdate ? copy(currentStatusUpdate) : null,
       currentBudgetVersion: currentBudgetVersion ? copy(currentBudgetVersion) : null,
       currentCostSnapshot: currentCostSnapshot ? copy(currentCostSnapshot) : null,
       currentWipSnapshot: currentWipSnapshot ? copy(currentWipSnapshot) : null,
       currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
       currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
+      currentProjectAgreement: currentProjectAgreement ? copy(currentProjectAgreement) : null,
       currentBillingPlan: currentBillingPlan ? copy(currentBillingPlan) : null,
       currentInvoiceReadinessAssessment: currentInvoiceReadinessAssessment ? copy(currentInvoiceReadinessAssessment) : null,
       currentProjectInvoiceSimulation: currentProjectInvoiceSimulation ? copy(currentProjectInvoiceSimulation) : null,
       currentProjectLiveConversionPlan: currentProjectLiveConversionPlan ? copy(currentProjectLiveConversionPlan) : null,
       projectOpportunityLinks: opportunityLinks.map(copy),
       projectQuoteLinks: quoteLinks.map(copy),
+      projectAgreements: agreements.map(copy),
       projectEngagements: engagements.map(copy),
       projectWorkModels: workModels.map(copy),
       projectWorkPackages: workPackages.map(copy),
@@ -711,6 +742,7 @@ export function createProjectEngine({
         kalkylSummary,
         openProjectDeviationCount: openProjectDeviations.length,
         engagementCount: engagements.length,
+        signedAgreementCount: signedAgreements.length,
         approvedRevenuePlanCount: revenuePlans.filter((record) => record.status === "approved").length,
         currentInvoiceReadinessAssessment
       }),
@@ -802,6 +834,7 @@ export function createProjectEngine({
       dimensionJson: normalizeDimensions(dimensionJson),
       opportunityLinks: [],
       quoteLinks: [],
+      agreements: [],
       billingPlans: [],
       statusUpdates: [],
       capacityReservations: [],
@@ -882,10 +915,29 @@ export function createProjectEngine({
       actorId: resolvedActorId,
       correlationId
     });
+    const agreement = createProjectAgreement({
+      companyId: resolvedCompanyId,
+      projectId: project.projectId,
+      title: `${scenario.projectDisplayName} agreement`,
+      status: "signed",
+      commercialModelCode: deriveProjectCommercialModelCode({
+        billingModelCode: scenario.billingModelCode,
+        revenueRecognitionModelCode: scenario.revenueRecognitionModelCode
+      }),
+      billingModelCode: scenario.billingModelCode,
+      revenueRecognitionModelCode: scenario.revenueRecognitionModelCode,
+      signedOn: projectStartDate,
+      effectiveFrom: projectStartDate,
+      contractValueAmount: scenario.contractValueAmount,
+      customerId,
+      actorId: resolvedActorId,
+      correlationId
+    });
     const engagement = createProjectEngagement({
       companyId: resolvedCompanyId,
       projectId: project.projectId,
       displayName: scenario.engagementDisplayName,
+      projectAgreementId: agreement.projectAgreementId,
       customerId,
       workModelCode: scenario.workModelCode,
       startsOn: projectStartDate,
@@ -1160,10 +1212,56 @@ export function createProjectEngine({
         actorId: resolvedActorId,
         correlationId
       });
+      let quoteLink = null;
+      if (record.externalOpportunityId) {
+        createProjectOpportunityLink({
+          companyId: batch.companyId,
+          projectId: project.projectId,
+          externalSystemCode: batch.sourceSystemCode,
+          externalOpportunityId: record.externalOpportunityId,
+          externalOpportunityRef: record.externalOpportunityRef,
+          customerId,
+          actorId: resolvedActorId,
+          correlationId
+        });
+      }
+      if (record.externalQuoteRef || record.sourceQuoteId) {
+        quoteLink = createProjectQuoteLink({
+          companyId: batch.companyId,
+          projectId: project.projectId,
+          sourceQuoteId: record.sourceQuoteId,
+          externalSystemCode: batch.sourceSystemCode,
+          externalQuoteRef: record.externalQuoteRef,
+          acceptedOn: record.quoteAcceptedOn,
+          customerId,
+          actorId: resolvedActorId,
+          correlationId
+        });
+      }
+      const agreement = createProjectAgreement({
+        companyId: batch.companyId,
+        projectId: project.projectId,
+        projectQuoteLinkId: quoteLink?.projectQuoteLinkId || null,
+        title: `${record.displayName} agreement`,
+        status: "signed",
+        commercialModelCode: deriveProjectCommercialModelCode({
+          billingModelCode: record.billingModelCode,
+          revenueRecognitionModelCode: record.revenueRecognitionModelCode
+        }),
+        billingModelCode: record.billingModelCode,
+        revenueRecognitionModelCode: record.revenueRecognitionModelCode,
+        signedOn: record.quoteAcceptedOn || record.startsOn,
+        effectiveFrom: record.quoteAcceptedOn || record.startsOn,
+        contractValueAmount: record.contractValueAmount,
+        customerId,
+        actorId: resolvedActorId,
+        correlationId
+      });
       const engagement = createProjectEngagement({
         companyId: batch.companyId,
         projectId: project.projectId,
         displayName: record.engagementDisplayName,
+        projectAgreementId: agreement.projectAgreementId,
         customerId,
         workModelCode: record.workModelCode,
         startsOn: record.startsOn,
@@ -1188,31 +1286,6 @@ export function createProjectEngine({
         actorId: resolvedActorId,
         correlationId
       });
-      if (record.externalOpportunityId) {
-        createProjectOpportunityLink({
-          companyId: batch.companyId,
-          projectId: project.projectId,
-          externalSystemCode: batch.sourceSystemCode,
-          externalOpportunityId: record.externalOpportunityId,
-          externalOpportunityRef: record.externalOpportunityRef,
-          customerId,
-          actorId: resolvedActorId,
-          correlationId
-        });
-      }
-      if (record.externalQuoteRef || record.sourceQuoteId) {
-        createProjectQuoteLink({
-          companyId: batch.companyId,
-          projectId: project.projectId,
-          sourceQuoteId: record.sourceQuoteId,
-          externalSystemCode: batch.sourceSystemCode,
-          externalQuoteRef: record.externalQuoteRef,
-          acceptedOn: record.quoteAcceptedOn,
-          customerId,
-          actorId: resolvedActorId,
-          correlationId
-        });
-      }
       const workPackage = createProjectWorkPackage({
         companyId: batch.companyId,
         projectId: project.projectId,
@@ -1426,6 +1499,152 @@ export function createProjectEngine({
     return copy(record);
   }
 
+  function listProjectAgreements({ companyId, projectId, status = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedStatus = normalizeOptionalText(status);
+    return copy(project.agreements || [])
+      .filter((record) => (resolvedStatus ? record.status === resolvedStatus : true))
+      .sort(
+        (left, right) =>
+          (left.effectiveFrom || left.signedOn || left.createdAt).localeCompare(right.effectiveFrom || right.signedOn || right.createdAt)
+          || left.createdAt.localeCompare(right.createdAt)
+          || left.projectAgreementId.localeCompare(right.projectAgreementId)
+      );
+  }
+
+  function createProjectAgreement({
+    companyId,
+    projectId,
+    projectAgreementId = null,
+    projectQuoteLinkId = null,
+    agreementNo = null,
+    title = null,
+    status = "signed",
+    commercialModelCode = null,
+    billingModelCode = null,
+    revenueRecognitionModelCode = null,
+    signedOn = null,
+    effectiveFrom = null,
+    effectiveTo = null,
+    contractValueAmount = null,
+    currencyCode = null,
+    customerId = null,
+    sourceQuoteId = null,
+    sourceQuoteVersionId = null,
+    sourceAgreementRef = null,
+    evidenceRef = null,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const quoteLink = resolveProjectAgreementQuoteLink({
+      project,
+      projectQuoteLinkId,
+      sourceQuoteId,
+      sourceQuoteVersionId
+    });
+    const resolvedStatus = assertAllowed(status, PROJECT_AGREEMENT_STATUSES, "project_agreement_status_invalid");
+    const resolvedBillingModelCode = normalizeOptionalText(billingModelCode) || project.billingModelCode || null;
+    const resolvedRevenueRecognitionModelCode =
+      normalizeOptionalText(revenueRecognitionModelCode) || project.revenueRecognitionModelCode || null;
+    if (resolvedBillingModelCode) {
+      assertAllowed(resolvedBillingModelCode, PROJECT_BILLING_MODEL_CODES, "project_agreement_billing_model_invalid");
+    }
+    if (resolvedRevenueRecognitionModelCode) {
+      assertAllowed(
+        resolvedRevenueRecognitionModelCode,
+        PROJECT_REVENUE_RECOGNITION_MODEL_CODES,
+        "project_agreement_revenue_recognition_invalid"
+      );
+    }
+    const resolvedSignedOn =
+      resolvedStatus === "signed"
+        ? normalizeRequiredDate(signedOn || effectiveFrom || quoteLink?.acceptedOn || project.startsOn, "project_agreement_signed_on_required")
+        : normalizeOptionalDate(signedOn, "project_agreement_signed_on_invalid");
+    const resolvedEffectiveFrom =
+      normalizeOptionalDate(effectiveFrom, "project_agreement_effective_from_invalid")
+      || resolvedSignedOn
+      || quoteLink?.acceptedOn
+      || project.startsOn;
+    const resolvedEffectiveTo = normalizeOptionalDate(effectiveTo, "project_agreement_effective_to_invalid");
+    if (resolvedEffectiveTo && resolvedEffectiveTo < resolvedEffectiveFrom) {
+      throw createError(
+        400,
+        "project_agreement_date_range_invalid",
+        "Project agreement effectiveTo cannot be earlier than effectiveFrom."
+      );
+    }
+    const resolvedAgreementNo = requireText(
+      agreementNo || `${project.projectCode}-AGR-${String((project.agreements || []).length + 1).padStart(2, "0")}`,
+      "project_agreement_number_required"
+    );
+    const resolvedCustomerId = normalizeOptionalText(customerId) || quoteLink?.customerId || project.customerId || null;
+    if (resolvedCustomerId && arPlatform?.getCustomer) {
+      arPlatform.getCustomer({
+        companyId: project.companyId,
+        customerId: resolvedCustomerId
+      });
+    }
+    const normalizedSourceAgreementRef = normalizeOptionalText(sourceAgreementRef);
+    const duplicate = (project.agreements || []).find(
+      (record) =>
+        record.agreementNo === resolvedAgreementNo
+        || (quoteLink
+          && record.projectQuoteLinkId === quoteLink.projectQuoteLinkId
+          && record.sourceQuoteVersionId === quoteLink.sourceQuoteVersionId)
+        || (normalizedSourceAgreementRef && record.sourceAgreementRef === normalizedSourceAgreementRef)
+    );
+    if (duplicate) {
+      return copy(duplicate);
+    }
+    const record = {
+      projectAgreementId: normalizeOptionalText(projectAgreementId) || crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectQuoteLinkId: quoteLink?.projectQuoteLinkId || null,
+      agreementNo: resolvedAgreementNo,
+      title: requireText(title || quoteLink?.quoteTitle || `${project.displayName} commercial agreement`, "project_agreement_title_required"),
+      customerId: resolvedCustomerId,
+      status: resolvedStatus,
+      commercialModelCode:
+        normalizeOptionalText(commercialModelCode)
+        || deriveProjectCommercialModelCode({
+          billingModelCode: resolvedBillingModelCode,
+          revenueRecognitionModelCode: resolvedRevenueRecognitionModelCode
+        }),
+      billingModelCode: resolvedBillingModelCode,
+      revenueRecognitionModelCode: resolvedRevenueRecognitionModelCode,
+      signedOn: resolvedSignedOn,
+      effectiveFrom: resolvedEffectiveFrom,
+      effectiveTo: resolvedEffectiveTo,
+      contractValueAmount: normalizeMoney(
+        contractValueAmount ?? quoteLink?.totalAmount ?? project.contractValueAmount,
+        "project_agreement_contract_value_invalid"
+      ),
+      currencyCode: normalizeUpperCode(currencyCode || quoteLink?.currencyCode || project.currencyCode, "project_agreement_currency_required", 3),
+      sourceQuoteId: quoteLink?.sourceQuoteId || normalizeOptionalText(sourceQuoteId),
+      sourceQuoteVersionId: quoteLink?.sourceQuoteVersionId || normalizeOptionalText(sourceQuoteVersionId),
+      sourceAgreementRef: normalizedSourceAgreementRef,
+      evidenceRef: normalizeOptionalText(evidenceRef),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    project.agreements.push(record);
+    project.updatedAt = nowIso(clock);
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.agreement.created",
+      entityType: "project_agreement",
+      entityId: record.projectAgreementId,
+      projectId: record.projectId,
+      explanation: `Created project agreement ${record.agreementNo} for ${project.projectCode}.`
+    });
+    return copy(record);
+  }
+
   function listProjectEngagements({ companyId, projectId, status = null } = {}) {
     const project = requireProject(state, companyId, projectId);
     const resolvedStatus = normalizeOptionalText(status);
@@ -1443,6 +1662,7 @@ export function createProjectEngine({
     projectEngagementId = null,
     engagementCode = null,
     displayName,
+    projectAgreementId = null,
     customerId = null,
     workModelCode,
     startsOn,
@@ -1454,6 +1674,13 @@ export function createProjectEngine({
     correlationId = crypto.randomUUID()
   } = {}) {
     const project = requireProject(state, companyId, projectId);
+    const agreement =
+      normalizeOptionalText(projectAgreementId)
+        ? requireProjectAgreement(project, projectAgreementId)
+        : selectCurrentProjectAgreement({
+            agreements: project.agreements || [],
+            cutoffDate: startsOn || project.startsOn
+          });
     const resolvedStartsOn = normalizeRequiredDate(startsOn || project.startsOn, "project_engagement_start_date_required");
     const resolvedEndsOn = normalizeOptionalDate(endsOn, "project_engagement_end_date_invalid");
     if (resolvedEndsOn && resolvedEndsOn < resolvedStartsOn) {
@@ -1463,9 +1690,10 @@ export function createProjectEngine({
       projectEngagementId: normalizeOptionalText(projectEngagementId) || crypto.randomUUID(),
       companyId: project.companyId,
       projectId: project.projectId,
+      projectAgreementId: agreement?.projectAgreementId || null,
       engagementCode: requireText(engagementCode || `${project.projectCode}-ENG-${String((state.projectEngagementIdsByProject.get(project.projectId) || []).length + 1).padStart(2, "0")}`, "project_engagement_code_required"),
       displayName: requireText(displayName, "project_engagement_display_name_required"),
-      customerId: normalizeOptionalText(customerId) || project.customerId || null,
+      customerId: normalizeOptionalText(customerId) || agreement?.customerId || project.customerId || null,
       workModelCode: assertAllowed(workModelCode, PROJECT_WORK_MODEL_CODES, "project_work_model_invalid"),
       startsOn: resolvedStartsOn,
       endsOn: resolvedEndsOn,
@@ -1520,14 +1748,23 @@ export function createProjectEngine({
       normalizeOptionalText(projectEngagementId)
         ? requireProjectEngagement(state, project.companyId, project.projectId, projectEngagementId)
         : null;
+    const resolvedModelCode = assertAllowed(modelCode, PROJECT_WORK_MODEL_CODES, "project_work_model_invalid");
+    const resolvedOperationalPackCode = requireText(operationalPackCode, "project_operational_pack_code_required");
+    if (isProjectVerticalWorkModelCode(resolvedModelCode) && normalizePackCode(resolvedOperationalPackCode) === "general_core") {
+      throw createError(
+        400,
+        "project_vertical_work_model_requires_vertical_pack",
+        "Vertical work models must be attached through a vertical pack code, not general_core."
+      );
+    }
     const record = {
       projectWorkModelId: normalizeOptionalText(projectWorkModelId) || crypto.randomUUID(),
       companyId: project.companyId,
       projectId: project.projectId,
       projectEngagementId: engagement?.projectEngagementId || null,
-      modelCode: assertAllowed(modelCode, PROJECT_WORK_MODEL_CODES, "project_work_model_invalid"),
+      modelCode: resolvedModelCode,
       title: requireText(title, "project_work_model_title_required"),
-      operationalPackCode: requireText(operationalPackCode, "project_operational_pack_code_required"),
+      operationalPackCode: resolvedOperationalPackCode,
       requiresWorkOrders: requiresWorkOrders === true,
       requiresMilestones: requiresMilestones === true,
       requiresAttendance: requiresAttendance === true,
@@ -2365,8 +2602,12 @@ export function createProjectEngine({
       sourceQuoteVersionId: quoteVersion.quoteVersionId
     });
     if (existingProject) {
+      const existingAgreement = listProjectAgreements({ companyId, projectId: existingProject.projectId }).find(
+        (record) => record.sourceQuoteId === quote.quoteId && record.sourceQuoteVersionId === quoteVersion.quoteVersionId
+      ) || null;
       return {
         project: copy(existingProject),
+        agreement: existingAgreement,
         quoteLink: listProjectQuoteLinks({ companyId, projectId: existingProject.projectId }).find(
           (record) => record.sourceQuoteId === quote.quoteId && record.sourceQuoteVersionId === quoteVersion.quoteVersionId
         ) || null
@@ -2415,10 +2656,31 @@ export function createProjectEngine({
       actorId,
       correlationId
     });
+    const agreement = createProjectAgreement({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      projectQuoteLinkId: quoteLink.projectQuoteLinkId,
+      title: `${quoteVersion.title} agreement`,
+      status: "signed",
+      commercialModelCode: deriveProjectCommercialModelCode({
+        billingModelCode,
+        revenueRecognitionModelCode
+      }),
+      billingModelCode,
+      revenueRecognitionModelCode,
+      signedOn: quoteVersion.acceptedAt?.slice(0, 10) || startsOn || project.startsOn,
+      effectiveFrom: quoteVersion.acceptedAt?.slice(0, 10) || startsOn || project.startsOn,
+      contractValueAmount: quoteVersion.totalAmount,
+      currencyCode: quoteVersion.currencyCode,
+      customerId: quote.customerId,
+      actorId,
+      correlationId
+    });
     const engagement = createProjectEngagement({
       companyId: project.companyId,
       projectId: project.projectId,
       displayName: quoteVersion.title,
+      projectAgreementId: agreement.projectAgreementId,
       customerId: quote.customerId,
       workModelCode,
       startsOn: project.startsOn,
@@ -2435,8 +2697,13 @@ export function createProjectEngine({
       projectEngagementId: engagement.projectEngagementId,
       modelCode: workModelCode,
       title: `${quoteVersion.title} work model`,
-      operationalPackCode: ["work_order", "service_order", "construction_stage"].includes(workModelCode) ? "field_optional" : "general_core",
-      requiresWorkOrders: ["work_order", "service_order", "construction_stage"].includes(workModelCode),
+      operationalPackCode:
+        workModelCode === "construction_stage"
+          ? "construction_overlay"
+          : ["field_service_optional", "work_order", "service_order"].includes(workModelCode)
+            ? "field_service"
+            : "general_core",
+      requiresWorkOrders: ["field_service_optional", "work_order", "service_order", "construction_stage"].includes(workModelCode),
       requiresMilestones: ["milestone_only", "construction_stage", "fixed_scope"].includes(workModelCode),
       actorId,
       correlationId
@@ -2501,6 +2768,7 @@ export function createProjectEngine({
       project,
       opportunityLink,
       quoteLink,
+      agreement,
       engagement,
       workModel,
       revenuePlan: approvedRevenuePlan,
@@ -2542,19 +2810,42 @@ export function createProjectEngine({
       projectId: project.projectId,
       status: "approved"
     }).pop() || null;
+    const currentAgreement = selectCurrentProjectAgreement({
+      agreements: listProjectAgreements({
+        companyId: project.companyId,
+        projectId: project.projectId,
+        status: "signed"
+      }),
+      cutoffDate: model.cutoffDate
+    });
     const plannedRevenueAmount = approvedRevenuePlan ? calculateRevenuePlanAmountAtCutoff(approvedRevenuePlan, model.cutoffDate) : 0;
+    const blockerRefs = [];
+    if (!currentAgreement) {
+      blockerRefs.push("agreement_missing");
+    }
+    if (!approvedRevenuePlan) {
+      blockerRefs.push("approved_revenue_plan_missing");
+    }
     const record = {
       projectProfitabilitySnapshotId: crypto.randomUUID(),
       companyId: project.companyId,
       projectId: project.projectId,
       cutoffDate: model.cutoffDate,
       reportingPeriod: model.reportingPeriod,
+      projectAgreementId: currentAgreement?.projectAgreementId || null,
+      commercialModelCode:
+        currentAgreement?.commercialModelCode
+        || deriveProjectCommercialModelCode({
+          billingModelCode: project.billingModelCode,
+          revenueRecognitionModelCode: project.revenueRecognitionModelCode
+        }),
       plannedRevenueAmount,
       billedRevenueAmount: model.billedRevenueAmount,
       recognizedRevenueAmount: model.recognizedRevenueAmount,
       actualCostAmount: model.actualCostAmount,
       currentMarginAmount: model.currentMarginAmount,
       forecastMarginAmount: model.forecastMarginAmount,
+      blockerRefs: Object.freeze(blockerRefs),
       workPackageCount: listProjectWorkPackages({ companyId: project.companyId, projectId: project.projectId }).length,
       deliveryMilestoneCount: listProjectDeliveryMilestones({ companyId: project.companyId, projectId: project.projectId }).length,
       openDeviationCount: listProjectDeviations({ companyId: project.companyId, projectId: project.projectId }).filter((record) => !["resolved", "closed"].includes(record.status)).length,
@@ -2573,7 +2864,9 @@ export function createProjectEngine({
         actualCostAmount: model.actualCostAmount,
         currentMarginAmount: model.currentMarginAmount,
         forecastMarginAmount: model.forecastMarginAmount,
-        approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null
+        approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null,
+        projectAgreementId: currentAgreement?.projectAgreementId || null,
+        blockerRefs
       }),
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock)
@@ -3902,8 +4195,10 @@ function exportProjectEvidenceBundle({
       cutoffDate: normalizeOptionalText(cutoffDate),
       warningCodes: [...workspace.warningCodes],
       customerContext: copy(workspace.customerContext),
+      verticalIsolationSummary: copy(workspace.verticalIsolationSummary),
       projectOpportunityLinks: copy(workspace.projectOpportunityLinks || []),
       projectQuoteLinks: copy(workspace.projectQuoteLinks || []),
+      projectAgreements: copy(workspace.projectAgreements || []),
       projectEngagements: copy(workspace.projectEngagements || []),
       projectWorkModels: copy(workspace.projectWorkModels || []),
       projectWorkPackages: copy(workspace.projectWorkPackages || []),
@@ -3921,6 +4216,7 @@ function exportProjectEvidenceBundle({
       projectInvoiceSimulations: copy(workspace.projectInvoiceSimulations || []),
       projectLiveConversionPlans: copy(workspace.projectLiveConversionPlans || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
+      currentProjectAgreement: copy(workspace.currentProjectAgreement),
       currentBillingPlan: copy(workspace.currentBillingPlan),
       currentInvoiceReadinessAssessment: copy(workspace.currentInvoiceReadinessAssessment),
       currentProjectInvoiceSimulation: copy(workspace.currentProjectInvoiceSimulation),
@@ -3962,6 +4258,7 @@ function exportProjectEvidenceBundle({
           ["project_wip_snapshot", workspace.currentWipSnapshotId],
           ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
           ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId],
+          ["project_agreement", workspace.currentProjectAgreementId],
           ["project_billing_plan", workspace.currentBillingPlanId],
           ["project_invoice_readiness_assessment", workspace.currentInvoiceReadinessAssessmentId],
           ["project_status_update", workspace.latestStatusUpdate?.projectStatusUpdateId || null]
@@ -4487,8 +4784,12 @@ function selectWorkspaceSnapshot(records, cutoffDate, dateField = "cutoffDate") 
   }
   const candidates = records
     .filter((record) => normalizeOptionalText(record?.[dateField]))
-    .sort((left, right) => String(left[dateField]).localeCompare(String(right[dateField])));
-  const exact = candidates.find((record) => record[dateField] === cutoffDate);
+    .sort(
+      (left, right) =>
+        String(left[dateField]).localeCompare(String(right[dateField]))
+        || String(left.createdAt || "").localeCompare(String(right.createdAt || ""))
+    );
+  const exact = [...candidates].reverse().find((record) => record[dateField] === cutoffDate);
   if (exact) {
     return copy(exact);
   }
@@ -4951,6 +5252,7 @@ function buildWorkspaceIndicatorStrip({
   kalkylSummary,
   openProjectDeviationCount,
   engagementCount,
+  signedAgreementCount,
   approvedRevenuePlanCount
 }) {
   return [
@@ -4968,6 +5270,11 @@ function buildWorkspaceIndicatorStrip({
       indicatorCode: "commercial_core",
       status: engagementCount > 0 && approvedRevenuePlanCount > 0 ? "ok" : "warning",
       count: engagementCount + approvedRevenuePlanCount
+    },
+    {
+      indicatorCode: "commercial_agreement",
+      status: signedAgreementCount > 0 ? "ok" : "warning",
+      count: signedAgreementCount
     },
     {
       indicatorCode: "invoice_readiness",
@@ -5012,6 +5319,17 @@ function buildWorkspaceIndicatorStrip({
       count: openProjectDeviationCount
     }
   ];
+}
+
+function buildProjectVerticalIsolationSummary({ workModels }) {
+  const verticalWorkModels = (Array.isArray(workModels) ? workModels : []).filter((record) => isProjectVerticalWorkModelCode(record.modelCode));
+  const generalWorkModels = (Array.isArray(workModels) ? workModels : []).filter((record) => !isProjectVerticalWorkModelCode(record.modelCode));
+  return {
+    financeTruthOwner: "projects",
+    generalWorkModelCount: generalWorkModels.length,
+    verticalWorkModelCount: verticalWorkModels.length,
+    verticalPackCodes: Array.from(new Set(verticalWorkModels.map((record) => normalizePackCode(record.operationalPackCode)).filter(Boolean))).sort()
+  };
 }
 
 function buildScopedProjectDeviationKey(companyId, projectId) {
@@ -6279,6 +6597,16 @@ function requireProjectEngagement(state, companyId, projectId, projectEngagement
   return record;
 }
 
+function requireProjectAgreement(project, projectAgreementId) {
+  const record = (project.agreements || []).find(
+    (candidate) => candidate.projectAgreementId === requireText(projectAgreementId, "project_agreement_id_required")
+  );
+  if (!record) {
+    throw createError(404, "project_agreement_not_found", "Project agreement was not found.");
+  }
+  return record;
+}
+
 function requireProjectWorkModel(state, companyId, projectId, projectWorkModelId) {
   const record = state.projectWorkModels.get(requireText(projectWorkModelId, "project_work_model_id_required"));
   if (!record || record.companyId !== requireText(companyId, "company_id_required") || record.projectId !== requireText(projectId, "project_id_required")) {
@@ -6671,6 +6999,39 @@ function currentDateString(clock) {
   return new Date(clock()).toISOString().slice(0, 10);
 }
 
+function selectCurrentProjectAgreement({ agreements, cutoffDate = null } = {}) {
+  const records = (Array.isArray(agreements) ? agreements : [])
+    .filter((record) => record.status === "signed")
+    .filter((record) => !cutoffDate || (record.effectiveFrom || record.signedOn || record.createdAt.slice(0, 10)) <= cutoffDate)
+    .sort(
+      (left, right) =>
+        (left.effectiveFrom || left.signedOn || left.createdAt).localeCompare(right.effectiveFrom || right.signedOn || right.createdAt)
+        || left.createdAt.localeCompare(right.createdAt)
+        || left.projectAgreementId.localeCompare(right.projectAgreementId)
+    );
+  return records.at(-1) || null;
+}
+
+function resolveProjectAgreementQuoteLink({ project, projectQuoteLinkId = null, sourceQuoteId = null, sourceQuoteVersionId = null }) {
+  if (normalizeOptionalText(projectQuoteLinkId)) {
+    return requireProjectQuoteLink(project, projectQuoteLinkId);
+  }
+  const resolvedSourceQuoteId = normalizeOptionalText(sourceQuoteId);
+  if (!resolvedSourceQuoteId) {
+    return null;
+  }
+  const resolvedSourceQuoteVersionId = normalizeOptionalText(sourceQuoteVersionId);
+  const record = (project.quoteLinks || []).find(
+    (candidate) =>
+      candidate.sourceQuoteId === resolvedSourceQuoteId
+      && (!resolvedSourceQuoteVersionId || candidate.sourceQuoteVersionId === resolvedSourceQuoteVersionId)
+  );
+  if (!record) {
+    throw createError(404, "project_quote_link_not_found", "Project quote link was not found.");
+  }
+  return record;
+}
+
 function addDaysToDate(dateValue, days) {
   const resolvedDate = normalizeRequiredDate(dateValue, "project_date_required");
   const value = new Date(`${resolvedDate}T00:00:00.000Z`);
@@ -6809,6 +7170,20 @@ function normalizeOptionalText(value) {
 
 function normalizeCode(value, code) {
   return requireText(value, code).replaceAll("-", "_").replaceAll(" ", "_").toUpperCase();
+}
+
+function normalizePackCode(value) {
+  return normalizeOptionalText(value)?.replaceAll("-", "_").replaceAll(" ", "_").toLowerCase() || null;
+}
+
+function isProjectVerticalWorkModelCode(value) {
+  return PROJECT_VERTICAL_WORK_MODEL_CODES.includes(requireText(value, "project_work_model_invalid"));
+}
+
+function deriveProjectCommercialModelCode({ billingModelCode, revenueRecognitionModelCode }) {
+  const billing = normalizeOptionalText(billingModelCode) || "unassigned_billing";
+  const revenueRecognition = normalizeOptionalText(revenueRecognitionModelCode) || "unassigned_revenue";
+  return `${billing}__${revenueRecognition}`;
 }
 
 function requireEnum(allowedValues, value, code) {

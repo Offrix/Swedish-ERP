@@ -24,16 +24,31 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     "time_only",
     "milestone_only",
     "retainer_capacity",
+    "fixed_scope",
     "subscription_service",
-    "service_order",
-    "work_order",
-    "construction_stage",
     "internal_delivery"
   ]) {
     assert.equal(
       projectsPlatform.projectWorkModelCodes.includes(requiredWorkModelCode),
       true,
       `${requiredWorkModelCode} should be supported by the general project-commercial core`
+    );
+  }
+  for (const verticalWorkModelCode of [
+    "field_service_optional",
+    "service_order",
+    "work_order",
+    "construction_stage"
+  ]) {
+    assert.equal(
+      projectsPlatform.projectWorkModelCodes.includes(verticalWorkModelCode),
+      false,
+      `${verticalWorkModelCode} should not leak into the general project-commercial core catalog`
+    );
+    assert.equal(
+      projectsPlatform.projectVerticalWorkModelCodes.includes(verticalWorkModelCode),
+      true,
+      `${verticalWorkModelCode} should be isolated as a vertical work model`
     );
   }
 
@@ -44,16 +59,62 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
   });
   assert.equal(initialWorkspace.warningCodes.includes("engagement_missing"), true);
   assert.equal(initialWorkspace.warningCodes.includes("work_model_missing"), true);
+  assert.equal(initialWorkspace.warningCodes.includes("agreement_missing"), true);
   assert.equal(initialWorkspace.warningCodes.includes("approved_revenue_plan_missing"), true);
+  assert.equal(
+    initialWorkspace.complianceIndicatorStrip.some(
+      (indicator) => indicator.indicatorCode === "commercial_agreement" && indicator.status === "warning" && indicator.count === 0
+    ),
+    true
+  );
+
+  const blockedProfitabilitySnapshot = projectsPlatform.materializeProjectProfitabilitySnapshot({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    cutoffDate: "2026-04-30",
+    actorId: "unit-test"
+  });
+  assert.deepEqual(
+    blockedProfitabilitySnapshot.blockerRefs,
+    ["agreement_missing", "approved_revenue_plan_missing"]
+  );
+
+  const agreement = projectsPlatform.createProjectAgreement({
+    companyId: COMPANY_ID,
+    projectId: project.projectId,
+    title: "Phase 14 signed commercial agreement",
+    signedOn: "2026-04-01",
+    effectiveFrom: "2026-04-01",
+    actorId: "unit-test"
+  });
+  assert.equal(agreement.status, "signed");
 
   const engagement = projectsPlatform.createProjectEngagement({
     companyId: COMPANY_ID,
     projectId: project.projectId,
     displayName: "Consulting engagement",
+    projectAgreementId: agreement.projectAgreementId,
     workModelCode: "time_only",
     startsOn: "2026-04-01",
     actorId: "unit-test"
   });
+  assert.equal(engagement.projectAgreementId, agreement.projectAgreementId);
+
+  assert.throws(
+    () =>
+      projectsPlatform.createProjectWorkModel({
+        companyId: COMPANY_ID,
+        projectId: project.projectId,
+        projectEngagementId: engagement.projectEngagementId,
+        modelCode: "service_order",
+        title: "Invalid vertical leakage",
+        actorId: "unit-test"
+      }),
+    (error) => {
+      assert.equal(error?.error, "project_vertical_work_model_requires_vertical_pack");
+      return true;
+    }
+  );
 
   const workModel = projectsPlatform.createProjectWorkModel({
     companyId: COMPANY_ID,
@@ -133,7 +194,9 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     cutoffDate: "2026-04-30",
     actorId: "unit-test"
   });
+  assert.deepEqual(profitabilitySnapshot.blockerRefs, []);
   assert.equal(profitabilitySnapshot.approvedRevenuePlanId, approvedRevenuePlan.projectRevenuePlanId);
+  assert.equal(profitabilitySnapshot.projectAgreementId, agreement.projectAgreementId);
   assert.equal(profitabilitySnapshot.workPackageCount, 1);
   assert.equal(profitabilitySnapshot.deliveryMilestoneCount, 1);
 
@@ -142,14 +205,20 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     projectId: project.projectId,
     cutoffDate: "2026-04-30"
   });
+  assert.equal(workspace.agreementCount, 1);
+  assert.equal(workspace.signedAgreementCount, 1);
   assert.equal(workspace.projectEngagements.length, 1);
   assert.equal(workspace.projectWorkModels.length, 1);
   assert.equal(workspace.projectWorkPackages.length, 1);
   assert.equal(workspace.projectDeliveryMilestones.length, 1);
   assert.equal(workspace.projectRevenuePlans.length, 1);
+  assert.equal(workspace.currentProjectAgreementId, agreement.projectAgreementId);
+  assert.equal(workspace.currentProjectAgreement.projectAgreementId, agreement.projectAgreementId);
   assert.equal(workspace.currentProfitabilitySnapshotId, profitabilitySnapshot.projectProfitabilitySnapshotId);
   assert.equal(workspace.warningCodes.includes("engagement_missing"), false);
   assert.equal(workspace.warningCodes.includes("work_model_missing"), false);
+  assert.equal(workspace.warningCodes.includes("agreement_missing"), false);
+  assert.equal(workspace.warningCodes.includes("engagement_agreement_missing"), false);
   assert.equal(workspace.warningCodes.includes("approved_revenue_plan_missing"), false);
   assert.equal(
     workspace.complianceIndicatorStrip.some(
@@ -157,6 +226,18 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     ),
     true
   );
+  assert.equal(
+    workspace.complianceIndicatorStrip.some(
+      (indicator) => indicator.indicatorCode === "commercial_agreement" && indicator.status === "ok" && indicator.count === 1
+    ),
+    true
+  );
+  assert.deepEqual(workspace.verticalIsolationSummary, {
+    financeTruthOwner: "projects",
+    generalWorkModelCount: 1,
+    verticalWorkModelCount: 0,
+    verticalPackCodes: []
+  });
 
   const evidenceBundle = projectsPlatform.exportProjectEvidenceBundle({
     companyId: COMPANY_ID,
@@ -164,6 +245,8 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     cutoffDate: "2026-04-30",
     actorId: "unit-test"
   });
+  assert.equal(evidenceBundle.projectAgreements.length, 1);
+  assert.equal(evidenceBundle.currentProjectAgreement.projectAgreementId, agreement.projectAgreementId);
   assert.equal(evidenceBundle.projectEngagements.length, 1);
   assert.equal(evidenceBundle.projectWorkModels.length, 1);
   assert.equal(evidenceBundle.projectWorkPackages.length, 1);
@@ -181,6 +264,7 @@ test("Phase 14.1 project commercial core materializes engagement, revenue plan a
     })
     .map((event) => event.action);
   for (const requiredAction of [
+    "project.agreement.created",
     "project.engagement.created",
     "project.work_model.created",
     "project.work_package.created",

@@ -32,6 +32,7 @@ test("Phase 14.2 API converts accepted quote into canonical project handoff obje
       "/v1/projects/quote-handoffs",
       "/v1/projects/:projectId/opportunity-links",
       "/v1/projects/:projectId/quote-links",
+      "/v1/projects/:projectId/agreements",
       "/v1/projects/:projectId/billing-plans",
       "/v1/projects/:projectId/status-updates"
     ]) {
@@ -140,7 +141,11 @@ test("Phase 14.2 API converts accepted quote into canonical project handoff obje
 
     assert.equal(handoff.project.projectCode, "P-API-142");
     assert.equal(handoff.quoteLink.sourceQuoteId, quote.quoteId);
+    assert.equal(handoff.agreement.projectQuoteLinkId, handoff.quoteLink.projectQuoteLinkId);
+    assert.equal(handoff.agreement.customerId, customer.customerId);
     assert.equal(handoff.opportunityLink.externalOpportunityId, "deal-api-142");
+    assert.equal(handoff.engagement.projectAgreementId, handoff.agreement.projectAgreementId);
+    assert.equal(handoff.workModel.operationalPackCode, "field_service");
     assert.equal(handoff.billingPlan.status, "active");
     assert.equal(handoff.statusUpdate.healthCode, "green");
 
@@ -152,6 +157,11 @@ test("Phase 14.2 API converts accepted quote into canonical project handoff obje
     const quoteLinks = await requestJson(
       baseUrl,
       `/v1/projects/${handoff.project.projectId}/quote-links?companyId=${COMPANY_ID}`,
+      { token: sessionToken }
+    );
+    const agreements = await requestJson(
+      baseUrl,
+      `/v1/projects/${handoff.project.projectId}/agreements?companyId=${COMPANY_ID}`,
       { token: sessionToken }
     );
     const billingPlans = await requestJson(
@@ -172,14 +182,24 @@ test("Phase 14.2 API converts accepted quote into canonical project handoff obje
 
     assert.equal(opportunityLinks.items.length, 1);
     assert.equal(quoteLinks.items.length, 1);
+    assert.equal(agreements.items.length, 1);
     assert.equal(billingPlans.items.length, 1);
     assert.equal(statusUpdates.items.length, 1);
     assert.equal(workspace.opportunityLinkCount, 1);
     assert.equal(workspace.quoteLinkCount, 1);
+    assert.equal(workspace.agreementCount, 1);
+    assert.equal(workspace.signedAgreementCount, 1);
     assert.equal(workspace.billingPlanCount, 1);
+    assert.equal(workspace.currentProjectAgreementId, handoff.agreement.projectAgreementId);
     assert.equal(workspace.customerContext.customerId, customer.customerId);
     assert.equal(workspace.customerContext.activeQuoteRef, quote.quoteNo);
     assert.equal(workspace.currentBillingPlan.status, "active");
+    assert.deepEqual(workspace.verticalIsolationSummary, {
+      financeTruthOwner: "projects",
+      generalWorkModelCount: 0,
+      verticalWorkModelCount: 1,
+      verticalPackCodes: ["field_service"]
+    });
   } finally {
     await stopServer(server);
   }

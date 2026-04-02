@@ -34,8 +34,12 @@ test("Phase 14.2 accepted quote handoff creates canonical project links, plans a
   assert.equal(converted.project.customerId, quote.customerId);
   assert.equal(converted.opportunityLink.externalSystemCode, "HUBSPOT");
   assert.equal(converted.quoteLink.sourceQuoteId, quote.quoteId);
+  assert.equal(converted.agreement.projectQuoteLinkId, converted.quoteLink.projectQuoteLinkId);
+  assert.equal(converted.agreement.customerId, quote.customerId);
   assert.equal(converted.engagement.externalQuoteRef, quote.quoteNo);
+  assert.equal(converted.engagement.projectAgreementId, converted.agreement.projectAgreementId);
   assert.equal(converted.workModel.modelCode, "service_order");
+  assert.equal(converted.workModel.operationalPackCode, "field_service");
   assert.equal(converted.workModel.requiresWorkOrders, true);
   assert.equal(converted.revenuePlan.status, "approved");
   assert.equal(converted.billingPlan.status, "active");
@@ -48,13 +52,22 @@ test("Phase 14.2 accepted quote handoff creates canonical project links, plans a
   });
   assert.equal(workspace.opportunityLinkCount, 1);
   assert.equal(workspace.quoteLinkCount, 1);
+  assert.equal(workspace.agreementCount, 1);
+  assert.equal(workspace.signedAgreementCount, 1);
   assert.equal(workspace.billingPlanCount, 1);
   assert.equal(workspace.engagementCount, 1);
+  assert.equal(workspace.currentProjectAgreementId, converted.agreement.projectAgreementId);
   assert.equal(workspace.customerContext.customerId, quote.customerId);
   assert.equal(workspace.customerContext.activeQuoteRef, quote.quoteNo);
   assert.equal(workspace.currentBillingPlan.status, "active");
   assert.equal(workspace.projectBillingPlans[0].frequencyCode, "MONTHLY");
   assert.equal(workspace.projectStatusUpdates.length, 1);
+  assert.deepEqual(workspace.verticalIsolationSummary, {
+    financeTruthOwner: "projects",
+    generalWorkModelCount: 0,
+    verticalWorkModelCount: 1,
+    verticalPackCodes: ["field_service"]
+  });
 
   const evidenceBundle = projectsPlatform.exportProjectEvidenceBundle({
     companyId: COMPANY_ID,
@@ -64,6 +77,7 @@ test("Phase 14.2 accepted quote handoff creates canonical project links, plans a
   });
   assert.equal(evidenceBundle.projectOpportunityLinks.length, 1);
   assert.equal(evidenceBundle.projectQuoteLinks.length, 1);
+  assert.equal(evidenceBundle.projectAgreements.length, 1);
   assert.equal(evidenceBundle.projectBillingPlans.length, 1);
   assert.equal(evidenceBundle.projectStatusUpdates.length, 1);
 
@@ -76,6 +90,7 @@ test("Phase 14.2 accepted quote handoff creates canonical project links, plans a
   for (const requiredAction of [
     "project.opportunity_link.created",
     "project.quote_link.created",
+    "project.agreement.created",
     "project.engagement.created",
     "project.billing_plan.created",
     "project.status_update.created",

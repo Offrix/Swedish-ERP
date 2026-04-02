@@ -9,17 +9,18 @@ export type ProjectBillingModelCode =
   | "hybrid_change_order";
 export type ProjectRevenueRecognitionModelCode = "billing_equals_revenue" | "over_time" | "deferred_until_milestone";
 export type ProjectEngagementStatus = "draft" | "active" | "paused" | "closed" | "cancelled";
-export type ProjectWorkModelCode =
+export type ProjectGeneralWorkModelCode =
   | "time_only"
   | "milestone_only"
   | "retainer_capacity"
   | "fixed_scope"
   | "subscription_service"
-  | "field_service_optional"
-  | "service_order"
-  | "work_order"
-  | "construction_stage"
   | "internal_delivery";
+export type ProjectVerticalWorkModelCode = "field_service_optional" | "service_order" | "work_order" | "construction_stage";
+export type ProjectWorkModelCode =
+  | ProjectGeneralWorkModelCode
+  | ProjectVerticalWorkModelCode;
+export type ProjectAgreementStatus = "draft" | "signed" | "superseded" | "terminated";
 export type ProjectWorkPackageStatus = "draft" | "active" | "completed" | "cancelled";
 export type ProjectDeliveryMilestoneStatus = "planned" | "ready" | "achieved" | "accepted" | "cancelled";
 export type ProjectWorkLogStatus = "recorded" | "approved" | "rejected";
@@ -73,6 +74,7 @@ export interface ProjectEngagementRef {
   readonly projectEngagementId: string;
   readonly companyId: string;
   readonly projectId: string;
+  readonly projectAgreementId: string | null;
   readonly engagementCode: string;
   readonly displayName: string;
   readonly customerId: string | null;
@@ -116,6 +118,32 @@ export interface ProjectQuoteLinkRef {
   readonly externalQuoteRef: string | null;
   readonly totalAmount: number | null;
   readonly currencyCode: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectAgreementRef {
+  readonly projectAgreementId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly projectQuoteLinkId: string | null;
+  readonly agreementNo: string;
+  readonly title: string;
+  readonly customerId: string | null;
+  readonly status: ProjectAgreementStatus;
+  readonly commercialModelCode: string;
+  readonly billingModelCode: ProjectBillingModelCode | null;
+  readonly revenueRecognitionModelCode: ProjectRevenueRecognitionModelCode | null;
+  readonly signedOn: string | null;
+  readonly effectiveFrom: string;
+  readonly effectiveTo: string | null;
+  readonly contractValueAmount: number;
+  readonly currencyCode: string;
+  readonly sourceQuoteId: string | null;
+  readonly sourceQuoteVersionId: string | null;
+  readonly sourceAgreementRef: string | null;
+  readonly evidenceRef: string | null;
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -318,12 +346,15 @@ export interface ProjectProfitabilitySnapshotRef {
   readonly projectId: string;
   readonly cutoffDate: string;
   readonly reportingPeriod: string;
+  readonly projectAgreementId: string | null;
+  readonly commercialModelCode: string;
   readonly plannedRevenueAmount: number;
   readonly billedRevenueAmount: number;
   readonly recognizedRevenueAmount: number;
   readonly actualCostAmount: number;
   readonly currentMarginAmount: number;
   readonly forecastMarginAmount: number;
+  readonly blockerRefs: readonly string[];
   readonly workPackageCount: number;
   readonly deliveryMilestoneCount: number;
   readonly openDeviationCount: number;
