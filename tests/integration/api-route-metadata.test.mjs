@@ -242,6 +242,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
   "/v1/projects/:projectId/invoice-readiness-assessments",
   "/v1/projects/:projectId/invoice-simulations",
+  "/v1/projects/:projectId/profitability-mission-control-snapshots",
   "/v1/projects/:projectId/profitability-snapshots",
   "/v1/projects/:projectId/wip-ledger-bridges",
   "/v1/projects/portfolio/nodes",
@@ -497,6 +498,19 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectWipLedgerBridgePostContract.requiredActionClass, "project_wip_ledger_bridge_post");
     assert.equal(projectWipLedgerBridgePostContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectWipLedgerBridgePostContract.requiredScopeType, "project");
+
+    const projectProfitabilityMissionControlContract = payload.routeContracts.find(
+      (routeContract) =>
+        routeContract.method === "POST"
+        && routeContract.path === "/v1/projects/:projectId/profitability-mission-control-snapshots"
+    );
+    assert.ok(projectProfitabilityMissionControlContract);
+    assert.equal(
+      projectProfitabilityMissionControlContract.requiredActionClass,
+      "project_profitability_mission_control_materialize"
+    );
+    assert.equal(projectProfitabilityMissionControlContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectProfitabilityMissionControlContract.requiredScopeType, "project");
 
     const closeRelockContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/close/reopen-requests/:reopenRequestId/relock"

@@ -402,6 +402,73 @@ export interface ProjectProfitabilitySnapshotRef {
   readonly createdAt: string;
 }
 
+export interface ProjectProfitabilityMissionControlSnapshotRef {
+  readonly projectProfitabilityMissionControlSnapshotId: string;
+  readonly companyId: string;
+  readonly projectId: string;
+  readonly cutoffDate: string;
+  readonly reportingPeriod: string;
+  readonly billingModelCode: ProjectBillingModelCode | null;
+  readonly revenueRecognitionModelCode: ProjectRevenueRecognitionModelCode | null;
+  readonly projectAgreementId: string | null;
+  readonly approvedRevenuePlanId: string | null;
+  readonly activeBillingPlanId: string | null;
+  readonly projectCostSnapshotId: string;
+  readonly projectWipSnapshotId: string;
+  readonly projectForecastSnapshotId: string;
+  readonly projectProfitabilitySnapshotId: string;
+  readonly projectInvoiceReadinessAssessmentId: string;
+  readonly projectStatusUpdateId: string | null;
+  readonly healthCode: ProjectStatusUpdateHealthCode;
+  readonly atRiskFlag: boolean;
+  readonly atRiskReason: string | null;
+  readonly blockerCodes: readonly string[];
+  readonly reviewCodes: readonly string[];
+  readonly attentionCodes: readonly string[];
+  readonly revenueSummary: {
+    readonly plannedRevenueAmount: number;
+    readonly approvedValueAmount: number;
+    readonly eligibleBillingPlanAmount: number;
+    readonly invoiceReadyAmount: number;
+    readonly unbilledApprovedValueAmount: number;
+    readonly billedRevenueAmount: number;
+    readonly recognizedRevenueAmount: number;
+    readonly wipAmount: number;
+    readonly deferredRevenueAmount: number;
+    readonly currentMarginAmount: number;
+    readonly forecastMarginAmount: number;
+  };
+  readonly sourceAmountSummary: {
+    readonly arBilledRevenueAmount: number;
+    readonly payrollAmount: number;
+    readonly travelAmount: number;
+    readonly materialAmount: number;
+    readonly subcontractorAmount: number;
+    readonly equipmentAmount: number;
+    readonly overheadAmount: number;
+    readonly otherAmount: number;
+    readonly manualRevenueAdjustmentAmount: number;
+    readonly manualCostAdjustmentAmount: number;
+    readonly marginAdjustmentAmount: number;
+    readonly husAdjustmentAmount: number;
+  };
+  readonly costBreakdown: ProjectCostSnapshotRef["costBreakdown"];
+  readonly sourceCounts: ProjectCostSnapshotRef["sourceCounts"];
+  readonly riskSummary: {
+    readonly blockerCount: number;
+    readonly openRiskCount: number;
+    readonly highRiskCount: number;
+    readonly criticalRiskCount: number;
+    readonly overdueRiskCount: number;
+    readonly uncoveredAssignmentMinutes: number;
+    readonly unusedReservedMinutes: number;
+    readonly resourceLoadPercent: number;
+  };
+  readonly snapshotHash: string;
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+}
+
 export interface ProjectBudgetLineRef {
   readonly projectBudgetLineId: string;
   readonly lineKind: ProjectBudgetLineKind;

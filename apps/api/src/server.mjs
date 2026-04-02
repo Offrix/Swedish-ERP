@@ -908,6 +908,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/projects/:projectId/profitability-adjustments/:projectProfitabilityAdjustmentId/decide",
               "/v1/projects/:projectId/invoice-readiness-assessments",
               "/v1/projects/:projectId/invoice-simulations",
+              "/v1/projects/:projectId/profitability-mission-control-snapshots",
               "/v1/projects/:projectId/profitability-snapshots",
               "/v1/projects/portfolio/nodes",
               "/v1/projects/portfolio/summary",
@@ -14723,6 +14724,60 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       platform.materializeProjectProfitabilitySnapshot({
         companyId,
         projectId: projectProfitabilitySnapshotsMatch.projectId,
+        cutoffDate: body.cutoffDate,
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
+      })
+    );
+    return;
+  }
+
+  const projectProfitabilityMissionControlSnapshotsMatch = matchPath(
+    path,
+    "/v1/projects/:projectId/profitability-mission-control-snapshots"
+  );
+  if (projectProfitabilityMissionControlSnapshotsMatch && req.method === "GET") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_profitability_mission_control_snapshot",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectProfitabilityMissionControlSnapshots({
+        companyId,
+        projectId: projectProfitabilityMissionControlSnapshotsMatch.projectId,
+        reportingPeriod: url.searchParams.get("reportingPeriod")
+      })
+    });
+    return;
+  }
+
+  if (projectProfitabilityMissionControlSnapshotsMatch && req.method === "POST") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_profitability_mission_control_snapshot",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.materializeProjectProfitabilityMissionControlSnapshot({
+        companyId,
+        projectId: projectProfitabilityMissionControlSnapshotsMatch.projectId,
         cutoffDate: body.cutoffDate,
         actorId: principal.userId,
         correlationId: body.correlationId || createCorrelationId()

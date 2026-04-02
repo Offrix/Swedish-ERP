@@ -292,6 +292,8 @@ export function createProjectEngine({
     projectRevenueRecognitionPlanIdsByProject: new Map(),
     projectProfitabilitySnapshots: new Map(),
     projectProfitabilitySnapshotIdsByProject: new Map(),
+    projectProfitabilityMissionControlSnapshots: new Map(),
+    projectProfitabilityMissionControlSnapshotIdsByProject: new Map(),
     budgetVersions: new Map(),
     budgetVersionIdsByProject: new Map(),
     resourceAllocations: new Map(),
@@ -410,6 +412,8 @@ export function createProjectEngine({
     convertQuoteToProject,
     listProjectProfitabilitySnapshots,
     materializeProjectProfitabilitySnapshot,
+    listProjectProfitabilityMissionControlSnapshots,
+    materializeProjectProfitabilityMissionControlSnapshot,
     listProjectBudgetVersions,
     createProjectBudgetVersion,
     listProjectResourceAllocations,
@@ -482,6 +486,14 @@ export function createProjectEngine({
     );
     const currentProfitabilitySnapshot = selectWorkspaceSnapshot(
       listProjectProfitabilitySnapshots({ companyId: project.companyId, projectId: project.projectId }),
+      cutoffDate
+    );
+    const profitabilityMissionControlSnapshots = listProjectProfitabilityMissionControlSnapshots({
+      companyId: project.companyId,
+      projectId: project.projectId
+    });
+    const currentProfitabilityMissionControlSnapshot = selectWorkspaceSnapshot(
+      profitabilityMissionControlSnapshots,
       cutoffDate
     );
     const engagements = listProjectEngagements({ companyId: project.companyId, projectId: project.projectId });
@@ -635,6 +647,9 @@ export function createProjectEngine({
     if (project.status === "active" && project.revenueRecognitionModelCode && !currentProjectRevenueRecognitionPlan) {
       warningCodes.push("revenue_recognition_plan_missing");
     }
+    if (currentProfitabilitySnapshot && !currentProfitabilityMissionControlSnapshot) {
+      warningCodes.push("profitability_mission_control_missing");
+    }
     if (currentWipSnapshot && !currentProjectWipLedgerBridge) {
       warningCodes.push("wip_ledger_bridge_missing");
     }
@@ -682,6 +697,8 @@ export function createProjectEngine({
       currentWipSnapshotId: currentWipSnapshot?.projectWipSnapshotId || null,
       currentForecastSnapshotId: currentForecastSnapshot?.projectForecastSnapshotId || null,
       currentProfitabilitySnapshotId: currentProfitabilitySnapshot?.projectProfitabilitySnapshotId || null,
+      currentProjectProfitabilityMissionControlSnapshotId:
+        currentProfitabilityMissionControlSnapshot?.projectProfitabilityMissionControlSnapshotId || null,
       currentProjectAgreementId: currentProjectAgreement?.projectAgreementId || null,
       currentProjectRevenueRecognitionPlanId: currentProjectRevenueRecognitionPlan?.projectRevenueRecognitionPlanId || null,
       currentBillingPlanId: currentBillingPlan?.projectBillingPlanId || null,
@@ -696,6 +713,7 @@ export function createProjectEngine({
       revenueRecognitionPlanCount: revenueRecognitionPlans.length,
       billingPlanCount: billingPlans.length,
       profitabilityAdjustmentCount: profitabilityAdjustments.length,
+      profitabilityMissionControlSnapshotCount: profitabilityMissionControlSnapshots.length,
       invoiceReadinessAssessmentCount: invoiceReadinessAssessments.length,
       capacityReservationCount: capacityReservations.length,
       assignmentPlanCount: assignmentPlans.length,
@@ -737,6 +755,7 @@ export function createProjectEngine({
       currentWipSnapshot: currentWipSnapshot ? copy(currentWipSnapshot) : null,
       currentForecastSnapshot: currentForecastSnapshot ? copy(currentForecastSnapshot) : null,
       currentProfitabilitySnapshot: currentProfitabilitySnapshot ? copy(currentProfitabilitySnapshot) : null,
+      currentProjectProfitabilityMissionControlSnapshot: currentProfitabilityMissionControlSnapshot ? copy(currentProfitabilityMissionControlSnapshot) : null,
       currentProjectAgreement: currentProjectAgreement ? copy(currentProjectAgreement) : null,
       currentProjectRevenueRecognitionPlan: currentProjectRevenueRecognitionPlan ? copy(currentProjectRevenueRecognitionPlan) : null,
       currentBillingPlan: currentBillingPlan ? copy(currentBillingPlan) : null,
@@ -759,6 +778,7 @@ export function createProjectEngine({
       projectAssignmentPlans: assignmentPlans.map(copy),
       projectRisks: projectRisks.map(copy),
       projectProfitabilityAdjustments: profitabilityAdjustments.map(copy),
+      projectProfitabilityMissionControlSnapshots: profitabilityMissionControlSnapshots.map(copy),
       projectInvoiceReadinessAssessments: invoiceReadinessAssessments.map(copy),
       projectWipLedgerBridges: projectWipLedgerBridges.map(copy),
       projectTrialScenarioRuns: projectTrialScenarioRuns.map(copy),
@@ -3080,6 +3100,288 @@ export function createProjectEngine({
     return copy(record);
   }
 
+  function listProjectProfitabilityMissionControlSnapshots({ companyId, projectId, reportingPeriod = null } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedReportingPeriod = normalizeOptionalText(reportingPeriod);
+    return (state.projectProfitabilityMissionControlSnapshotIdsByProject.get(project.projectId) || [])
+      .map((snapshotId) => state.projectProfitabilityMissionControlSnapshots.get(snapshotId))
+      .filter(Boolean)
+      .filter((record) => (resolvedReportingPeriod ? record.reportingPeriod === resolvedReportingPeriod : true))
+      .sort((left, right) => left.cutoffDate.localeCompare(right.cutoffDate) || left.createdAt.localeCompare(right.createdAt))
+      .map(copy);
+  }
+
+  function materializeProjectProfitabilityMissionControlSnapshot({
+    companyId,
+    projectId,
+    cutoffDate,
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const project = requireProject(state, companyId, projectId);
+    const resolvedCutoffDate = normalizeRequiredDate(cutoffDate, "project_profitability_mission_control_cutoff_date_required");
+    const model = buildProjectMetricsModel({
+      state,
+      project,
+      cutoffDate: resolvedCutoffDate,
+      arPlatform,
+      apPlatform,
+      hrPlatform,
+      timePlatform,
+      payrollPlatform,
+      husPlatform: resolvePlatform(getHusPlatform, husPlatform)
+    });
+    const costSnapshot = materializeProjectCostSnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const wipSnapshot = materializeProjectWipSnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const forecastSnapshot = materializeProjectForecastSnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const profitabilitySnapshot = materializeProjectProfitabilitySnapshot({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const invoiceReadinessAssessment = materializeProjectInvoiceReadinessAssessment({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      actorId,
+      correlationId
+    });
+    const currentStatusUpdate = selectWorkspaceSnapshot(
+      listProjectStatusUpdates({ companyId: project.companyId, projectId: project.projectId }),
+      resolvedCutoffDate,
+      "statusDate"
+    );
+    const openProjectRisks = listProjectRisks({ companyId: project.companyId, projectId: project.projectId }).filter(
+      (risk) => risk.status !== "closed"
+    );
+    const resourceCapacitySummary = buildProjectResourceCapacitySummary({
+      currentCostSnapshot: costSnapshot,
+      capacityReservations: listProjectCapacityReservations({ companyId: project.companyId, projectId: project.projectId }),
+      assignmentPlans: listProjectAssignmentPlans({ companyId: project.companyId, projectId: project.projectId }),
+      resourceAllocations: listProjectResourceAllocations({ companyId: project.companyId, projectId: project.projectId })
+    });
+    const currentPortfolioNode = buildProjectPortfolioNode({
+      state,
+      companyId: project.companyId,
+      project,
+      cutoffDate: resolvedCutoffDate,
+      currentCostSnapshot: costSnapshot,
+      currentForecastSnapshot: forecastSnapshot,
+      currentProfitabilitySnapshot: profitabilitySnapshot,
+      currentInvoiceReadinessAssessment: invoiceReadinessAssessment,
+      currentStatusUpdate,
+      openProjectRisks,
+      resourceCapacitySummary
+    });
+    const currentProjectAgreement = selectCurrentProjectAgreement({
+      agreements: listProjectAgreements({ companyId: project.companyId, projectId: project.projectId }).filter((record) => record.status === "signed"),
+      cutoffDate: resolvedCutoffDate
+    });
+    const approvedRevenuePlan = listProjectRevenuePlans({
+      companyId: project.companyId,
+      projectId: project.projectId,
+      status: "approved"
+    }).pop() || null;
+    const activeBillingPlan = listProjectBillingPlans({
+      companyId: project.companyId,
+      projectId: project.projectId
+    }).filter((record) => record.status === "active").pop() || null;
+    const blockerCodes = uniqueTexts(
+      [
+        ...(profitabilitySnapshot.blockerRefs || []),
+        ...(invoiceReadinessAssessment.blockerCodes || []),
+        ...(currentStatusUpdate?.blockerCodes || []),
+        resourceCapacitySummary.uncoveredAssignmentMinutes > 0 ? "capacity_assignment_gap" : null
+      ].filter(Boolean)
+    );
+    const reviewCodes = uniqueTexts(
+      [
+        ...(invoiceReadinessAssessment.reviewCodes || []),
+        ...(model.explanationCodes || []),
+        currentStatusUpdate?.healthCode === "red" ? "project_status_red" : null,
+        currentPortfolioNode.healthCode === "amber" ? "portfolio_health_amber" : null,
+        currentPortfolioNode.healthCode === "red" ? "portfolio_health_red" : null,
+        openProjectRisks.some((risk) => ["high", "critical"].includes(risk.severityCode)) ? "project_risk_attention_required" : null,
+        currentStatusUpdate?.atRiskReason ? "project_status_at_risk" : null
+      ].filter(Boolean)
+    );
+    const attentionCodes = uniqueTexts(
+      [
+        ...blockerCodes,
+        ...reviewCodes,
+        currentPortfolioNode.atRiskFlag ? "project_at_risk" : null
+      ].filter(Boolean)
+    );
+    const payrollAmount = roundMoney(
+      Number(model.costBreakdown.salaryAmount || 0) +
+      Number(model.costBreakdown.benefitAmount || 0) +
+      Number(model.costBreakdown.pensionAmount || 0) +
+      Number(model.costBreakdown.employerContributionAmount || 0)
+    );
+    const record = {
+      projectProfitabilityMissionControlSnapshotId: crypto.randomUUID(),
+      companyId: project.companyId,
+      projectId: project.projectId,
+      cutoffDate: resolvedCutoffDate,
+      reportingPeriod: model.reportingPeriod,
+      billingModelCode: project.billingModelCode,
+      revenueRecognitionModelCode: project.revenueRecognitionModelCode,
+      projectAgreementId: currentProjectAgreement?.projectAgreementId || null,
+      approvedRevenuePlanId: approvedRevenuePlan?.projectRevenuePlanId || null,
+      activeBillingPlanId: activeBillingPlan?.projectBillingPlanId || null,
+      projectCostSnapshotId: costSnapshot.projectCostSnapshotId,
+      projectWipSnapshotId: wipSnapshot.projectWipSnapshotId,
+      projectForecastSnapshotId: forecastSnapshot.projectForecastSnapshotId,
+      projectProfitabilitySnapshotId: profitabilitySnapshot.projectProfitabilitySnapshotId,
+      projectInvoiceReadinessAssessmentId: invoiceReadinessAssessment.projectInvoiceReadinessAssessmentId,
+      projectStatusUpdateId: currentStatusUpdate?.projectStatusUpdateId || null,
+      healthCode: currentPortfolioNode.healthCode,
+      atRiskFlag: currentPortfolioNode.atRiskFlag,
+      atRiskReason: currentStatusUpdate?.atRiskReason || null,
+      blockerCodes: Object.freeze(blockerCodes),
+      reviewCodes: Object.freeze(reviewCodes),
+      attentionCodes: Object.freeze(attentionCodes),
+      revenueSummary: {
+        plannedRevenueAmount: profitabilitySnapshot.plannedRevenueAmount,
+        approvedValueAmount: invoiceReadinessAssessment.approvedValueAmount,
+        eligibleBillingPlanAmount: invoiceReadinessAssessment.eligibleBillingPlanAmount,
+        invoiceReadyAmount: invoiceReadinessAssessment.invoiceReadyAmount,
+        unbilledApprovedValueAmount: invoiceReadinessAssessment.unbilledApprovedValueAmount,
+        billedRevenueAmount: profitabilitySnapshot.billedRevenueAmount,
+        recognizedRevenueAmount: profitabilitySnapshot.recognizedRevenueAmount,
+        wipAmount: wipSnapshot.wipAmount,
+        deferredRevenueAmount: wipSnapshot.deferredRevenueAmount,
+        currentMarginAmount: profitabilitySnapshot.currentMarginAmount,
+        forecastMarginAmount: profitabilitySnapshot.forecastMarginAmount
+      },
+      sourceAmountSummary: {
+        arBilledRevenueAmount: model.billedRevenueAmount,
+        payrollAmount,
+        travelAmount: model.costBreakdown.travelAmount,
+        materialAmount: model.costBreakdown.materialAmount,
+        subcontractorAmount: model.costBreakdown.subcontractorAmount,
+        equipmentAmount: model.costBreakdown.equipmentAmount,
+        overheadAmount: model.costBreakdown.overheadAmount,
+        otherAmount: model.costBreakdown.otherAmount,
+        manualRevenueAdjustmentAmount: model.manualRevenueAdjustmentAmount,
+        manualCostAdjustmentAmount: model.manualCostAdjustmentAmount,
+        marginAdjustmentAmount: model.marginAdjustmentAmount,
+        husAdjustmentAmount: model.husAdjustmentAmount
+      },
+      costBreakdown: copy(model.costBreakdown),
+      sourceCounts: copy(model.sourceCounts),
+      riskSummary: {
+        blockerCount: currentPortfolioNode.blockerCount,
+        openRiskCount: currentPortfolioNode.openRiskCount,
+        highRiskCount: currentPortfolioNode.highRiskCount,
+        criticalRiskCount: currentPortfolioNode.criticalRiskCount,
+        overdueRiskCount: currentPortfolioNode.overdueRiskCount,
+        uncoveredAssignmentMinutes: currentPortfolioNode.uncoveredAssignmentMinutes,
+        unusedReservedMinutes: currentPortfolioNode.unusedReservedMinutes,
+        resourceLoadPercent: currentPortfolioNode.resourceLoadPercent
+      },
+      snapshotHash: hashObject({
+        projectId: project.projectId,
+        cutoffDate: resolvedCutoffDate,
+        projectCostSnapshotId: costSnapshot.projectCostSnapshotId,
+        projectWipSnapshotId: wipSnapshot.projectWipSnapshotId,
+        projectForecastSnapshotId: forecastSnapshot.projectForecastSnapshotId,
+        projectProfitabilitySnapshotId: profitabilitySnapshot.projectProfitabilitySnapshotId,
+        projectInvoiceReadinessAssessmentId: invoiceReadinessAssessment.projectInvoiceReadinessAssessmentId,
+        projectStatusUpdateId: currentStatusUpdate?.projectStatusUpdateId || null,
+        blockerCodes,
+        reviewCodes,
+        attentionCodes,
+        healthCode: currentPortfolioNode.healthCode,
+        atRiskFlag: currentPortfolioNode.atRiskFlag,
+        revenueSummary: {
+          plannedRevenueAmount: profitabilitySnapshot.plannedRevenueAmount,
+          approvedValueAmount: invoiceReadinessAssessment.approvedValueAmount,
+          invoiceReadyAmount: invoiceReadinessAssessment.invoiceReadyAmount,
+          billedRevenueAmount: profitabilitySnapshot.billedRevenueAmount,
+          recognizedRevenueAmount: profitabilitySnapshot.recognizedRevenueAmount,
+          wipAmount: wipSnapshot.wipAmount,
+          deferredRevenueAmount: wipSnapshot.deferredRevenueAmount,
+          currentMarginAmount: profitabilitySnapshot.currentMarginAmount,
+          forecastMarginAmount: profitabilitySnapshot.forecastMarginAmount
+        },
+        sourceAmountSummary: {
+          payrollAmount,
+          travelAmount: model.costBreakdown.travelAmount,
+          materialAmount: model.costBreakdown.materialAmount,
+          subcontractorAmount: model.costBreakdown.subcontractorAmount,
+          equipmentAmount: model.costBreakdown.equipmentAmount,
+          overheadAmount: model.costBreakdown.overheadAmount,
+          otherAmount: model.costBreakdown.otherAmount,
+          manualRevenueAdjustmentAmount: model.manualRevenueAdjustmentAmount,
+          manualCostAdjustmentAmount: model.manualCostAdjustmentAmount,
+          marginAdjustmentAmount: model.marginAdjustmentAmount,
+          husAdjustmentAmount: model.husAdjustmentAmount
+        },
+        sourceCounts: model.sourceCounts,
+        riskSummary: {
+          blockerCount: currentPortfolioNode.blockerCount,
+          openRiskCount: currentPortfolioNode.openRiskCount,
+          highRiskCount: currentPortfolioNode.highRiskCount,
+          criticalRiskCount: currentPortfolioNode.criticalRiskCount,
+          overdueRiskCount: currentPortfolioNode.overdueRiskCount,
+          uncoveredAssignmentMinutes: currentPortfolioNode.uncoveredAssignmentMinutes,
+          unusedReservedMinutes: currentPortfolioNode.unusedReservedMinutes,
+          resourceLoadPercent: currentPortfolioNode.resourceLoadPercent
+        }
+      }),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock)
+    };
+    const existing = listProjectProfitabilityMissionControlSnapshots({
+      companyId: project.companyId,
+      projectId: project.projectId
+    }).find((candidate) => candidate.snapshotHash === record.snapshotHash);
+    if (existing) {
+      return existing;
+    }
+    state.projectProfitabilityMissionControlSnapshots.set(
+      record.projectProfitabilityMissionControlSnapshotId,
+      record
+    );
+    appendToIndex(
+      state.projectProfitabilityMissionControlSnapshotIdsByProject,
+      project.projectId,
+      record.projectProfitabilityMissionControlSnapshotId
+    );
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.profitability_mission_control.materialized",
+      entityType: "project_profitability_mission_control_snapshot",
+      entityId: record.projectProfitabilityMissionControlSnapshotId,
+      projectId: record.projectId,
+      explanation: `Materialized profitability mission control snapshot for ${project.projectCode} at ${resolvedCutoffDate}.`
+    });
+    return copy(record);
+  }
+
   function listProjectBudgetVersions({ companyId, projectId } = {}) {
     const project = requireProject(state, companyId, projectId);
     return (state.budgetVersionIdsByProject.get(project.projectId) || [])
@@ -4578,11 +4880,13 @@ function exportProjectEvidenceBundle({
       projectProfitabilityAdjustments: copy(workspace.projectProfitabilityAdjustments || []),
       projectInvoiceReadinessAssessments: copy(workspace.projectInvoiceReadinessAssessments || []),
       projectWipLedgerBridges: copy(workspace.projectWipLedgerBridges || []),
+      projectProfitabilityMissionControlSnapshots: copy(workspace.projectProfitabilityMissionControlSnapshots || []),
       projectTrialScenarioRuns: copy(workspace.projectTrialScenarioRuns || []),
       projectImportBatches: copy(workspace.projectImportBatches || []),
       projectInvoiceSimulations: copy(workspace.projectInvoiceSimulations || []),
       projectLiveConversionPlans: copy(workspace.projectLiveConversionPlans || []),
       currentProfitabilitySnapshot: copy(workspace.currentProfitabilitySnapshot),
+      currentProjectProfitabilityMissionControlSnapshot: copy(workspace.currentProjectProfitabilityMissionControlSnapshot),
       currentProjectAgreement: copy(workspace.currentProjectAgreement),
       currentProjectRevenueRecognitionPlan: copy(workspace.currentProjectRevenueRecognitionPlan),
       currentBillingPlan: copy(workspace.currentBillingPlan),
@@ -4614,6 +4918,8 @@ function exportProjectEvidenceBundle({
         ,
         workspace.currentProjectRevenueRecognitionPlanId,
         workspace.currentProjectWipLedgerBridgeId
+        ,
+        workspace.currentProjectProfitabilityMissionControlSnapshotId
       ]
         .filter(Boolean)
         .join(":") || workspace.projectStatus,
@@ -4630,6 +4936,7 @@ function exportProjectEvidenceBundle({
           ["project_wip_snapshot", workspace.currentWipSnapshotId],
           ["project_forecast_snapshot", workspace.currentForecastSnapshotId],
           ["project_profitability_snapshot", workspace.currentProfitabilitySnapshotId],
+          ["project_profitability_mission_control_snapshot", workspace.currentProjectProfitabilityMissionControlSnapshotId],
           ["project_agreement", workspace.currentProjectAgreementId],
           ["project_revenue_recognition_plan", workspace.currentProjectRevenueRecognitionPlanId],
           ["project_billing_plan", workspace.currentBillingPlanId],
@@ -4726,6 +5033,10 @@ function exportProjectEvidenceBundle({
         (workspace.projectWipLedgerBridges || []).map((bridge) => ({
           objectType: "project_wip_ledger_bridge",
           objectId: bridge.projectWipLedgerBridgeId
+        })),
+        (workspace.projectProfitabilityMissionControlSnapshots || []).map((snapshot) => ({
+          objectType: "project_profitability_mission_control_snapshot",
+          objectId: snapshot.projectProfitabilityMissionControlSnapshotId
         })),
         (workspace.projectInvoiceSimulations || []).map((simulation) => ({
           objectType: "project_invoice_simulation",
