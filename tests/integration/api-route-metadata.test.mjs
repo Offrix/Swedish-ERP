@@ -219,6 +219,7 @@ const REQUIRED_ROUTE_METADATA = Object.freeze([
   "/v1/projects/trial-scenarios/:scenarioCode/materialize",
   "/v1/projects/import-batches",
   "/v1/projects/import-batches/:projectImportBatchId/commit",
+  "/v1/projects/vertical-pack-governance",
   "/v1/projects/:projectId/opportunity-links",
   "/v1/projects/:projectId/quote-links",
   "/v1/projects/:projectId/vertical-pack-links",
@@ -500,6 +501,14 @@ test("api root metadata lists critical auth, backoffice and migration routes wit
     assert.equal(projectVerticalPackLinkContract.requiredActionClass, "project_vertical_pack_link_create");
     assert.equal(projectVerticalPackLinkContract.requiredTrustLevel, "strong_mfa");
     assert.equal(projectVerticalPackLinkContract.requiredScopeType, "project");
+
+    const projectVerticalPackGovernanceContract = payload.routeContracts.find(
+      (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/vertical-pack-governance"
+    );
+    assert.ok(projectVerticalPackGovernanceContract);
+    assert.equal(projectVerticalPackGovernanceContract.requiredActionClass, "project_vertical_pack_governance_publish");
+    assert.equal(projectVerticalPackGovernanceContract.requiredTrustLevel, "strong_mfa");
+    assert.equal(projectVerticalPackGovernanceContract.requiredScopeType, "company");
 
     const projectWipLedgerBridgePostContract = payload.routeContracts.find(
       (routeContract) => routeContract.method === "POST" && routeContract.path === "/v1/projects/:projectId/wip-ledger-bridges"

@@ -889,6 +889,7 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
               "/v1/projects/import-batches",
               "/v1/projects/import-batches/:projectImportBatchId/commit",
               "/v1/projects",
+              "/v1/projects/vertical-pack-governance",
               "/v1/projects/:projectId",
               "/v1/projects/:projectId/opportunity-links",
               "/v1/projects/:projectId/quote-links",
@@ -13683,6 +13684,61 @@ async function handleRequest({ req, res, platform, flags, edgePolicy, edgeState 
       platform.getProjectPortfolioSummary({
         companyId,
         cutoffDate: url.searchParams.get("cutoffDate") || null
+      })
+    );
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/projects/vertical-pack-governance") {
+    const companyId = requireText(
+      url.searchParams.get("companyId"),
+      "company_id_required",
+      "companyId query parameter is required."
+    );
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req),
+      companyId,
+      permissionCode: "company.read",
+      objectType: "project_vertical_pack_governance_decision",
+      scopeCode: "project"
+    });
+    assertProjectWorkspaceReadAccess({ principal });
+    writeJson(res, 200, {
+      items: platform.listProjectVerticalPackGovernanceDecisions({
+        companyId,
+        packType: url.searchParams.get("packType") || null
+      })
+    });
+    return;
+  }
+
+  if (req.method === "POST" && path === "/v1/projects/vertical-pack-governance") {
+    const body = await readJsonBody(req);
+    const companyId = requireText(body.companyId, "company_id_required", "Company id is required.");
+    const principal = authorizeCompanyAccess({
+      platform,
+      sessionToken: readSessionToken(req, body),
+      companyId,
+      permissionCode: "company.manage",
+      objectType: "project_vertical_pack_governance_decision",
+      scopeCode: "project"
+    });
+    writeJson(
+      res,
+      201,
+      platform.publishProjectVerticalPackGovernanceDecision({
+        companyId,
+        projectVerticalPackGovernanceDecisionId: body.projectVerticalPackGovernanceDecisionId ?? null,
+        packType: body.packType,
+        status: body.status,
+        effectiveFrom: body.effectiveFrom ?? null,
+        sunsetAt: body.sunsetAt ?? null,
+        replacementPackType: body.replacementPackType ?? null,
+        reasonCode: body.reasonCode,
+        evidenceRefs: body.evidenceRefs || [],
+        actorId: principal.userId,
+        correlationId: body.correlationId || createCorrelationId()
       })
     );
     return;

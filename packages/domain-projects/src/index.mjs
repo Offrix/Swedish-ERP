@@ -207,6 +207,11 @@ export const PROJECT_VERTICAL_PACK_TYPES = Object.freeze([
   "personalliggare",
   "id06"
 ]);
+export const PROJECT_VERTICAL_PACK_GOVERNANCE_STATUSES = Object.freeze([
+  "enabled",
+  "deprecated",
+  "disabled"
+]);
 export const PROJECT_WORK_MODEL_CODES = Object.freeze([
   ...PROJECT_GENERAL_WORK_MODEL_CODES,
   ...PROJECT_VERTICAL_WORK_MODEL_CODES
@@ -304,6 +309,8 @@ export function createProjectEngine({
     projectVerticalPackLinks: new Map(),
     projectVerticalPackLinkIdsByProject: new Map(),
     projectVerticalPackLinkIdsByScopedKey: new Map(),
+    projectVerticalPackGovernanceDecisions: new Map(),
+    projectVerticalPackGovernanceDecisionIdsByCompany: new Map(),
     budgetVersions: new Map(),
     budgetVersionIdsByProject: new Map(),
     resourceAllocations: new Map(),
@@ -347,6 +354,7 @@ export function createProjectEngine({
     projectGeneralWorkModelCodes: PROJECT_GENERAL_WORK_MODEL_CODES,
     projectVerticalWorkModelCodes: PROJECT_VERTICAL_WORK_MODEL_CODES,
     projectVerticalPackTypes: PROJECT_VERTICAL_PACK_TYPES,
+    projectVerticalPackGovernanceStatuses: PROJECT_VERTICAL_PACK_GOVERNANCE_STATUSES,
     projectAllWorkModelCodes: PROJECT_WORK_MODEL_CODES,
     projectAgreementStatuses: PROJECT_AGREEMENT_STATUSES,
     projectWorkPackageStatuses: PROJECT_WORK_PACKAGE_STATUSES,
@@ -390,6 +398,9 @@ export function createProjectEngine({
     listProjectQuoteLinks,
     createProjectQuoteLink,
     listProjectVerticalPackLinks,
+    listProjectVerticalPackGovernanceDecisions,
+    getProjectVerticalPackOperationalStatus,
+    publishProjectVerticalPackGovernanceDecision,
     linkVerticalPack,
     listProjectAgreements,
     createProjectAgreement,
@@ -517,6 +528,11 @@ export function createProjectEngine({
     const opportunityLinks = listProjectOpportunityLinks({ companyId: project.companyId, projectId: project.projectId });
     const quoteLinks = listProjectQuoteLinks({ companyId: project.companyId, projectId: project.projectId });
     const projectVerticalPackLinks = listProjectVerticalPackLinks({ companyId: project.companyId, projectId: project.projectId });
+    const projectVerticalPackGovernanceSummary = buildProjectVerticalPackGovernanceSummary({
+      companyId: project.companyId,
+      projectVerticalPackLinks,
+      getProjectVerticalPackOperationalStatus
+    });
     const agreements = listProjectAgreements({ companyId: project.companyId, projectId: project.projectId });
     const signedAgreements = agreements.filter((record) => record.status === "signed");
     const revenueRecognitionPlans = listProjectRevenueRecognitionPlans({ companyId: project.companyId, projectId: project.projectId });
@@ -692,6 +708,12 @@ export function createProjectEngine({
     if (workModels.some((record) => record.requiresId06 === true) && !projectVerticalPackLinks.some((link) => link.packType === "id06")) {
       warningCodes.push("id06_pack_link_missing");
     }
+    if (projectVerticalPackGovernanceSummary.deprecatedPackTypes.length > 0) {
+      warningCodes.push("vertical_pack_deprecated");
+    }
+    if (projectVerticalPackGovernanceSummary.disabledPackTypes.length > 0) {
+      warningCodes.push("vertical_pack_disabled");
+    }
     if (id06Summary.attentionCount > 0) {
       warningCodes.push("id06_attention_required");
     }
@@ -781,6 +803,7 @@ export function createProjectEngine({
       husSummary,
       personalliggareSummary,
       id06Summary,
+      verticalPackGovernanceSummary: projectVerticalPackGovernanceSummary,
       egenkontrollSummary,
       kalkylSummary,
       customerContext,
@@ -832,6 +855,7 @@ export function createProjectEngine({
         husSummary,
         personalliggareSummary,
         id06Summary,
+        projectVerticalPackGovernanceSummary,
         egenkontrollSummary,
         kalkylSummary,
         openProjectDeviationCount: openProjectDeviations.length,
@@ -1617,6 +1641,131 @@ export function createProjectEngine({
       .map(copy);
   }
 
+  function listProjectVerticalPackGovernanceDecisions({ companyId, packType = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedPackType = normalizeProjectVerticalPackType(packType, "project_vertical_pack_type_invalid");
+    return (state.projectVerticalPackGovernanceDecisionIdsByCompany.get(resolvedCompanyId) || [])
+      .map((decisionId) => state.projectVerticalPackGovernanceDecisions.get(decisionId))
+      .filter(Boolean)
+      .filter((record) => (resolvedPackType ? record.packType === resolvedPackType : true))
+      .sort(
+        (left, right) =>
+          left.effectiveFrom.localeCompare(right.effectiveFrom)
+          || left.createdAt.localeCompare(right.createdAt)
+          || left.projectVerticalPackGovernanceDecisionId.localeCompare(right.projectVerticalPackGovernanceDecisionId)
+      )
+      .map(copy);
+  }
+
+  function getProjectVerticalPackOperationalStatus({ companyId, packType, asOfDate = null } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedPackType = normalizeProjectVerticalPackType(packType, "project_vertical_pack_type_required");
+    const resolvedAsOfDate = normalizeOptionalDate(asOfDate, "project_vertical_pack_governance_as_of_date_invalid") || todayIso(clock);
+    const activeDecision = listProjectVerticalPackGovernanceDecisions({
+      companyId: resolvedCompanyId,
+      packType: resolvedPackType
+    })
+      .filter((record) => record.effectiveFrom <= resolvedAsOfDate)
+      .at(-1) || null;
+    const baseStatus = activeDecision?.status || "enabled";
+    const operationalStatus = baseStatus === "deprecated" && activeDecision?.sunsetAt && resolvedAsOfDate > activeDecision.sunsetAt
+      ? "disabled"
+      : baseStatus;
+    return {
+      companyId: resolvedCompanyId,
+      packType: resolvedPackType,
+      asOfDate: resolvedAsOfDate,
+      governanceDecisionId: activeDecision?.projectVerticalPackGovernanceDecisionId || null,
+      governanceSource: activeDecision ? "decision" : "baseline",
+      effectiveFrom: activeDecision?.effectiveFrom || null,
+      sunsetAt: activeDecision?.sunsetAt || null,
+      replacementPackType: activeDecision?.replacementPackType || null,
+      reasonCode: activeDecision?.reasonCode || "baseline_enabled",
+      evidenceRefs: copy(activeDecision?.evidenceRefs || []),
+      operationalStatus,
+      allowNewLinks: operationalStatus === "enabled",
+      allowOperationalUse: operationalStatus !== "disabled",
+      deprecationActiveFlag: operationalStatus === "deprecated",
+      financeTruthOwner: "projects"
+    };
+  }
+
+  function publishProjectVerticalPackGovernanceDecision({
+    companyId,
+    projectVerticalPackGovernanceDecisionId = null,
+    packType,
+    status,
+    effectiveFrom = null,
+    sunsetAt = null,
+    replacementPackType = null,
+    reasonCode,
+    evidenceRefs = [],
+    actorId = "system",
+    correlationId = crypto.randomUUID()
+  } = {}) {
+    const resolvedCompanyId = requireText(companyId, "company_id_required");
+    const resolvedPackType = normalizeProjectVerticalPackType(packType, "project_vertical_pack_type_required");
+    const resolvedStatus = assertAllowed(status, PROJECT_VERTICAL_PACK_GOVERNANCE_STATUSES, "project_vertical_pack_governance_status_invalid");
+    const resolvedEffectiveFrom = normalizeOptionalDate(effectiveFrom, "project_vertical_pack_governance_effective_from_invalid") || todayIso(clock);
+    const resolvedSunsetAt = normalizeOptionalDate(sunsetAt, "project_vertical_pack_governance_sunset_at_invalid");
+    const resolvedReplacementPackType = normalizeProjectVerticalPackType(
+      replacementPackType,
+      "project_vertical_pack_type_invalid"
+    );
+    if (resolvedStatus === "deprecated" && !resolvedSunsetAt) {
+      throw createError(
+        400,
+        "project_vertical_pack_governance_sunset_at_required",
+        "Deprecated vertical packs must define a sunset date."
+      );
+    }
+    if (resolvedSunsetAt && resolvedSunsetAt < resolvedEffectiveFrom) {
+      throw createError(
+        400,
+        "project_vertical_pack_governance_date_range_invalid",
+        "Sunset date cannot be earlier than effectiveFrom."
+      );
+    }
+    if (resolvedReplacementPackType && resolvedReplacementPackType === resolvedPackType) {
+      throw createError(
+        400,
+        "project_vertical_pack_governance_replacement_invalid",
+        "Replacement pack type must differ from the governed pack type."
+      );
+    }
+    const record = {
+      projectVerticalPackGovernanceDecisionId:
+        normalizeOptionalText(projectVerticalPackGovernanceDecisionId) || crypto.randomUUID(),
+      companyId: resolvedCompanyId,
+      packType: resolvedPackType,
+      status: resolvedStatus,
+      effectiveFrom: resolvedEffectiveFrom,
+      sunsetAt: resolvedStatus === "deprecated" ? resolvedSunsetAt : null,
+      replacementPackType: resolvedReplacementPackType,
+      reasonCode: requireText(reasonCode, "project_vertical_pack_governance_reason_required"),
+      evidenceRefs: normalizeStringList(evidenceRefs),
+      createdByActorId: requireText(actorId, "actor_id_required"),
+      createdAt: nowIso(clock),
+      updatedAt: nowIso(clock)
+    };
+    state.projectVerticalPackGovernanceDecisions.set(record.projectVerticalPackGovernanceDecisionId, record);
+    appendToIndex(
+      state.projectVerticalPackGovernanceDecisionIdsByCompany,
+      record.companyId,
+      record.projectVerticalPackGovernanceDecisionId
+    );
+    pushAudit(state, clock, {
+      companyId: record.companyId,
+      actorId: record.createdByActorId,
+      correlationId,
+      action: "project.vertical_pack.governance_published",
+      entityType: "project_vertical_pack_governance_decision",
+      entityId: record.projectVerticalPackGovernanceDecisionId,
+      explanation: `Published ${record.status} governance for ${record.packType} vertical pack.`
+    });
+    return copy(record);
+  }
+
   function linkVerticalPack({
     companyId,
     projectId,
@@ -1628,6 +1777,17 @@ export function createProjectEngine({
   } = {}) {
     const project = requireProject(state, companyId, projectId);
     const resolvedPackType = normalizeProjectVerticalPackType(packType, "project_vertical_pack_type_required");
+    const governanceStatus = getProjectVerticalPackOperationalStatus({
+      companyId: project.companyId,
+      packType: resolvedPackType
+    });
+    if (!governanceStatus.allowNewLinks) {
+      throw createError(
+        409,
+        "project_vertical_pack_not_enabled",
+        `Vertical pack ${resolvedPackType} is ${governanceStatus.operationalStatus} and cannot be newly linked.`
+      );
+    }
     const resolvedVerticalRefs = normalizeVerticalPackRefs(verticalRefs);
     const scopedKey = buildProjectVerticalPackLinkScopedKey(project.companyId, project.projectId, resolvedPackType, resolvedVerticalRefs);
     const existingLinkId = state.projectVerticalPackLinkIdsByScopedKey.get(scopedKey);
@@ -1644,6 +1804,7 @@ export function createProjectEngine({
       projectId: project.projectId,
       packType: resolvedPackType,
       verticalRefs: resolvedVerticalRefs,
+      governanceDecisionId: governanceStatus.governanceDecisionId,
       financeTruthOwner: "projects",
       createdByActorId: requireText(actorId, "actor_id_required"),
       createdAt: nowIso(clock),
@@ -4961,6 +5122,7 @@ function exportProjectEvidenceBundle({
       warningCodes: [...workspace.warningCodes],
       customerContext: copy(workspace.customerContext),
       verticalIsolationSummary: copy(workspace.verticalIsolationSummary),
+      verticalPackGovernanceSummary: copy(workspace.verticalPackGovernanceSummary),
       projectOpportunityLinks: copy(workspace.projectOpportunityLinks || []),
       projectQuoteLinks: copy(workspace.projectQuoteLinks || []),
       projectVerticalPackLinks: copy(workspace.projectVerticalPackLinks || []),
@@ -5022,6 +5184,17 @@ function exportProjectEvidenceBundle({
         workspace.currentProjectProfitabilityMissionControlSnapshotId,
         (workspace.projectVerticalPackLinks || []).length > 0
           ? hashObject((workspace.projectVerticalPackLinks || []).map((link) => [link.linkId, link.packType]))
+          : null,
+        (workspace.verticalPackGovernanceSummary?.items || []).length > 0
+          ? hashObject(
+            (workspace.verticalPackGovernanceSummary?.items || []).map((item) => [
+              item.packType,
+              item.operationalStatus,
+              item.governanceDecisionId,
+              item.sunsetAt || null,
+              item.replacementPackType || null
+            ])
+          )
           : null
       ]
         .filter(Boolean)
@@ -5743,6 +5916,30 @@ function summarizeId06Workspace({ companyId, projectId, workModels = [], persona
   };
 }
 
+function buildProjectVerticalPackGovernanceSummary({ companyId, projectVerticalPackLinks = [], getProjectVerticalPackOperationalStatus }) {
+  const items = Array.from(
+    new Set((Array.isArray(projectVerticalPackLinks) ? projectVerticalPackLinks : []).map((record) => normalizeOptionalText(record?.packType)).filter(Boolean))
+  )
+    .sort()
+    .map((packType) => getProjectVerticalPackOperationalStatus({ companyId, packType }))
+    .map((status) => ({
+      packType: status.packType,
+      operationalStatus: status.operationalStatus,
+      governanceDecisionId: status.governanceDecisionId,
+      sunsetAt: status.sunsetAt,
+      replacementPackType: status.replacementPackType,
+      allowNewLinks: status.allowNewLinks,
+      allowOperationalUse: status.allowOperationalUse
+    }));
+  return {
+    financeTruthOwner: "projects",
+    deprecatedPackTypes: items.filter((item) => item.operationalStatus === "deprecated").map((item) => item.packType),
+    disabledPackTypes: items.filter((item) => item.operationalStatus === "disabled").map((item) => item.packType),
+    itemCount: items.length,
+    items
+  };
+}
+
 function summarizeEgenkontrollWorkspace({ companyId, projectId, egenkontrollPlatform }) {
   const instances = egenkontrollPlatform?.listChecklistInstances
     ? egenkontrollPlatform.listChecklistInstances({ companyId, projectId })
@@ -6103,6 +6300,7 @@ function buildWorkspaceIndicatorStrip({
   husSummary,
   personalliggareSummary,
   id06Summary,
+  projectVerticalPackGovernanceSummary,
   egenkontrollSummary,
   kalkylSummary,
   openProjectDeviationCount,
@@ -6162,6 +6360,18 @@ function buildWorkspaceIndicatorStrip({
       indicatorCode: "id06",
       status: id06Summary.attentionCount > 0 ? "warning" : "ok",
       count: id06Summary.activeBindingCount
+    },
+    {
+      indicatorCode: "vertical_pack_governance",
+      status:
+        projectVerticalPackGovernanceSummary.disabledPackTypes.length > 0
+          ? "warning"
+          : projectVerticalPackGovernanceSummary.deprecatedPackTypes.length > 0
+            ? "warning"
+            : "ok",
+      count:
+        projectVerticalPackGovernanceSummary.disabledPackTypes.length
+        + projectVerticalPackGovernanceSummary.deprecatedPackTypes.length
     },
     {
       indicatorCode: "egenkontroll",
@@ -7981,6 +8191,10 @@ function uniqueTexts(values) {
   return [...new Set((Array.isArray(values) ? values : []).map((value) => String(value || "").trim()).filter(Boolean))];
 }
 
+function normalizeStringList(values) {
+  return uniqueTexts(values);
+}
+
 function resolveProjectBuildVatCodeCandidate({ reverseChargeFlag, vatRate }) {
   if (reverseChargeFlag) {
     return "VAT_SE_RC_BUILD_SELL";
@@ -8386,6 +8600,10 @@ function assertAllowed(value, allowedValues, code) {
 
 function nowIso(clock) {
   return new Date(clock()).toISOString();
+}
+
+function todayIso(clock) {
+  return nowIso(clock).slice(0, 10);
 }
 
 function roundMoney(value) {

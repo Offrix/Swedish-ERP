@@ -18,6 +18,7 @@ export type ProjectGeneralWorkModelCode =
   | "internal_delivery";
 export type ProjectVerticalWorkModelCode = "field_service_optional" | "service_order" | "work_order" | "construction_stage";
 export type ProjectVerticalPackType = "field" | "personalliggare" | "id06";
+export type ProjectVerticalPackGovernanceStatus = "enabled" | "deprecated" | "disabled";
 export type ProjectWorkModelCode =
   | ProjectGeneralWorkModelCode
   | ProjectVerticalWorkModelCode;
@@ -175,10 +176,44 @@ export interface FieldPackLinkRef {
   readonly projectId: string;
   readonly packType: ProjectVerticalPackType;
   readonly verticalRefs: Record<string, unknown>;
+  readonly governanceDecisionId: string | null;
   readonly financeTruthOwner: "projects";
   readonly createdByActorId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface ProjectVerticalPackGovernanceDecisionRef {
+  readonly projectVerticalPackGovernanceDecisionId: string;
+  readonly companyId: string;
+  readonly packType: ProjectVerticalPackType;
+  readonly status: ProjectVerticalPackGovernanceStatus;
+  readonly effectiveFrom: string;
+  readonly sunsetAt: string | null;
+  readonly replacementPackType: ProjectVerticalPackType | null;
+  readonly reasonCode: string;
+  readonly evidenceRefs: readonly string[];
+  readonly createdByActorId: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectVerticalPackOperationalStatusRef {
+  readonly companyId: string;
+  readonly packType: ProjectVerticalPackType;
+  readonly asOfDate: string;
+  readonly governanceDecisionId: string | null;
+  readonly governanceSource: "decision" | "baseline";
+  readonly effectiveFrom: string | null;
+  readonly sunsetAt: string | null;
+  readonly replacementPackType: ProjectVerticalPackType | null;
+  readonly reasonCode: string;
+  readonly evidenceRefs: readonly string[];
+  readonly operationalStatus: ProjectVerticalPackGovernanceStatus;
+  readonly allowNewLinks: boolean;
+  readonly allowOperationalUse: boolean;
+  readonly deprecationActiveFlag: boolean;
+  readonly financeTruthOwner: "projects";
 }
 
 export interface ProjectWorkPackageRef {

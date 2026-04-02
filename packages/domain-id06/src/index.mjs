@@ -606,6 +606,19 @@ export function createId06Engine({
         `Project must link the ${packType} vertical pack before ID06 workplace bindings can be created.`
       );
     }
+    if (typeof projectsPlatformRef.getProjectVerticalPackOperationalStatus === "function") {
+      const governanceStatus = projectsPlatformRef.getProjectVerticalPackOperationalStatus({
+        companyId,
+        packType
+      });
+      if (!governanceStatus.allowOperationalUse) {
+        throw createError(
+          409,
+          "id06_vertical_pack_disabled",
+          `Project vertical pack ${packType} is disabled and cannot be used for new ID06 workplace bindings.`
+        );
+      }
+    }
     return activeLink;
   }
 

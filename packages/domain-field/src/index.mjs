@@ -963,7 +963,13 @@ export function createFieldEngine({
     if (listOpenConflictRecordsForCase(state, workOrder.workOrderId).length > 0) {
       throw createError(409, "field_operational_case_open_conflicts", "Operational case has open conflicts that block finance handoff readiness.");
     }
-    const linkedFieldPack = requireProjectVerticalPackLink(projectsPlatform, workOrder.companyId, workOrder.projectId, "field");
+    const linkedFieldPack = requireProjectVerticalPackLink(
+      projectsPlatform,
+      workOrder.companyId,
+      workOrder.projectId,
+      "field",
+      { enforceOperationalStatus: false }
+    );
     if (!arPlatform || typeof arPlatform.getItem !== "function") {
       throw createError(500, "field_ar_platform_missing", "AR platform is required to prepare field finance handoffs.");
     }
@@ -1443,7 +1449,7 @@ function requireProject(projectsPlatform, companyId, projectId) {
   });
 }
 
-function requireProjectVerticalPackLink(projectsPlatform, companyId, projectId, packType) {
+function requireProjectVerticalPackLink(projectsPlatform, companyId, projectId, packType, { enforceOperationalStatus = true } = {}) {
   if (!projectsPlatform || typeof projectsPlatform.listProjectVerticalPackLinks !== "function") {
     throw createError(500, "field_project_vertical_pack_link_support_required", "Projects platform must support vertical pack links.");
   }
@@ -1455,6 +1461,19 @@ function requireProjectVerticalPackLink(projectsPlatform, companyId, projectId, 
   const activeLink = Array.isArray(links) ? links.at(-1) || null : null;
   if (!activeLink) {
     throw createError(409, "field_vertical_pack_link_required", `Project must link the ${packType} vertical pack before field work can be created.`);
+  }
+  if (enforceOperationalStatus && typeof projectsPlatform.getProjectVerticalPackOperationalStatus === "function") {
+    const governanceStatus = projectsPlatform.getProjectVerticalPackOperationalStatus({
+      companyId,
+      packType
+    });
+    if (!governanceStatus.allowOperationalUse) {
+      throw createError(
+        409,
+        "field_vertical_pack_disabled",
+        `Project vertical pack ${packType} is disabled and cannot be used for new field operations.`
+      );
+    }
   }
   return activeLink;
 }

@@ -765,6 +765,19 @@ export function createPersonalliggareEngine({
         `Project must link the ${packType} vertical pack before personalliggare sites can be created.`
       );
     }
+    if (typeof projectsPlatformRef.getProjectVerticalPackOperationalStatus === "function") {
+      const governanceStatus = projectsPlatformRef.getProjectVerticalPackOperationalStatus({
+        companyId,
+        packType
+      });
+      if (!governanceStatus.allowOperationalUse) {
+        throw createError(
+          409,
+          "personalliggare_vertical_pack_disabled",
+          `Project vertical pack ${packType} is disabled and cannot be used for new personalliggare sites.`
+        );
+      }
+    }
     return activeLink;
   }
 }
