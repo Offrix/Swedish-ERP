@@ -57,39 +57,29 @@ export const requiredPackages = [
   "packages/events",
   "packages/db",
   "packages/rule-engine",
-  "packages/document-engine",
-  "packages/integration-core",
-  "packages/test-fixtures"
+  "packages/document-engine"
 ];
 
+const domainTruthDocuments = Array.from({ length: 18 }, (_, index) => index).flatMap((index) => {
+  const phaseCode = String(index).padStart(2, "0");
+  const documents = [
+    `docs/implementation-control/domankarta-rebuild/DOMAIN_${phaseCode}_ANALYSIS.md`,
+    `docs/implementation-control/domankarta-rebuild/DOMAIN_${phaseCode}_ROADMAP.md`,
+    `docs/implementation-control/domankarta-rebuild/DOMAIN_${phaseCode}_IMPLEMENTATION_LIBRARY.md`
+  ];
+  if (index === 0) {
+    documents.push("docs/implementation-control/domankarta-rebuild/DOMAIN_00_REPO_PRUNE_MAP.md");
+  }
+  return documents;
+});
+
 export const mandatoryDocs = [
-  "docs/MASTER_BUILD_PLAN.md",
-  "docs/adr/ADR-0001-runtime-versions.md",
-  "docs/adr/ADR-0002-surface-strategy.md",
-  "docs/adr/ADR-0003-domain-boundaries.md",
-  "docs/adr/ADR-0004-ledger-invariants.md",
-  "docs/adr/ADR-0005-rule-engine-philosophy.md",
-  "docs/adr/ADR-0006-document-archive-philosophy.md",
-  "docs/adr/ADR-0007-security-baseline.md",
-  "docs/adr/ADR-0008-testing-pyramid.md",
-  "docs/compliance/se/accounting-foundation.md",
-  "docs/compliance/se/vat-engine.md",
-  "docs/compliance/se/agi-engine.md",
-  "docs/compliance/se/payroll-engine.md",
-  "docs/compliance/se/benefits-engine.md",
-  "docs/compliance/se/travel-and-traktamente-engine.md",
-  "docs/compliance/se/pension-and-salary-exchange-engine.md",
-  "docs/compliance/se/rot-rut-engine.md",
-  "docs/compliance/se/personalliggare-engine.md",
-  "docs/compliance/se/einvoice-peppol-engine.md",
-  "docs/compliance/se/annual-reporting-engine.md",
-  "docs/domain/ubiquitous-language.md",
-  "docs/test-plans/master-test-strategy.md",
-  "docs/test-plans/master-verification-gates.md",
-  "docs/runbooks/local-development.md",
-  "docs/runbooks/production-deploy.md",
-  "docs/ui/ENTERPRISE_UI_PLAN.md",
-  "docs/prompts/CODEX_PROMPT_LIBRARY.md"
+  "AGENTS.md",
+  "README.md",
+  "docs/implementation-control/domankarta-rebuild/MASTER_DOMAIN_ROADMAP.md",
+  "docs/implementation-control/domankarta-rebuild/MASTER_DOMAIN_IMPLEMENTATION_LIBRARY.md",
+  "docs/implementation-control/domankarta-rebuild/CODEX_SETTINGS_PROMPT.md",
+  ...domainTruthDocuments
 ];
 
 export function repoPath(...segments) {

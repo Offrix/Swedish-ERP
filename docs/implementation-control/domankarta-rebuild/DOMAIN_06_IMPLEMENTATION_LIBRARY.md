@@ -1,0 +1,799 @@
+﻿# DOMAIN_06_IMPLEMENTATION_LIBRARY
+
+## mal
+
+Detta dokument beskriver exakt hur Domän 6 ska byggas om sa att moms-, skattekonto-, bank- och betalningskornan blir regulatoriskt korrekt, auditbar, replaybar och go-live-massig. Libraryt speglar roadmapen 1:1.
+
+## bindande tvärdomänsunderlag
+
+- `FAKTURAFLODET_BINDANDE_SANNING.md` styr all seller-side momsrapportering, betalallokering, över-/underbetalning, kredit, kundförlust och valutahantering som utgar från kundfaktura.
+- `LEVFAKTURAFLODET_BINDANDE_SANNING.md` styr all purchase-side momsrapportering, AP-posting, reverse-charge-inköp, importmoms, avdragsrätt och skapandet av AP-open-items som utgar från leverantörsfaktura.
+- `INKOP_VARUMOTTAG_OCH_LEVERANSMATCHNING_BINDANDE_SANNING.md` styr PO/receipt/ownership acceptance, 2-way/3-way match, invoice-before-receipt-holds och AP release gates för stock- och receipt-drivna inköp.
+- `LEVERANTORSBETALNINGAR_OCH_LEVERANTORSRESKONTRA_BINDANDE_SANNING.md` styr all leverantörsreskontra efter posting, supplier advances, AP-betalningar, AP-returer, payment holds, netting, bankavgifter, FX och annan supplier settlement-truth.
+- `BANKFLODET_OCH_BANKAVSTAMNING_BINDANDE_SANNING.md` styr all bankkonto- och statement-truth, bankline identity, owner binding, bankavstämning, bankavgifter, ränteposter, interna överföringar, duplicate replay och annan bank-owned legal effect.
+- `MOMSFLODET_BINDANDE_SANNING.md` styr all momsscenariokod, slutlig box mapping, periodisk sammanställning, OSS, avdragsrätt, importmoms och replacement-declaration-truth i denna fas.
+- `SKATTEKONTOFLODET_BINDANDE_SANNING.md` styr all skattekonto-truth, `1630`-mirror, inbetalningar, debiteringar, återbetalningar, ränta, anstånd, utbetalningsspärr och authority receipts i denna fas.
+- `BOKFORINGSKARNAN_OCH_VERIFIKATIONER_BINDANDE_SANNING.md` styr alla voucherregler, verifikationsserier, kontrollkonton, correction chains, period locks och SIE4-voucher-truth i denna fas.
+- `SIE4_IMPORT_OCH_EXPORT_BINDANDE_SANNING.md` styr all canonical SIE4 export/import, `#RAR`, `#KONTO`, `#VER`, `#TRANS`, dimensionsmetadata och parity-evidence i denna fas.
+- `RAPPORTER_MOMS_AGI_RESKONTRA_HUVUDBOK_BINDANDE_SANNING.md` styr momsrapport, periodisk sammanställning, customer och supplier aging, huvudbok, verifikationslista och filing-ready report packages i denna fas.
+- `PEPPOL_EDI_OCH_OFFENTLIG_EFAKTURA_BINDANDE_SANNING.md` styr structured inbound supplier invoices via Peppol, transport receipts, duplicate control, public-sector delivery gates och AP-routing för structured e-faktura i denna fas.
+- `OCR_REFERENSER_OCH_BETALFORMAT_BINDANDE_SANNING.md` styr OCR-matchning, Bg Max, incoming payment files, supplier payment files, provider-versionerade bankformat och referensbaserad settlement-routing mellan reskontra och bank i denna fas.
+- `PARTNER_API_WEBHOOKS_OCH_ADAPTERKONTRAKT_BINDANDE_SANNING.md` styr generiska partner-API:er, adapterkontrakt, webhook- och callbackverifiering, duplicate control och command-path-only routing för externa finance-adapters i denna fas.
+- `KVITTOFLODET_BINDANDE_SANNING.md` styr all receipt-driven momsrapportering, avdragsrätt, non-deductible VAT, representation på köparsidan, personbilskvitton, digital bevarandetruth och blockerlogik när kvittot inte racker som moms- eller bokföringsunderlag.
+- `BAS_KONTOPOLICY_BINDANDE_SANNING.md` styr alla canonical BAS-kontofamiljer, control accounts, bank/tax anchors och blocked overrides i denna fas.
+- `MOMSRUTEKARTA_BINDANDE_SANNING.md` styr all slutlig momsrutekarta, reverse-charge box mapping, importboxar, replacement declarations och VAT box lineage i denna fas.
+- `SKATTEKONTOMAPPNING_BINDANDE_SANNING.md` styr all `1630`-mirror, authority-event-klassning, moms- och payroll-clearing mot skattekontot, HUS/grön-teknik-offset och blocked unknown authority events i denna fas.
+- `VERIFIKATIONSSERIER_OCH_BOKFORINGSPOLICY_BINDANDE_SANNING.md` styr alla verifikationsserier, voucher identity, reservationsluckor, correction policy, posting date policy och SIE4-serieparitet för moms-, bank- och skattekontovouchers i denna fas.
+- `VALUTA_OMRAKNING_OCH_KURSDIFFERENS_BINDANDE_SANNING.md` styr redovisningsvaluta, bank- och AP-related FX, omräkningsdatum, rate-source policy, rounding och blocked missing rate lineage i denna fas.
+- `LEGAL_REASON_CODES_OCH_SPECIALTEXTPOLICY_BINDANDE_SANNING.md` styr legal basis för 0%-moms, reverse-charge-texter, EU/exportreferenser och structured legal-basis lineage mot momsrapport och e-faktura i denna fas.
+- Domän 6 får inte definiera egen avvikande invoice-ledger- eller momsrutelogik för kundfakturor.
+
+## Fas 6
+
+### Delfas 6.1 VAT code/scenario model
+
+- vad som ska byggas:
+  - `VatScenarioDefinition`
+  - `VatLegalBasisLink`
+  - `VatScenarioInputProfile`
+  - `VatDecision`
+  - `VatEvidenceBundle`
+  - `VatReviewDecision`
+- vilka objekt som ska finnas:
+  - scenariofamiljer för domestic, EU B2B goods, EU B2B services, EU B2C OSS, IOSS, export goods, export services, import goods, non-EU service purchase reverse charge, EU purchases, byggmoms, blocked deduction
+  - separata no-VAT-scenarier för exempt, zero-rated export, outside scope och domestic purchase 0 där de skiljer sig rattsligt
+- vilka state machines som ska finnas:
+  - `VatDecision.status: pending_review -> approved -> posted -> declared -> corrected`
+  - `VatReviewDecision.status: open -> resolved -> approved_override | rejected_override`
+- vilka commands som ska finnas:
+  - `deriveVatDecision`
+  - `resolveVatReviewDecision`
+  - `approveVatDecision`
+  - `correctVatDecision`
+- vilka events som ska finnas:
+  - `vat.decision.derived`
+  - `vat.review.opened`
+  - `vat.review.resolved`
+  - `vat.decision.approved`
+  - `vat.decision.corrected`
+- vilka invariants som måste hållas:
+  - exakt ett scenario per decision
+  - exakt en reporting channel per decision
+  - unsupported scenario får inte autoaccepteras
+  - inkompatibel review override får inte accepteras
+- vilka valideringar som blockerar fel:
+  - IOSS kraver importflagga, goods-only och consignmentsgrans
+  - EU B2B kraver VAT-nummer och VIES-status när sadan regel gäller
+  - byggmoms kraver rätt flaggor och svensk motpart där modellen sager det
+- vilka routes/API-kontrakt som ska finnas:
+  - route för scenario-derivation
+  - route för review-resolution med strict compatibility-check
+  - route för att läsa kodgenererad scenario->box-matris
+- vilka permissions/review-boundaries som ska finnas:
+  - endast auktoriserad review-roll för läsa VAT review case
+  - override som ändrar reporting channel eller deduction flag ska krava hojd approval
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - decision hash
+  - scenario code
+  - legal basis refs
+  - review actor
+  - override reason
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma source object + same normalized input + same rulepack ska ge samma decision
+  - replay ska ge samma hash eller explicit ny correction chain
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - aldre breda koder migreras till smalare canonical scenarier med mapping ledger
+  - rollback får inte sla samman redan separerade scenarier
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverkets regler om momsrutor, OSS/IOSS och omvänd skattskyldighet
+- vilka tester som bevisar att delfasen är korrekt:
+  - scenario-matris
+  - incompatibility denial
+  - IOSS eligibility tests
+  - byggmoms-scope tests
+
+### Delfas 6.2 VAT period/frequency/lock governance model
+
+- vad som ska byggas:
+  - `VatFrequencyElection`
+  - `VatFrequencyChangeRequest`
+  - `VatPeriodProfile`
+  - `VatPeriodLock`
+  - `VatPeriodUnlockApproval`
+- vilka objekt som ska finnas:
+  - cadence `monthly|quarterly|annual`
+  - effectiveFrom/effectiveTo
+  - turnoverBasisAmount
+  - turnoverBasisDate
+  - minimumNextChangeDate
+  - reason code
+  - evidence refs
+- vilka state machines som ska finnas:
+  - `VatFrequencyChangeRequest.status: draft -> review_pending -> approved | rejected -> applied`
+  - `VatPeriodLock.status: open -> locked -> unlocked_via_correction`
+- vilka commands som ska finnas:
+  - `electVatFrequency`
+  - `requestVatFrequencyChange`
+  - `approveVatFrequencyChange`
+  - `lockVatPeriod`
+  - `unlockVatPeriodViaCorrection`
+- vilka events som ska finnas:
+  - `vat.frequency.elected`
+  - `vat.frequency.change.requested`
+  - `vat.frequency.change.approved`
+  - `vat.period.locked`
+  - `vat.period.unlock.approved`
+- vilka invariants som måste hållas:
+  - exakt en aktiv frekvens per bolag och datum
+  - declaration periods kommer från profile, inte fritt intervall
+  - retroaktiv ändring får bara ske via correction policy
+- vilka valideringar som blockerar fel:
+  - blockera frekvensbyte när last/finaliserad period skulle brytas
+  - blockera unlock utan reason, approval och evidence
+- vilka routes/API-kontrakt som ska finnas:
+  - create/list frequency elections
+  - request/approve frequency change
+  - list generated periods
+- vilka permissions/review-boundaries som ska finnas:
+  - normal användare får inte läsa upp VAT-perioder
+  - frekvensbyte ska vara approval-bound
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - actor chain
+  - effective-date chain
+  - blocked-by refs
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - period generation måste vara deterministisk per bolag, frekvens och effektivt datum
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - migration ska skapa historisk frekvensprofil innan gamla declaration runs importeras
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverkets regler för när moms deklareras
+- vilka tester som bevisar att delfasen är korrekt:
+  - frekvensvalstest
+  - retroaktivt byte blockeras
+  - las/unlock policy tests
+
+### Delfas 6.3 declaration/periodic-statement/correction/posting model
+
+- vad som ska byggas:
+  - `VatSubmission`
+  - `VatSubmissionVersion`
+  - `VatPeriodicStatementSubmission`
+  - `VatSubmissionSupersedeLink`
+  - `VatPostingLink`
+- vilka objekt som ska finnas:
+  - payload hash
+  - source decision ids
+  - source period profile
+  - receipt refs
+  - correction reason
+  - supersede lineage
+- vilka state machines som ska finnas:
+  - `VatSubmission.status: draft -> review_pending -> finalized -> superseded`
+  - `VatPostingLink.status: pending -> posted -> reversed`
+- vilka commands som ska finnas:
+  - `createVatSubmissionVersion`
+  - `finalizeVatSubmission`
+  - `replaceVatSubmission`
+  - `attachVatReceipt`
+  - `linkVatPosting`
+- vilka events som ska finnas:
+  - `vat.submission.created`
+  - `vat.submission.finalized`
+  - `vat.submission.superseded`
+  - `vat.receipt.attached`
+  - `vat.posting.linked`
+- vilka invariants som måste hållas:
+  - finaliserad submission är immutable
+  - replacement är full submission, inte delta
+  - decision blir `declared` endast genom finaliserad submission-version
+- vilka valideringar som blockerar fel:
+  - blockera mutation av finaliserad version
+  - blockera replacement som saknar full boxmangd
+- vilka routes/API-kontrakt som ska finnas:
+  - create/finalize/replace/list submission versions
+  - attach receipt
+  - diff between versions
+- vilka permissions/review-boundaries som ska finnas:
+  - replacement declarations kraver sarskild reviewniva
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - payload hash
+  - signed operator evidence
+  - receipt ids
+  - previous version ref
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - replay av samma period och samma source snapshot får inte skapa annan version utan correction reason
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - historiska filings måste importeras som immutable versioner
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverket om att ratta momsdeklaration
+- vilka tester som bevisar att delfasen är korrekt:
+  - immutability tests
+  - replacement chain tests
+  - receipt attachment tests
+
+### Delfas 6.4 Skatteverket transport model
+
+- vad som ska byggas:
+  - capabilityklassning per filing path
+  - adapterlager för `real_api`, `real_file`, `manual_controlled`, `prepared_only`, `stub`
+- vilka objekt som ska finnas:
+  - `VatTransportAttempt`
+  - `VatTransportReceipt`
+  - `VatManualSubmissionEvidence`
+- vilka state machines som ska finnas:
+  - `VatTransportAttempt.status: prepared -> dispatched -> receipt_recorded | failed`
+- vilka commands som ska finnas:
+  - `prepareVatTransport`
+  - `dispatchVatTransport`
+  - `recordVatTransportReceipt`
+  - `recordManualVatSubmissionEvidence`
+- vilka events som ska finnas:
+  - `vat.transport.prepared`
+  - `vat.transport.dispatched`
+  - `vat.transport.receipt.recorded`
+- vilka invariants som måste hållas:
+  - varje submissionversion har exakt en transportklass
+  - prepared-only för aldrig presenteras som live
+- vilka valideringar som blockerar fel:
+  - blockera `real_api` utan verklig adapter och authmodell
+  - blockera `manual_controlled` utan exportartefakt och receiptfalt
+- vilka routes/API-kontrakt som ska finnas:
+  - capability listing
+  - transport attempt read
+  - manual receipt register
+- vilka permissions/review-boundaries som ska finnas:
+  - endast behörig filing-roll för registrera manual evidence och receipt
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - payload hash
+  - dispatch actor
+  - manual signer
+  - receipt data
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - transport replay ska inte skapa ny filingversion, bara nytt transportattempt
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - tidigare prepared-only operations ska migreras till `prepared_only` capability log, inte latsas vara live
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverkets filing reality och den faktiska kanal som används
+- vilka tester som bevisar att delfasen är korrekt:
+  - capability manifest tests
+  - manual controlled flow test
+  - negative test för false live classification
+
+### Delfas 6.5 VAT clearing/reversal model
+
+- vad som ska byggas:
+  - `VatClearingRun`
+  - `VatClearingReversal`
+- vilka objekt som ska finnas:
+  - source submission version
+  - clearing journal ref
+  - approval actor
+  - reversal ref
+- vilka state machines som ska finnas:
+  - `VatClearingRun.status: prepared -> posted -> reversed`
+- vilka commands som ska finnas:
+  - `runVatClearing`
+  - `reverseVatClearing`
+- vilka events som ska finnas:
+  - `vat.clearing.posted`
+  - `vat.clearing.reversed`
+- vilka invariants som måste hållas:
+  - clearing får bara utga från finaliserad submissionversion
+  - reversal måste peka på originalrun
+- vilka valideringar som blockerar fel:
+  - blockera clearing utan submission hash och period lock
+- vilka routes/API-kontrakt som ska finnas:
+  - list clearing runs
+  - reverse clearing
+- vilka permissions/review-boundaries som ska finnas:
+  - reversal kraver högre behörighet an vanlig clearing
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - source filing refs
+  - reason code
+  - actor chain
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - clearing idempotency key = submission version id
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - historiska clearingposter måste kunna länkas till historisk filingversion
+- vilka officiella regler och källor som styr delfasen:
+  - svensk VAT-redovisning och korrekt ledgerkoppling
+- vilka tester som bevisar att delfasen är korrekt:
+  - clearing idempotency
+  - reversal chain
+  - blockering mot icke-final submission
+
+### Delfas 6.6 tax-account mirror model
+
+- vad som ska byggas:
+  - `TaxAccountImportBatch`
+  - `TaxAccountEvent`
+  - `ExpectedTaxLiability`
+  - `TaxAccountMirrorJournal`
+- vilka objekt som ska finnas:
+  - authority reference
+  - source object lineage
+  - liability type
+  - period key
+  - import identity
+- vilka state machines som ska finnas:
+  - `TaxAccountImportBatch.status: received -> parsed -> applied | blocked`
+  - `TaxAccountEvent.mappingStatus: imported -> mapped -> posted_to_ledger -> reconciled | corrected`
+- vilka commands som ska finnas:
+  - `importTaxAccountBatch`
+  - `emitExpectedTaxLiability`
+  - `mapTaxAccountEvent`
+  - `postTaxAccountMirrorJournal`
+- vilka events som ska finnas:
+  - `tax_account.batch.imported`
+  - `tax_account.expected_liability.emitted`
+  - `tax_account.event.mapped`
+  - `tax_account.journal.posted`
+- vilka invariants som måste hållas:
+  - skattekonto får inte synkas via open banking
+  - expected liabilities måste komma från källdomän eller explicit migration
+  - source lineage måste finnas
+- vilka valideringar som blockerar fel:
+  - blockera event utan authority/source reference
+  - blockera expected liability utan source domain lineage
+- vilka routes/API-kontrakt som ska finnas:
+  - import batch read
+  - list tax-account events
+  - list expected liabilities
+- vilka permissions/review-boundaries som ska finnas:
+  - import och mapping ska vara egna operationsroller
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - import file/source hash
+  - authority ref
+  - source domain refs
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - import replay på samma authority refs ska vara idempotent
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - historiska tax-account-batches måste importeras med stabil identity
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverket skattekonto
+- vilka tester som bevisar att delfasen är korrekt:
+  - VAT/HUS/payroll liability emission tests
+  - replay tests
+  - ambiguity tests
+
+### Delfas 6.7 tax-account reconciliation/difference-case/offset/refund/correction model
+
+- vad som ska byggas:
+  - `TaxAccountReconciliationRun`
+  - `TaxAccountDiscrepancyCase`
+  - `TaxAccountOffset`
+  - `TaxAccountOffsetReversal`
+  - `TaxAccountRefundDecision`
+- vilka objekt som ska finnas:
+  - rulepack ref
+  - priority used
+  - source credit event
+  - target liabilities
+  - resolution note
+  - reversal lineage
+- vilka state machines som ska finnas:
+  - `TaxAccountDiscrepancyCase.status: open -> reviewed -> resolved | waived`
+  - `TaxAccountOffset.status: suggested -> approved -> applied -> reversed`
+- vilka commands som ska finnas:
+  - `runTaxAccountReconciliation`
+  - `openTaxAccountDiscrepancyCase`
+  - `approveTaxAccountOffset`
+  - `reverseTaxAccountOffset`
+  - `approveTaxAccountRefund`
+- vilka events som ska finnas:
+  - `tax_account.reconciliation.completed`
+  - `tax_account.discrepancy.opened`
+  - `tax_account.offset.approved`
+  - `tax_account.offset.reversed`
+  - `tax_account.refund.approved`
+- vilka invariants som måste hållas:
+  - auto-match kraver stark identity
+  - amount-only får inte auto-matcha i production
+  - refund och offset får inte vara dolda statusbyten
+- vilka valideringar som blockerar fel:
+  - discrepancy case får inte stangas utan resolution path
+  - offset reversal kraver originaloffset
+- vilka routes/API-kontrakt som ska finnas:
+  - list offsets, reversals, refunds
+  - resolve discrepancy case
+- vilka permissions/review-boundaries som ska finnas:
+  - offset approval och refund approval ska vara separata roller
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - rulepack checksum
+  - approval actor
+  - reversal actor
+  - reason code
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - reconciliation rerun ska inte dolja aldre discrepancy cases
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - tidigare `approved` offsets ska kunna migreras till full state machine utan semantisk farlust
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverket skattekonto, återbetalning och kvittning
+- vilka tester som bevisar att delfasen är korrekt:
+  - rulepack/runtime parity
+  - reversal tests
+  - refund tests
+
+### Delfas 6.8 bank-account/provider/secret model
+
+- vad som ska byggas:
+  - `BankAccount`
+  - `BankAccountSecretRef`
+  - `ProviderCapabilityManifest`
+  - `ProviderCredentialRef`
+- vilka objekt som ska finnas:
+  - masked account presentation
+  - live readiness class
+  - security posture class
+  - provider environment refs
+- vilka state machines som ska finnas:
+  - `ProviderCapabilityManifest.status: declared -> verified -> deprecated`
+- vilka commands som ska finnas:
+  - `registerBankAccount`
+  - `rotateBankCredential`
+  - `verifyProviderCapability`
+  - `deprecateProviderCapability`
+- vilka events som ska finnas:
+  - `bank_account.registered`
+  - `bank_credential.rotated`
+  - `provider_capability.verified`
+- vilka invariants som måste hållas:
+  - raa kontodetaljer får inte ut i vanliga svar
+  - provider live-claim måste ha proof path
+- vilka valideringar som blockerar fel:
+  - blockera capability med live-flagga utan verifierad adapter
+- vilka routes/API-kontrakt som ska finnas:
+  - read masked bank account
+  - read provider capability manifest
+- vilka permissions/review-boundaries som ska finnas:
+  - credential rotation kraver högre behörighet an bankkonto-lasning
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - credential version
+  - rotated by
+  - live proof refs
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - capability updates ska vara append-only för audit
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - tidigare rails med falska namn måste migreras till sann klassning
+- vilka officiella regler och källor som styr delfasen:
+  - leverantörsdokumentation och sakerhetskrav
+- vilka tester som bevisar att delfasen är korrekt:
+  - masking tests
+  - capability manifest tests
+  - negative tests för false live flags
+
+### Delfas 6.9 payment proposal/batch/order/SoD model
+
+- vad som ska byggas:
+  - `PaymentProposal`
+  - `PaymentBatch`
+  - `PaymentOrder`
+  - `PaymentApprovalPolicy`
+  - `DutySeparationRule`
+  - `PaymentSignatureSession`
+- vilka objekt som ska finnas:
+  - actor chain
+  - required approval steps
+  - sign requirement
+  - batch/order lineage
+- vilka state machines som ska finnas:
+  - `PaymentProposal.status: draft -> approved -> exported -> submitted -> accepted_by_bank -> partially_executed -> settled | failed | cancelled`
+  - `PaymentOrder.status: prepared -> reserved -> sent -> accepted -> booked | returned | rejected`
+- vilka commands som ska finnas:
+  - `createPaymentProposal`
+  - `approvePaymentProposal`
+  - `exportPaymentBatch`
+  - `signPaymentBatch`
+  - `submitPaymentBatch`
+  - `cancelPaymentBatch`
+  - `reopenPaymentBatch`
+- vilka events som ska finnas:
+  - `payment.proposal.created`
+  - `payment.proposal.approved`
+  - `payment.batch.exported`
+  - `payment.batch.signed`
+  - `payment.batch.cancelled`
+  - `payment.batch.reopened`
+- vilka invariants som måste hållas:
+  - förbjudna aktorskombinationer ska blockeras
+  - batchstatus harleds från orderstatusar och bankfeedback
+- vilka valideringar som blockerar fel:
+  - same actor denial
+  - reopen denial utan ny approvalkedja
+- vilka routes/API-kontrakt som ska finnas:
+  - create/approve/export/sign/cancel/reopen payment batch
+- vilka permissions/review-boundaries som ska finnas:
+  - separata roller för creator, approver, exporter, signer
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - policy id
+  - actor ids
+  - step-up evidence
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - export replay får inte skapa ny batch utan ny batchversion
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla batchar måste kunna migreras utan att farlora actor chain
+- vilka officiella regler och källor som styr delfasen:
+  - bankpraxis, internkontroll och SoD-krav
+- vilka tester som bevisar att delfasen är korrekt:
+  - same actor denial
+  - dual approval
+  - cancel/reopen with approval reset
+
+### Delfas 6.10 payment lifecycle/cut-off/settlement model
+
+- vad som ska byggas:
+  - `PaymentExecutionWindow`
+  - `PaymentExecutionEvent`
+  - `PaymentSettlementEvent`
+  - `PaymentReturnEvent`
+  - `BankHolidayCalendarRef`
+- vilka objekt som ska finnas:
+  - rail calendar
+  - cut-off policy
+  - requested payment date
+  - actual execution date
+  - settlement date
+  - returned amount
+  - residual amount
+- vilka state machines som ska finnas:
+  - `PaymentExecutionEvent.status: scheduled -> sent -> accepted -> executed | rejected`
+  - `PaymentSettlementEvent.status: pending -> partial -> settled | returned`
+- vilka commands som ska finnas:
+  - `schedulePaymentExecution`
+  - `recordBankAcceptance`
+  - `recordPaymentExecution`
+  - `recordPaymentSettlement`
+  - `recordPaymentReturn`
+- vilka events som ska finnas:
+  - `payment.execution.scheduled`
+  - `payment.accepted_by_bank`
+  - `payment.executed`
+  - `payment.settled`
+  - `payment.returned`
+- vilka invariants som måste hållas:
+  - accepted_by_bank != settled
+  - partial settlement ska röra restbelopp
+  - returned payment ska återstalla rätt skuld eller residual
+- vilka valideringar som blockerar fel:
+  - blockera settled utan execution data
+  - blockera delsettlad batch från att markeras fullsettled
+- vilka routes/API-kontrakt som ska finnas:
+  - record acceptance/execution/settlement/return
+- vilka permissions/review-boundaries som ska finnas:
+  - manuell settlementregistrering kraver sarskild operationsroll
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - bank event ref
+  - execution window used
+  - actual vs requested dates
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma bankfeedback får inte ge dubbel execution eller dubbel settlement
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - historiska batchar måste migreras med kand residualmodell
+- vilka officiella regler och källor som styr delfasen:
+  - officiella railformat och bankregler
+- vilka tester som bevisar att delfasen är korrekt:
+  - cut-off tests
+  - bank-day tests
+  - partial settlement tests
+  - return/reject tests
+
+### Delfas 6.11 statement import/reference-matching/reconciliation model
+
+- vad som ska byggas:
+  - `StatementImport`
+  - `BankStatementLineIdentity`
+  - `StructuredPaymentReference`
+  - `BankReconciliationCase`
+- vilka objekt som ska finnas:
+  - file hash
+  - provider batch id
+  - line sequence
+  - entry reference
+  - OCR/BG/PG/EndToEndId fields
+  - remittance payload
+- vilka state machines som ska finnas:
+  - `StatementImport.status: received -> parsed -> deduplicated -> applied | blocked`
+  - `BankReconciliationCase.status: open -> in_review -> resolved | written_off`
+- vilka commands som ska finnas:
+  - `importBankStatement`
+  - `deduplicateStatementLines`
+  - `matchStatementLine`
+  - `openBankReconciliationCase`
+  - `resolveBankReconciliationCase`
+- vilka events som ska finnas:
+  - `bank_statement.imported`
+  - `bank_statement.line.deduplicated`
+  - `bank_statement.line.matched`
+  - `bank_reconciliation_case.opened`
+- vilka invariants som måste hållas:
+  - line identity ska vara line-level stark
+  - ambiguity ska bli review case
+  - structured refs ska boras first-class
+- vilka valideringar som blockerar fel:
+  - blockera auto-match vid identity collision
+  - blockera same-file duplicate från ny effekt
+- vilka routes/API-kontrakt som ska finnas:
+  - import statement
+  - list reconciliation cases
+  - show structured refs
+- vilka permissions/review-boundaries som ska finnas:
+  - endast behörig roll för läsa review cases
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - import file hash
+  - source adapter
+  - identity key explanation
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - replay av samma statementfil eller providerbatch ska vara idempotent
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - tidigare importer måste kunna migreras till ny line identity med bevarad lineage
+- vilka officiella regler och källor som styr delfasen:
+  - bank-/statementformat och referensborare
+- vilka tester som bevisar att delfasen är korrekt:
+  - duplicate tests
+  - collision tests
+  - structured reference parser tests
+
+### Delfas 6.12 fee/interest/settlement bridge model
+
+- vad som ska byggas:
+  - `StatementPostingApproval`
+  - `StatementPostingJournalLink`
+  - `TaxAccountStatementBridge`
+- vilka objekt som ska finnas:
+  - statement category
+  - offset account
+  - journal entry ref
+  - bridge target ref
+- vilka state machines som ska finnas:
+  - `StatementPostingApproval.status: pending -> approved -> posted | rejected`
+- vilka commands som ska finnas:
+  - `approveStatementPosting`
+  - `postStatementJournal`
+  - `linkTaxAccountStatementBridge`
+- vilka events som ska finnas:
+  - `bank_statement.posting.approved`
+  - `bank_statement.posting.journal_posted`
+  - `tax_account.statement_bridge_linked`
+- vilka invariants som måste hållas:
+  - runtime och DB måste erkanna samma kategorier
+  - journal posting får inte ske utan approval
+- vilka valideringar som blockerar fel:
+  - blockera kategori som runtime stöder men DB inte kan persistiera
+- vilka routes/API-kontrakt som ska finnas:
+  - approve/post statement category
+- vilka permissions/review-boundaries som ska finnas:
+  - statement posting approval separat från vanlig bankimport
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - approval actor
+  - journal ref
+  - bridge target
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma statement event får inte skapa dubbel journal
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - enum- och statusmangder måste migreras synkront i runtime och DB
+- vilka officiella regler och källor som styr delfasen:
+  - god redovisningssed och bank-/skattekontobryggor
+- vilka tester som bevisar att delfasen är korrekt:
+  - schema/runtime parity tests
+  - journal roundtrip tests
+  - duplicate guard tests
+
+### Delfas 6.13 FX/exchange-rate/date control model
+
+- vad som ska byggas:
+  - `DateControlProfile`
+  - `FxSource`
+  - `FxRateLock`
+  - `CrossDomainDateTrace`
+- vilka objekt som ska finnas:
+  - source dates
+  - controlling date
+  - rate source
+  - rate date
+  - lock timestamp
+  - correction refs
+- vilka state machines som ska finnas:
+  - `FxRateLock.status: active -> superseded`
+- vilka commands som ska finnas:
+  - `deriveControllingDate`
+  - `lockFxRate`
+  - `supersedeFxRateLock`
+- vilka events som ska finnas:
+  - `date_control.derived`
+  - `fx_rate.locked`
+  - `fx_rate.lock.superseded`
+- vilka invariants som måste hållas:
+  - samma business event ska kunna sparas över alla datumdimensioner
+  - controlling date måste vara explicit
+  - rate source och rate date måste lagras
+- vilka valideringar som blockerar fel:
+  - blockera retroaktiv rate-ändring utan correction lineage
+  - blockera VAT/OSS/IOSS utan korrekt rate source när sadan krävs
+- vilka routes/API-kontrakt som ska finnas:
+  - read cross-domain date trace
+  - read locked FX source
+- vilka permissions/review-boundaries som ska finnas:
+  - ändring av FX source policy kraver sarskild governance
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - rate source proof
+  - controlling-date reason
+  - correction chain
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - replay av samma event ska ge samma controlling date och rate lock när source data är samma
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla events måste kunna röra historisk rate source och date trace
+- vilka officiella regler och källor som styr delfasen:
+  - Skatteverket om periodkurser och relevant vaxelkurspolicy
+- vilka tester som bevisar att delfasen är korrekt:
+  - cross-domain date consistency
+  - OSS/IOSS rate tests
+  - realized FX tests
+
+### Delfas 6.14 transport/API/file/manual fallback model
+
+- vad som ska byggas:
+  - gemensam capabilitykatalog för VAT, tax-account och bankingtransport
+- vilka objekt som ska finnas:
+  - capability code
+  - runtime class
+  - proof paths
+  - blocker codes
+  - required evidence
+- vilka state machines som ska finnas:
+  - `CapabilityStatus.status: declared -> verified -> blocked | deprecated`
+- vilka commands som ska finnas:
+  - `registerCapabilityStatus`
+  - `verifyCapabilityStatus`
+  - `blockCapabilityStatus`
+- vilka events som ska finnas:
+  - `capability_status.registered`
+  - `capability_status.verified`
+  - `capability_status.blocked`
+- vilka invariants som måste hållas:
+  - varje capability har exakt en sann runtimeklass
+  - manual path får inte fa live-status utan receiptmodell
+- vilka valideringar som blockerar fel:
+  - blockera capability som `real_*` utan bevisad adapter/testkedja
+- vilka routes/API-kontrakt som ska finnas:
+  - list capability status
+  - show blocker reasons
+- vilka permissions/review-boundaries som ska finnas:
+  - endast styrande operationsroll för ändra capabilityklassning
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - proof path
+  - source commit/ref
+  - verifierande aktor
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - capabilitystatus ska vara append-only för audit
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - aldre felklassningar ska migreras med historisk notering, inte skrivas över utan spar
+- vilka officiella regler och källor som styr delfasen:
+  - officiella format, leverantörsdokumentation och driftstyrning
+- vilka tester som bevisar att delfasen är korrekt:
+  - capability manifest tests
+  - negative tests för false live
+  - manual drill tests
+
+## vilka bevis som krävs innan något marks som moms-, skattekonto- eller bankingmassigt korrekt eller production-ready
+
+- regulatorisk kalla är last per scenario eller capability där det krävs
+- runtime, DB och tester använder samma status- och kategorimangder
+- live claims kan bevisas av verklig adapter eller korrekt `manual_controlled` process
+- replay, correction och reversal är testade
+- actor chain och approval boundaries är tekniskt verkstallda
+- date trace och FX trace är synliga och deterministiska
+
+## vilka risker som kraver mansklig flaggning
+
+- VAT review override som ändrar scenario, box eller reporting channel
+- momsfrekvensbyte eller unlock av last VAT-period
+- ersättningsdeklaration efter finaliserad filing
+- ambiguity i tax-account matchning eller offsetordning
+- refund eller offset reversal som poverkar flera liabilities
+- statementlinje utan stark identity eller med referenskollision
+- rail capability som fortfarande är `manual_controlled`, `prepared_only` eller `stub`
+- ändring av FX-källa, controlling-date-policy eller bankdag-/cut-off-policy
+
+
+
+

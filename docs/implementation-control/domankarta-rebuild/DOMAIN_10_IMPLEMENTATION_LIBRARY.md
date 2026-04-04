@@ -1,0 +1,785 @@
+# DOMAIN_10_IMPLEMENTATION_LIBRARY
+
+## mål
+
+Domän 10 ska byggas som en förstaklassig svensk lönedomän där:
+- payroll truth är durable
+- skatte- och avgiftsbeslut är official-source-pinnade
+- AGI är fältkodsriktig
+- posting är BAS-riktig
+- payout är railspecifik
+- bankreturer är payroll truth
+- alla hög-risk-åtgärder är SoD- och step-up-säkrade
+
+## bindande tvärdomänsunderlag
+
+- `LONEFLODET_BINDANDE_SANNING.md` är obligatorisk canonical source för pay calendars, immutable payroll input snapshots, pay runs, payslips, corrections, final pay, employee receivables, payroll posting handoff, payout readiness, bankreturklassning och payroll replay/cutover truth.
+- `LONEARTER_OCH_LONEKONTON_BINDANDE_SANNING.md` är obligatorisk canonical source för pay item catalog, line effect classes, BAS-lönekonton, liability anchors, deduction anchors, employee receivable anchors, accrual anchors och payroll account-profile truth.
+- `PRELIMINARSKATT_OCH_SKATTETABELLER_BINDANDE_SANNING.md` är obligatorisk canonical source för ordinary table tax, one-time tax, jämkning, SINK, A-SINK, no-tax certificates, emergency-manual-tax och frozen tax decision truth.
+- `ARBETSGIVARAVGIFTER_OCH_SPECIALREGLER_BINDANDE_SANNING.md` är obligatorisk canonical source för arbetsgivaravgifter, 67+-, 1937- eller tidigare, tillfälliga nedsättningar, växa-stöd, contribution basis och frozen contribution-decision truth.
+- `FORMANER_OCH_FORMANSBESKATTNING_BINDANDE_SANNING.md` är obligatorisk canonical source för benefit classification, valuation, no-double-booking mellan kvitto/AP och payroll, taxable-vs-tax-free truth och benefit payroll handoff.
+- `AUDIT_EVIDENCE_OCH_APPROVALS_BINDANDE_SANNING.md` är obligatorisk canonical source för payroll approvals, AGI sign-off, payout evidence, support reveal och break-glass lineage.
+- `BAS_LONEKONTOPOLICY_BINDANDE_SANNING.md` är obligatorisk canonical source för BAS-lönekonton, payroll-liability-ankare, accrual anchors och employee-receivable-kontoankare.
+- `RESOR_TRAKTAMENTE_OCH_MILERSATTNING_BINDANDE_SANNING.md` är obligatorisk canonical source för tjänsteresa, traktamente, nattraktamente, måltidsreduktion, tremånadersreduktion, milersättning, tax-free vs taxable travel replacement och travel payroll handoff.
+- `PENSION_OCH_LONEVAXLING_BINDANDE_SANNING.md` är obligatorisk canonical source för pensionspremier, salary exchange, top-up policy, special löneskatt på pensionskostnader och pension payroll handoff.
+- `SEMESTER_SEMESTERSKULD_OCH_SEMESTERERSATTNING_BINDANDE_SANNING.md` är obligatorisk canonical source för semesterår, intjänande, betalda/obetalda dagar, sparade dagar, sammalöneregeln, procentregeln, förskottssemester, semesterersättning och semesterskuld.
+- `SJUKLON_KARENS_OCH_FRANVARO_BINDANDE_SANNING.md` är obligatorisk canonical source för sjukperiod dag 1-14, karensavdrag, deltidsfrånvaro, läkarintyg, högriskskydd, dag-15-övergång till Försäkringskassan och payroll handoff för sjuklön.
+- `LONEUTMATNING_OCH_ANDRA_MYNDIGHETSAVDRAG_BINDANDE_SANNING.md` är obligatorisk canonical source för löneutmatning, myndighetsbeslut, remittering, oregelbundna utbetalningar under beslut och liability-truth mot myndighet.
+- `NEGATIV_NETTOLON_OCH_EMPLOYEE_RECEIVABLE_BINDANDE_SANNING.md` är obligatorisk canonical source för negativ nettolön, employee receivable, legal kvittning, payroll settlement och bankåterbetalning av anstalldskuld.
+- `LONEUTBETALNING_OCH_BANKRETURER_BINDANDE_SANNING.md` är obligatorisk canonical source för payout batch, settlement receipt, partial batch, bankretur, reopened employee liability och reissue-truth.
+- `AGI_FLODET_BINDANDE_SANNING.md` är obligatorisk canonical source för AGI-period, huvuduppgift, individuppgifter, specifikationsnummer, receipt, correction, removal och frånvarouppgiftens transportgräns.
+- `AGI_FALTKARTA_OCH_RATTELSER_BINDANDE_SANNING.md` är obligatorisk canonical source för AGI-faltrutor, skattefalt, huvuduppgiftssummor, fuel-benefit-logik, checkbox-rutor, correction på faltniva och blockerad unsupported AGI-mappning.
+- `SKATTEKONTOMAPPNING_BINDANDE_SANNING.md` är obligatorisk canonical source för payroll liabilities när de materialiseras på skattekontot, `1630`-mirror, payroll tax/employer contribution owner binding och blocked authority mismatch.
+- `VERIFIKATIONSSERIER_OCH_BOKFORINGSPOLICY_BINDANDE_SANNING.md` är obligatorisk canonical source för löneverifikationsserier, voucher identity, correction policy, posting date policy och export parity för payroll vouchers.
+- `BOKFORINGSKARNAN_OCH_VERIFIKATIONER_BINDANDE_SANNING.md` är obligatorisk canonical source för payroll vouchers, verifikationsserier, kontrollkonton och ledger-truth.
+- `RAPPORTER_MOMS_AGI_RESKONTRA_HUVUDBOK_BINDANDE_SANNING.md` är obligatorisk canonical source för AGI-underlag, payroll-linked huvudbok, verifikationslista, report snapshots och filing-ready report packages för payroll och AGI.
+- `OCR_REFERENSER_OCH_BETALFORMAT_BINDANDE_SANNING.md` är obligatorisk canonical source för salary payment files, provider-versionerade payroll-bankformat, payout references och formatbinding mellan payroll payout batch och bankrail.
+- `PERIODISERING_OCH_BOKSLUTSOMFORINGAR_BINDANDE_SANNING.md` är obligatorisk canonical source för accrued wages, vacation-liability delta, accrued statutory charges och ändra payroll periodiseringsankare.
+
+## Fas 10
+
+### Delfas 10.1 Pay item / calendar / pay run / final pay model
+
+- bygg följande objekt:
+  - `PayItemCatalogEntry`
+  - `PayCalendar`
+  - `PayRun`
+  - `PayRunFingerprint`
+  - `PayRunCorrectionCase`
+  - `FinalPayCase`
+  - `FinalPayFreeze`
+  - `FinalPaySettlementLine`
+  - `BenefitsStopDecision`
+- state machines:
+  - `PayRun: draft -> calculated -> approved -> posted -> payout_prepared -> paid | corrected | reversed`
+  - `PayRunCorrectionCase: draft -> review_pending -> approved -> executed | rejected`
+  - `FinalPayCase: draft -> frozen -> calculated -> approved -> posted -> settled | corrected | cancelled`
+- commands:
+  - `registerPayItemCatalogEntry`
+  - `publishPayCalendar`
+  - `createPayRun`
+  - `calculatePayRun`
+  - `approvePayRun`
+  - `postPayRun`
+  - `preparePayoutBatchFromPayRun`
+  - `createFinalPayCase`
+  - `freezeFinalPayCase`
+  - `approveFinalPayCase`
+  - `executeFinalPaySettlement`
+- events:
+  - `PayRunCalculated`
+  - `PayRunApproved`
+  - `PayRunPosted`
+  - `PayRunPaid`
+  - `PayRunCorrected`
+  - `FinalPayCaseFrozen`
+  - `FinalPayCaseSettled`
+- invariants:
+  - ingen pay run utan `PayRunFingerprint`
+  - final pay får inte leva som lösa adjustment-rader
+  - pay run som är `posted` får inte tyst muteras
+  - samma employment får inte ha två öppna final pay-cases
+- valideringar som blockerar fel:
+  - deny `approvePayRun` om line trace, tax decisions eller contribution decisions saknas
+  - deny `postPayRun` om BAS/posting profile saknas
+  - deny `createFinalPayCase` om termination date eller freeze context saknas
+- routes/API-kontrakt:
+  - `POST /v1/payroll/pay-item-catalog`
+  - `POST /v1/payroll/calendars`
+  - `POST /v1/payroll/pay-runs`
+  - `POST /v1/payroll/pay-runs/{id}/approve`
+  - `POST /v1/payroll/pay-runs/{id}/post`
+  - `POST /v1/payroll/final-pay-cases`
+  - `POST /v1/payroll/final-pay-cases/{id}/freeze`
+  - `POST /v1/payroll/final-pay-cases/{id}/approve`
+- permissions/review-boundaries:
+  - `payroll.manage`
+  - `payroll.approve`
+  - `payroll.final_pay.manage`
+  - `payroll.final_pay.approve`
+- audit/evidence/receipt:
+  - calculation receipt
+  - approval receipt
+  - posting receipt
+  - final pay freeze receipt
+  - final pay settlement receipt
+- replay/recovery/dead-letter:
+  - pay run-calculation ska vara idempotent mot fingerprint
+  - final pay-settlement ska kunna replayas från freeze ref utan att dubbla lines skapas
+- migrations-/cutover-/rollback-regler:
+  - imported pay runs måste mappas till canonical state chain
+  - imported historical final pay måste märkas `historical_imported`
+- officiella regler och källor:
+  - semesterlagen för semesterersättning vid slutlön
+  - bokföringsmässig spårbarhet enligt svensk god redovisningssed
+- tester:
+  - pay run-state machine
+  - final pay-case lifecycle
+  - no silent overwrite after post
+
+### Delfas 10.2 Tax table / tax decision / engångsskatt / SINK / A-SINK model
+
+- bygg följande objekt:
+  - `TaxDecisionSnapshot`
+  - `TaxDecisionEvidence`
+  - `TaxModePolicy`
+  - `TaxRulepackVersion`
+  - `AtypicalTaxCase`
+- state machines:
+  - `TaxDecisionSnapshot: draft -> verified -> active -> superseded | expired`
+  - `AtypicalTaxCase: detected -> review_pending -> approved -> applied | rejected`
+- commands:
+  - `registerTaxDecisionSnapshot`
+  - `verifyTaxDecisionSnapshot`
+  - `activateTaxDecisionSnapshot`
+  - `openAtypicalTaxCase`
+  - `approveEmergencyManualTax`
+- events:
+  - `TaxDecisionSnapshotActivated`
+  - `EmergencyManualTaxApproved`
+- invariants:
+  - `manual_rate` får inte användas i protected/live ordinary tax
+  - `engangsskatt` får inte återanvända ordinary table calculation path
+  - `sink` och `a_sink` måste bära explicit beslut eller legal basis receipt
+- valideringar som blockerar fel:
+  - deny ordinary tax om municipality/table/column saknas
+  - deny emergency manual tax utan dual review
+  - deny mixed ordinary/SINK/A-SINK mode i samma beslut
+- routes/API-kontrakt:
+  - `POST /v1/payroll/tax-decisions`
+  - `POST /v1/payroll/tax-decisions/{id}/verify`
+  - `POST /v1/payroll/tax-decisions/{id}/activate`
+  - `POST /v1/payroll/tax-decisions/{id}/emergency-manual`
+- permissions/review-boundaries:
+  - `payroll.tax.manage`
+  - `payroll.tax.approve`
+  - `payroll.tax.emergency_manual`
+- audit/evidence/receipt:
+  - decision receipt med municipality, table, column, tax year, rulepack checksum, evidence ref
+- replay/recovery/dead-letter:
+  - tax resolution ska vara replaybar från snapshot + tax rulepack version
+- migrations-/cutover-/rollback-regler:
+  - imported tax profiles måste mappas till canonical modes `ordinary_table`, `engangsskatt`, `jamkning_fixed`, `jamkning_percentage`, `sink`, `a_sink`
+- officiella regler och källor:
+  - Skatteverket skattetabeller
+  - SKV 401
+  - Skatteverket SINK
+  - Skatteverket A-SINK
+  - Skatteverkets beslutstyper för jämkning där relevant
+- tester:
+  - official table vectors
+  - engångsskatt vectors
+  - SINK/A-SINK vectors
+  - deny live `manual_rate`
+
+### Delfas 10.3 Employer contribution / age transition decision model
+
+- bygg följande objekt:
+  - `EmployerContributionRulepackVersion`
+  - `EmployerContributionDecisionSnapshot`
+  - `EmployerContributionEligibilityProfile`
+  - `AgeTransitionBoundary`
+- state machines:
+  - `EmployerContributionDecisionSnapshot: draft -> verified -> active -> superseded | expired`
+- commands:
+  - `registerEmployerContributionDecision`
+  - `verifyEmployerContributionDecision`
+  - `resolveEmployerContributionForPayRun`
+- events:
+  - `EmployerContributionDecisionActivated`
+- invariants:
+  - varje avgiftsrad måste bära decision snapshot ref
+  - procentsatser och trösklar kommer bara från pinned rulepack
+  - age transition bestäms från korrekt datumregel
+- valideringar som blockerar fel:
+  - deny contribution calculation utan rulepack version
+  - deny växa-stöd utan eligibility profile
+- routes/API-kontrakt:
+  - `POST /v1/payroll/employer-contribution-decisions`
+  - `POST /v1/payroll/employer-contribution-decisions/{id}/verify`
+- permissions/review-boundaries:
+  - `payroll.contribution.manage`
+  - `payroll.contribution.approve`
+- audit/evidence/receipt:
+  - contribution receipt med rate, threshold, legal basis, eligibility basis
+- replay/recovery/dead-letter:
+  - contribution resolution ska kunna replayas från birth year, payout date, rulepack version och snapshot
+- migrations-/cutover-/rollback-regler:
+  - imported year-to-date contribution history måste kunna mappas till canonical decision classes
+- officiella regler och källor:
+  - SKV 401
+  - Skatteverket arbetsgivaravgifter
+  - Skatteverket växa-stöd
+- tester:
+  - rate vectors
+  - age-transition vectors
+  - växa/youth/no-contribution vectors
+
+### Delfas 10.4 Benefits / travel / pension / salary exchange classification model
+
+- bygg följande objekt:
+  - `BenefitValuationDecision`
+  - `BenefitValuationRulepackVersion`
+  - `TravelTaxRulepackVersion`
+  - `PensionContributionProfile`
+  - `SalaryExchangeAgreement`
+- state machines:
+  - `BenefitValuationDecision: draft -> verified -> active -> superseded`
+  - `SalaryExchangeAgreement: draft -> signed -> active -> terminated`
+- commands:
+  - `registerBenefitValuationDecision`
+  - `registerTravelTaxRulepackVersion`
+  - `signSalaryExchangeAgreement`
+- events:
+  - `BenefitValuationDecisionActivated`
+  - `SalaryExchangeAgreementActivated`
+- invariants:
+  - `manual_taxable_value` är inte normal live-path
+  - expense reimbursement och receipt VAT får inte ge taxable benefit line
+  - special payroll tax för pension ska komma från pinned rulepack
+- valideringar som blockerar fel:
+  - deny taxable benefit line utan valuation method ref
+  - deny salary exchange utan signed agreement
+- routes/API-kontrakt:
+  - `POST /v1/benefits/valuations`
+  - `POST /v1/travel/tax-rulepacks`
+  - `POST /v1/pension/salary-exchange-agreements`
+- permissions/review-boundaries:
+  - `payroll.benefits.manage`
+  - `payroll.travel.manage`
+  - `payroll.pension.manage`
+- audit/evidence/receipt:
+  - valuation receipt
+  - salary exchange agreement receipt
+- replay/recovery/dead-letter:
+  - valuation och classification måste vara replaybar från event, rulepack och agreement version
+- migrations-/cutover-/rollback-regler:
+  - imported benefits och travel reimbursements måste klassificeras om till canonical categories innan live cutover
+- officiella regler och källor:
+  - Skatteverket förmånsregler
+  - Skatteverket friskvård
+  - Skatteverket bilförmån/drivmedel
+  - SKV 401 för kostnadsersättningar
+- tester:
+  - valuation vectors
+  - travel allowance vectors
+  - pension/salary exchange vectors
+
+### Delfas 10.5 Sick pay / qualifying deduction / vacation model
+
+- bygg följande objekt:
+  - `SickPayDecisionTrace`
+  - `QualifyingDeductionTrace`
+  - `VacationDecisionTrace`
+  - `VacationLiabilitySnapshot`
+- state machines:
+  - `VacationLiabilitySnapshot: calculated -> approved -> posted | superseded`
+- commands:
+  - `calculateSickPay`
+  - `calculateQualifyingDeduction`
+  - `calculateVacationPay`
+  - `calculateVacationLiability`
+- events:
+  - `SickPayCalculated`
+  - `VacationLiabilityCalculated`
+- invariants:
+  - varje sjuk- och semesterlinje måste kunna spåras till leave/schedule/agreement truth
+  - final pay semesterersättning måste följa semesterlagens beräkningsgrunder
+- valideringar som blockerar fel:
+  - deny sick-pay line utan leave truth
+  - deny vacation liability posting utan approved liability snapshot
+- routes/API-kontrakt:
+  - `GET /v1/payroll/payslips/{id}/line-trace`
+  - `POST /v1/payroll/vacation-liability/calculate`
+- permissions/review-boundaries:
+  - `payroll.vacation.manage`
+  - `payroll.sickpay.manage`
+- audit/evidence/receipt:
+  - sick pay receipt
+  - vacation calculation receipt
+  - liability receipt
+- replay/recovery/dead-letter:
+  - all vacation calculations must replay from snapshot and rulepack
+- migrations-/cutover-/rollback-regler:
+  - imported saved days, liability balances och ongoing sickness cases måste mappas till canonical traces
+- officiella regler och källor:
+  - sjuklönelagen
+  - semesterlagen
+- tester:
+  - sick pay vectors
+  - vacation vectors
+  - final pay vacation settlement vectors
+
+### Delfas 10.6 Negative net pay / employee receivable model
+
+- bygg följande objekt:
+  - `SignedNetPayView`
+  - `EmployeeReceivable`
+  - `ReceivableSettlementPlan`
+  - `ReceivableOffsetDecision`
+  - `ReceivableWriteOffDecision`
+- state machines:
+  - `EmployeeReceivable: open -> scheduled_offset -> partially_settled -> settled | written_off`
+- commands:
+  - `openEmployeeReceivable`
+  - `scheduleReceivableOffset`
+  - `approveReceivableWriteOff`
+- events:
+  - `EmployeeReceivableOpened`
+  - `EmployeeReceivableOffsetScheduled`
+  - `EmployeeReceivableWrittenOff`
+- invariants:
+  - signed net pay får aldrig döljas
+  - receivable måste bära source pay run ref och ledger/posting ref
+  - write-off kräver high-risk governance
+- valideringar som blockerar fel:
+  - deny write-off utan second review där policy kräver det
+  - deny settlement mot fel employment eller fel receivable
+- routes/API-kontrakt:
+  - `GET /v1/payroll/receivables`
+  - `POST /v1/payroll/receivables/{id}/offsets`
+  - `POST /v1/payroll/receivables/{id}/write-off`
+- permissions/review-boundaries:
+  - `payroll.receivable.manage`
+  - `payroll.receivable.write_off`
+- audit/evidence/receipt:
+  - receivable creation receipt
+  - offset receipt
+  - write-off receipt
+- replay/recovery/dead-letter:
+  - receivable schedule ska kunna återberäknas från signed net pay + policy
+- migrations-/cutover-/rollback-regler:
+  - imported employee debts måste normaliseras till canonical receivable objects
+- officiella regler och källor:
+  - svensk bokförings- och lönepraxis för anställdfordran
+- tester:
+  - multi-run settlement
+  - write-off governance
+  - signed net visibility
+
+### Delfas 10.7 Returned salary payment / bank return model
+
+- bygg följande objekt:
+  - `ReturnedSalaryPayment`
+  - `PayrollBankReturn`
+  - `PayoutFailureDecision`
+  - `RepayoutRequest`
+  - `ReturnedPayoutLedgerBridge`
+- state machines:
+  - `ReturnedSalaryPayment: detected -> classified -> posted -> settled | repaid | written_off`
+  - `RepayoutRequest: draft -> approved -> exported -> settled | cancelled`
+- commands:
+  - `detectReturnedSalaryPayment`
+  - `classifyPayrollBankReturn`
+  - `createRepayoutRequest`
+- events:
+  - `ReturnedSalaryPaymentDetected`
+  - `RepayoutRequestApproved`
+- invariants:
+  - payroll return måste peka på original payout batch och original employee line
+  - return får inte försvinna in i generisk banking-reconciliation
+- valideringar som blockerar fel:
+  - deny repayout utan failure classification
+  - deny return posting utan suspense/receivable strategy
+- routes/API-kontrakt:
+  - `POST /v1/payroll/returned-payments/detect`
+  - `POST /v1/payroll/returned-payments/{id}/classify`
+  - `POST /v1/payroll/returned-payments/{id}/repayout`
+- permissions/review-boundaries:
+  - `payroll.payout.manage`
+  - `payroll.bank_return.manage`
+- audit/evidence/receipt:
+  - bank return receipt
+  - repayout approval receipt
+- replay/recovery/dead-letter:
+  - same bank event must be idempotent
+- migrations-/cutover-/rollback-regler:
+  - imported outstanding salary returns måste mappas till canonical return objects
+- officiella regler och källor:
+  - Bankgirot teknisk manual för Löner/Bg Lön
+- tester:
+  - return-to-receivable
+  - return-to-repayout
+  - idempotent bank-event ingest
+
+### Delfas 10.8 Garnishment / remittance model
+
+- bygg följande objekt:
+  - `GarnishmentDecisionSnapshot`
+  - `GarnishmentPriorityProfile`
+  - `GarnishmentRemittance`
+  - `GarnishmentReturnCase`
+- state machines:
+  - `GarnishmentRemittance: pending -> remitted -> settled | returned | corrected`
+- commands:
+  - `registerGarnishmentDecisionSnapshot`
+  - `calculateGarnishmentForPayRun`
+  - `createGarnishmentRemittance`
+  - `correctGarnishmentRemittance`
+- events:
+  - `GarnishmentDecisionActivated`
+  - `GarnishmentRemittanceCreated`
+- invariants:
+  - `manual_override` får bara användas i emergency lane
+  - varje remittance måste bära authority case ref och förbehållsbelopp baseline
+- valideringar som blockerar fel:
+  - deny remittance utan active decision snapshot
+  - deny correction utan lineage till originalremittance
+- routes/API-kontrakt:
+  - `POST /v1/payroll/garnishments`
+  - `POST /v1/payroll/garnishments/{id}/approve`
+  - `POST /v1/payroll/garnishments/{id}/remittances`
+  - `POST /v1/payroll/garnishments/remittances/{id}/correct`
+- permissions/review-boundaries:
+  - `payroll.garnishment.manage`
+  - `payroll.garnishment.approve`
+- audit/evidence/receipt:
+  - decision receipt
+  - remittance receipt
+  - correction receipt
+- replay/recovery/dead-letter:
+  - remittance generation must replay from snapshot + protected amount baseline + pay run
+- migrations-/cutover-/rollback-regler:
+  - imported garnishment decisions måste mappas till authority case + priority profile
+- officiella regler och källor:
+  - Kronofogdens allmänna råd 2026
+- tester:
+  - priority vectors
+  - protected amount vectors
+  - remittance correction flow
+
+### Delfas 10.9 AGI build / field mapping / correction / submission model
+
+- bygg följande objekt:
+  - `AgiFieldMappingBaseline`
+  - `AgiSubmission`
+  - `AgiSubmissionVersion`
+  - `AgiCorrectionCase`
+  - `AgiReplacementReference`
+  - `AgiRemovalReference`
+- state machines:
+  - `AgiSubmission: draft -> validated -> ready_for_sign -> signed -> submitted -> accepted | partially_rejected | rejected | superseded`
+  - `AgiCorrectionCase: draft -> review_pending -> approved -> submitted | rejected`
+- commands:
+  - `buildAgiSubmissionVersion`
+  - `validateAgiSubmissionVersion`
+  - `markAgiReadyForSign`
+  - `submitAgiVersion`
+  - `openAgiCorrectionCase`
+  - `submitAgiCorrection`
+- events:
+  - `AgiVersionBuilt`
+  - `AgiVersionSubmitted`
+  - `AgiReceiptReceived`
+  - `AgiCorrectionSubmitted`
+- invariants:
+  - varje AGI-belopp måste kunna spåras till exakt fältkod och source line
+  - transport truth ligger i regulated submissions, payload truth ligger i payroll
+  - replacement/remove måste följa Skatteverkets specifikationsnummer- och identitetsregler
+- valideringar som blockerar fel:
+  - deny submit utan `ready_for_sign`
+  - deny field mapping om pay item outcome saknar exakt fältkod
+  - deny live submit utan provider-backed transport
+- routes/API-kontrakt:
+  - `POST /v1/payroll/agi/build`
+  - `POST /v1/payroll/agi/{id}/validate`
+  - `POST /v1/payroll/agi/{id}/ready-för-sign`
+  - `POST /v1/payroll/agi/{id}/submit`
+  - `POST /v1/payroll/agi/{id}/corrections`
+- permissions/review-boundaries:
+  - `payroll.agi.manage`
+  - `payroll.agi.submit`
+  - `payroll.agi.correct`
+- audit/evidence/receipt:
+  - payload hash
+  - signature receipt
+  - provider receipt
+  - correction receipt
+- replay/recovery/dead-letter:
+  - AGI build måste vara idempotent mot pay-run truth och mapping baseline
+  - failed transport ska gå till replayable submission queue, inte till fake-live receipt
+- migrations-/cutover-/rollback-regler:
+  - imported previous AGI periods måste kunna länkas som prior state för correction logic
+- officiella regler och källor:
+  - Skatteverket AGI teknisk beskrivning
+  - Skatteverkets fältkodslista och kontroller
+- tester:
+  - field-code mapping suite
+  - correction replace/remove suite
+  - provider receipt ingest
+  - live submit deny until provider exists
+
+### Delfas 10.10 Payroll posting / payout / bank match / BAS model
+
+- bygg följande objekt:
+  - `PayrollPostingProfile`
+  - `PayrollPostingBundle`
+  - `PayrollPayoutBatch`
+  - `PayrollRailProfile`
+  - `PayrollBankMatch`
+- state machines:
+  - `PayrollPostingBundle: draft -> approved -> posted | reversed`
+  - `PayrollPayoutBatch: draft -> approved -> exported -> bank_acknowledged -> settled | returned | cancelled`
+  - `PayrollBankMatch: pending -> matched | mismatched | partially_matched | repaired`
+- commands:
+  - `buildPayrollPostingBundle`
+  - `approvePayrollPostingBundle`
+  - `createPayrollPayoutBatch`
+  - `exportPayrollPayoutBatch`
+  - `registerPayrollBankMatch`
+  - `repairPayrollBankMismatch`
+- events:
+  - `PayrollPostingBundlePosted`
+  - `PayrollPayoutBatchExported`
+  - `PayrollBankMatched`
+- invariants:
+  - posting profile måste peka på rätt BAS-konto, skuldkonto, kostnadsbärare och löneartsklass
+  - payout batch skapas bara från posted pay run/final pay truth
+  - bank match måste bära rail-specific identifiers
+- valideringar som blockerar fel:
+  - deny posting bundle om kontoallokering fortfarande faller tillbaka till placeholder rules
+  - deny payout export om rail profile saknas
+- routes/API-kontrakt:
+  - `POST /v1/payroll/postings`
+  - `POST /v1/payroll/postings/{id}/approve`
+  - `POST /v1/payroll/payout-batches`
+  - `POST /v1/payroll/payout-batches/{id}/export`
+  - `POST /v1/payroll/payout-batches/{id}/bank-match`
+- permissions/review-boundaries:
+  - `payroll.posting.manage`
+  - `payroll.posting.approve`
+  - `payroll.payout.manage`
+- audit/evidence/receipt:
+  - posting receipt
+  - export receipt
+  - bank-match receipt
+- replay/recovery/dead-letter:
+  - export payload ska kunna återskapas deterministiskt från batch + rail profile
+- migrations-/cutover-/rollback-regler:
+  - imported opening payroll liabilities måste mappas till canonical posting profile
+- officiella regler och källor:
+  - BAS kontogrupper 70-76
+  - Bankgirot teknisk information för Löner/Bg Lön
+- tester:
+  - BAS mapping suite
+  - rail export checksum suite
+  - bank-match mismatch repair suite
+
+### Delfas 10.11 Payroll input snapshot / dependency consumption model
+
+- bygg följande objekt:
+  - `PayrollInputSnapshot`
+  - `PayrollInputConsumptionTrace`
+  - `PayrollDependencyResolutionReceipt`
+- state machines:
+  - `PayrollInputSnapshot: captured -> consumed -> superseded`
+- commands:
+  - `capturePayrollInputSnapshot`
+  - `attachPayrollInputConsumptionTrace`
+- events:
+  - `PayrollInputSnapshotCaptured`
+- invariants:
+  - varje payroll line måste kunna visa HR/time/balances/agreement/benefit/travel/pension refs
+- valideringar som blockerar fel:
+  - deny pay run approval om line saknar dependency trace
+- routes/API-kontrakt:
+  - `GET /v1/payroll/pay-runs/{id}/input-trace`
+- permissions/review-boundaries:
+  - `payroll.trace.read`
+  - masked support-read only i backoffice
+- audit/evidence/receipt:
+  - input capture receipt
+  - trace read audit
+- replay/recovery/dead-letter:
+  - pay run replay must reuse same dependency snapshots unless explicit correction case opens
+- migrations-/cutover-/rollback-regler:
+  - imported history måste bära `historical_input_source_ref`
+- officiella regler och källor:
+  - ingen extern primärkälla; detta är intern sanningsstyrning
+- tester:
+  - line-level trace suite
+  - deny missing dependency trace
+
+### Delfas 10.12 Payroll migration / history import / parallel run model
+
+- bygg följande objekt:
+  - `PayrollMigrationBatch`
+  - `PayrollHistoryImportReceipt`
+  - `PayrollCutoverBaseline`
+  - `PayrollParallelRunDiffProfile`
+  - `AcceptedVariancePolicy`
+- state machines:
+  - `PayrollMigrationBatch: draft -> imported -> validated -> parallel_run_ready -> finalized | rejected | rolled_back`
+- commands:
+  - `importPayrollHistory`
+  - `validatePayrollCutoverBaseline`
+  - `runPayrollParallelDiff`
+  - `finalizePayrollCutover`
+  - `rollbackPayrollCutover`
+- events:
+  - `PayrollHistoryImported`
+  - `PayrollParallelRunCompleted`
+  - `PayrollCutoverFinalized`
+  - `PayrollCutoverRolledBack`
+- invariants:
+  - finalize bara efter accepted variance policy
+  - rollback måste peka på pre-cutover evidence refs
+- valideringar som blockerar fel:
+  - deny finalize med unresolved diffs
+  - deny import utan source evidence mapping
+- routes/API-kontrakt:
+  - `POST /v1/payroll/migrations`
+  - `POST /v1/payroll/migrations/{id}/validate`
+  - `POST /v1/payroll/migrations/{id}/parallel-run`
+  - `POST /v1/payroll/migrations/{id}/finalize`
+  - `POST /v1/payroll/migrations/{id}/rollback`
+- permissions/review-boundaries:
+  - `payroll.migration.manage`
+  - `payroll.migration.approve`
+- audit/evidence/receipt:
+  - import receipt
+  - diff receipt
+  - finalize receipt
+  - rollback receipt
+- replay/recovery/dead-letter:
+  - re-import same source must be idempotent or explicitly versioned
+- migrations-/cutover-/rollback-regler:
+  - YTD, leave, receivables, garnishments, tax decisions och AGI prior-state måste mappas innan finalize
+- officiella regler och källor:
+  - inga externa regler; intern cutover-governance
+- tester:
+  - import validation suite
+  - parallel diff suite
+  - finalize/rollback suite
+
+### Delfas 10.13 Security / review / step-up / trial-guard model
+
+- bygg följande objekt:
+  - `PayrollHighRiskActionPolicy`
+  - `PayrollApprovalReceipt`
+  - `PayrollStepUpSession`
+  - `PayrollTrialGuardReceipt`
+- state machines:
+  - `PayrollStepUpSession: pending -> active -> expired | revoked`
+- commands:
+  - `requirePayrollStepUp`
+  - `approvePayrollHighRiskAction`
+  - `recordPayrollTrialGuardReceipt`
+- events:
+  - `PayrollStepUpActivated`
+  - `PayrollHighRiskActionApproved`
+- invariants:
+  - `company.manage` räcker inte för high-risk payrollmutation
+  - samma aktör får inte både skapa och godkänna där SoD krävs
+  - trial receipts får inte se ut som live receipts
+- valideringar som blockerar fel:
+  - deny AGI submit utan `payroll.agi.submit` och fresh step-up
+  - deny receivable write-off utan second approver där policy kräver det
+- routes/API-kontrakt:
+  - samtliga high-risk payroll routes ska bära explicit permission code
+- permissions/review-boundaries:
+  - `payroll.tax.manage`
+  - `payroll.tax.approve`
+  - `payroll.agi.submit`
+  - `payroll.receivable.write_off`
+  - `payroll.garnishment.manage`
+  - `payroll.payout.manage`
+- audit/evidence/receipt:
+  - actor
+  - trust level
+  - approver 2
+  - reason code
+  - source object refs
+- replay/recovery/dead-letter:
+  - security receipts ska inte kunna replayeras som mutationer
+- migrations-/cutover-/rollback-regler:
+  - imported historical approvals får aldrig behandlas som aktiva step-up sessions
+- officiella regler och källor:
+  - NIST least privilege / separation of duties där det behövs
+- tester:
+  - authz deny matrix
+  - SoD suite
+  - trial/live receipt separation
+
+### Delfas 10.14 Runbook / seed / fake-live / legacy cleanup model
+
+- bygg följande objekt:
+  - `PayrollRunbookClassification`
+  - `PayrollSeedClassification`
+  - `PayrollLegacyArtifactDecision`
+- klassificera uttryckligen dessa runbooks:
+  - `docs/runbooks/payroll-tax-decisions-verification.md`
+  - `docs/runbooks/payroll-employer-contribution-decisions-verification.md`
+  - `docs/runbooks/payroll-input-snapshots-verification.md`
+  - `docs/runbooks/employee-receivables.md`
+  - `docs/runbooks/garnishment-remittance.md`
+  - `docs/runbooks/payroll-history-import-verification.md`
+  - `docs/runbooks/payroll-migration-cutover.md`
+  - `docs/runbooks/payroll-correction-and-agi-replay.md`
+  - `docs/runbooks/fas-8-payroll-core-verification.md`
+  - `docs/runbooks/fas-8-payroll-posting-verification.md`
+  - `docs/runbooks/fas-8-payroll-tax-agi-verification.md`
+  - `docs/runbooks/fas-9-benefits-verification.md`
+  - `docs/runbooks/fas-9-travel-verification.md`
+  - `docs/runbooks/fas-9-pension-verification.md`
+  - `docs/runbooks/fas-11-travel-receipt-vat-verification.md`
+  - `docs/runbooks/document-person-payroll-incident-and-repair.md`
+- klassificera uttryckligen dessa demo seeds:
+  - `packages/db/seeds/20260321201000_phase8_payroll_core_demo_seed.sql`
+  - `packages/db/seeds/20260321211000_phase8_payroll_tax_agi_demo_seed.sql`
+  - `packages/db/seeds/20260321221000_phase8_payroll_posting_payout_demo_seed.sql`
+  - `packages/db/seeds/20260321231000_phase9_benefits_engine_demo_seed.sql`
+  - `packages/db/seeds/20260322001000_phase9_travel_expenses_demo_seed.sql`
+  - `packages/db/seeds/20260322011000_phase9_pension_salary_exchange_demo_seed.sql`
+  - `packages/db/seeds/20260322151000_phase12_tax_submission_demo_seed.sql`
+- state machines:
+  - `PayrollLegacyArtifactDecision: identified -> classified -> archived | removed | rewritten`
+- commands:
+  - `classifyPayrollRunbook`
+  - `classifyPayrollSeed`
+  - `archivePayrollLegacyArtifact`
+  - `removePayrollLegacyArtifact`
+- events:
+  - `PayrollRunbookClassified`
+  - `PayrollLegacyArtifactArchived`
+- invariants:
+  - ingen legacy runbook får se bindande ut utan rebuild-status
+  - inga demo seeds får vara tillåtna i protected/live
+- valideringar som blockerar fel:
+  - deny protected boot om demo payroll seed används
+- routes/API-kontrakt:
+  - inga publika runtime-routes; detta är styrnings- och repoobjekt
+- permissions/review-boundaries:
+  - intern repo-governance only
+- audit/evidence/receipt:
+  - classification receipt med action `keep/harden/rewrite/replace/migrate/archive/remove`
+- replay/recovery/dead-letter:
+  - ej tillämpligt utöver repo-audit trail
+- migrations-/cutover-/rollback-regler:
+  - gamla runbooks får bara bevaras som historiska bilagor
+- officiella regler och källor:
+  - inga externa; intern dokumentstyrning
+- tester:
+  - docs consistency check
+  - protected-mode demo-seed deny
+
+## vilka bevis som krävs innan något märks som löne-, skatte- eller AGI-mässigt korrekt eller production-ready
+
+- official source locked per tax year
+- canonical object model finns och är durable där det krävs
+- green unit-, integration- och e2e-bevis finns för green path, fail path och correction path
+- live ordinary tax saknar `manual_rate`
+- AGI field mapping är full fältkodsmodell
+- final pay, receivable, bank return och garnishment är förstaklassiga objekt
+- payout export är verifierad mot riktig svensk rail
+- BAS/posting profile är regelstyrd och spårbar
+- high-risk payroll routes kräver rätt permission, step-up och review
+
+## vilka risker som kräver mänsklig flaggning
+
+- nytt tax year med ändrade tabeller, procentsatser eller AGI-fält
+- nya eller ändrade kollektivavtal som påverkar lönearter, pension eller semester
+- nytt bankrail- eller bankgiroformat
+- verklig AGI-provider- eller certifikatkonfiguration
+- irreversibla bokföringsbeslut om kontoplanstruktur eller legal-form-specifika lönekonton
+- policybeslut om vilka payrollaktioner som måste ha dual control i kunddrift

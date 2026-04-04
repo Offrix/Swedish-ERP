@@ -1,0 +1,713 @@
+# DOMAIN_12_IMPLEMENTATION_LIBRARY
+
+## mål
+
+Fas 12 ska byggas så att:
+- varje project-/field-/personalliggare-/id06-/kalkylobjekt har canonical truth
+- governing commercial lineage är cutoff-säker
+- WIP och profitability går att förklara bokföringsmässigt och regulatoriskt
+- field, personalliggare och ID06 aldrig kan skapa parallell ekonomi
+- varje export, approval, override, replay och correction har audit/evidence
+
+## Fas 12
+
+### Delfas 12.1 truth-mode / persistence / classification hardening
+
+- bygg:
+  - `ProjectDomainRepository`
+  - `FieldDomainRepository`
+  - `PersonalliggareDomainRepository`
+  - `Id06DomainRepository`
+  - `KalkylDomainRepository`
+  - `DomainTruthModeStatus`
+  - `DomainClassMaskPolicy`
+- state machines:
+  - `DomainTruthModeStatus: unresolved -> repository_required -> repository_active | blocked`
+- commands:
+  - `requireLegalEffectRepositoryMode`
+  - `publishDomainClassMaskPolicy`
+  - `verifyDomainTruthMode`
+- events:
+  - `DomainTruthModeVerified`
+  - `DomainTruthModeBlocked`
+  - `DomainClassMaskPolicyPublished`
+- invariants:
+  - legal-effect mode får aldrig köras på `memory`
+  - `projects`, `field`, `personalliggare`, `id06`, `kalkyl` får aldrig falla tillbaka till `S2`
+  - startup utan godkänd truth mode ska stoppa processstart, inte bara logga warning
+- blockerande valideringar:
+  - deny boot i `protected`, `pilot_parallel`, `production` om `storeKind !== postgres`
+  - deny publish av route contracts om domänens class-mask saknas
+- routes/API-kontrakt:
+  - intern health/diagnostic route för truth mode
+  - ingen publik mutation för att slå av legal-effect blocking
+- permissions/review-boundaries:
+  - endast platform/security owner får ändra truth-mode- eller class-mask-policy
+- audit/evidence/receipt-krav:
+  - truth-mode verification receipt
+  - class-mask publication receipt
+- replay/recovery/dead-letter-regler:
+  - repository restore måste kunna återställa samma domain snapshot checksums efter restart
+- migrations-/cutover-/rollback-regler:
+  - cutover får inte godkännas förrän truth mode är `repository_active`
+- officiella regler och källor:
+  - inga externa regler styr själva repositoryvalet, men bank-grade secrecy och support boundaries kräver strängare klassning
+- tester:
+  - boot deny on memory store
+  - repository round-trip för all domain keys
+
+### Delfas 12.2 project commercial lineage / immutable supersession
+
+- bygg:
+  - `ProjectCommercialLineage`
+  - `ProjectCommercialVersionNode`
+  - `ProjectCommercialSupersessionLink`
+  - `ProjectCommercialCutoffResolver`
+  - `ProjectCommercialDecisionReceipt`
+- state machines:
+  - `ProjectCommercialVersionNode: draft -> approved -> active | superseded | retired`
+  - `ProjectCommercialSupersessionLink: proposed -> approved -> effective | cancelled`
+- commands:
+  - `registerProjectCommercialVersionNode`
+  - `approveProjectCommercialVersionNode`
+  - `linkProjectCommercialSupersession`
+  - `resolveProjectCommercialCutoff`
+- events:
+  - `ProjectCommercialVersionNodeRegistered`
+  - `ProjectCommercialVersionNodeApproved`
+  - `ProjectCommercialSupersessionLinked`
+- invariants:
+  - historiska commercial records får aldrig skrivas över för att markera ny governing version
+  - cutoff-resolver måste kunna returnera exakt en governing version per object family
+- blockerande valideringar:
+  - deny overlapping active intervals i samma family
+  - deny supersession utan explicit `effectiveFrom`
+- routes/API-kontrakt:
+  - read routes för lineage och cutoff resolution
+  - mutation routes för approval och supersession måste vara high-risk
+- permissions/review-boundaries:
+  - create kan ligga på `company.manage`
+  - approve/supersede kräver `commercial.approve` och stark MFA
+- audit/evidence/receipt-krav:
+  - decision receipt med actor, approvedAt, correlationId och source refs
+- replay/recovery/dead-letter-regler:
+  - replay av approval får inte duplicera supersession links
+- migrations-/cutover-/rollback-regler:
+  - historiska revenue/billing plans migreras till version nodes + supersession links
+- officiella regler och källor:
+  - intern domain governance, men cutoff-säkerhet är ett bokförings- och auditkrav för all efterföljande WIP/fakturering
+- tester:
+  - immutable lineage tests
+  - cutoff resolver tests
+
+### Delfas 12.3 kalkyl / quote / project-budget chain
+
+- bygg:
+  - `EstimateVersion`
+  - `EstimateReviewDecision`
+  - `EstimateApprovalDecision`
+  - `EstimateQuoteConversionReceipt`
+  - `ProjectBudgetVersion`
+  - `ProjectBudgetApprovalDecision`
+- state machines:
+  - `EstimateVersion: draft -> reviewed -> approved -> quoted -> converted | superseded`
+  - `ProjectBudgetVersion: draft -> review_pending -> approved | rejected | superseded`
+- commands:
+  - `reviewEstimateVersion`
+  - `approveEstimateVersion`
+  - `convertEstimateToCanonicalQuote`
+  - `convertEstimateToProjectBudgetDraft`
+  - `approveProjectBudgetVersion`
+- events:
+  - `EstimateReviewed`
+  - `EstimateApproved`
+  - `EstimateConvertedToCanonicalQuote`
+  - `ProjectBudgetVersionCreated`
+  - `ProjectBudgetVersionApproved`
+- invariants:
+  - `quoted` kräver verklig `quoteId`
+  - `approved` budget kräver separat approval-beslut
+  - estimate source refs måste följa med till quote och budget
+- blockerande valideringar:
+  - deny same-actor approve där SoD-policy kräver separat approver
+  - deny budget approval utan lines, totals och trace till estimate eller handskriven source receipt
+- routes/API-kontrakt:
+  - `POST /v1/kalkyl/estimates/:estimateVersionId/review`
+  - `POST /v1/kalkyl/estimates/:estimateVersionId/approve`
+  - `POST /v1/kalkyl/estimates/:estimateVersionId/convert-to-quote`
+  - `POST /v1/kalkyl/estimates/:estimateVersionId/convert-to-project-budget`
+  - ny approval route för project budget
+- permissions/review-boundaries:
+  - estimate review/approve och budget approve ska skiljas från vanlig create
+- audit/evidence/receipt-krav:
+  - quote conversion receipt med `quoteId` och payload checksum
+  - budget approval receipt
+- replay/recovery/dead-letter-regler:
+  - conversion ska vara idempotent per estimate version
+- migrations-/cutover-/rollback-regler:
+  - befintliga `quoted` estimates utan canonical quote ska migreras till `review_pending_remediation`
+- officiella regler och källor:
+  - inga externa regler, men den kommersiella kedjan måste vara auditbar för senare redovisning
+- tester:
+  - estimate -> quote -> project chain
+  - budget approval SoD tests
+
+### Delfas 12.4 invoice-readiness / waiver / commercial decision
+
+- bygg:
+  - `ProjectInvoiceReadinessAssessment`
+  - `ProjectInvoiceReadinessWaiver`
+  - `ProjectInvoiceReadinessReceipt`
+  - `ProjectCommercialExceptionDecision`
+- state machines:
+  - `ProjectInvoiceReadinessAssessment: calculated -> blocked | review_required | ready | ready_by_waiver`
+  - `ProjectInvoiceReadinessWaiver: requested -> approved -> active -> expired | revoked`
+- commands:
+  - `materializeProjectInvoiceReadinessAssessment`
+  - `requestProjectInvoiceReadinessWaiver`
+  - `approveProjectInvoiceReadinessWaiver`
+  - `expireProjectInvoiceReadinessWaiver`
+- events:
+  - `ProjectInvoiceReadinessMaterialized`
+  - `ProjectInvoiceReadinessWaiverRequested`
+  - `ProjectInvoiceReadinessWaiverApproved`
+  - `ProjectInvoiceReadinessWaiverExpired`
+- invariants:
+  - `ready_by_waiver` kräver aktiv waiver
+  - waiver får aldrig vara tyst mutation i assessment record
+- blockerande valideringar:
+  - deny waiver utan support/incident/reference chain
+  - deny waive av blocker som policy förbjuder
+- routes/API-kontrakt:
+  - befintlig readiness-route
+  - nya waiver request/approve/revoke routes
+- permissions/review-boundaries:
+  - waiver approval kräver starkare trust och separat roll
+- audit/evidence/receipt-krav:
+  - waiver receipt med expiry, policyCode och approver chain
+- replay/recovery/dead-letter-regler:
+  - readiness re-materialization efter waiver expiry ska återblockera
+- migrations-/cutover-/rollback-regler:
+  - gamla manuella overrides migreras inte som gröna; de måste remederas
+- officiella regler och källor:
+  - intern governance, men måste hålla auditmässig SoD och support safety
+- tester:
+  - waiver expiry and blocker reset
+  - readiness decision consistency tests
+
+### Delfas 12.5 period-control / close / reopen / rerun
+
+- bygg:
+  - `ProjectPeriodControl`
+  - `ProjectCloseReceipt`
+  - `ProjectReopenRequest`
+  - `ProjectReopenImpact`
+  - `ProjectRebridgePlan`
+- state machines:
+  - `ProjectPeriodControl: open -> soft_closed -> hard_closed -> reopened`
+  - `ProjectReopenRequest: draft -> review_pending -> approved | rejected -> executed`
+- commands:
+  - `materializeProjectPeriodControl`
+  - `requestProjectReopen`
+  - `approveProjectReopen`
+  - `executeProjectRerunPlan`
+- events:
+  - `ProjectPeriodClosed`
+  - `ProjectReopenRequested`
+  - `ProjectReopenApproved`
+  - `ProjectRerunPlanExecuted`
+- invariants:
+  - project runtime får inte ignorera ledger hard close
+  - reopen måste skapa affected object list
+- blockerande valideringar:
+  - deny WIP rebridge i hard-closed period utan reopen receipt
+  - deny invoice-readiness green status om reopen impact fortfarande är aktiv
+- routes/API-kontrakt:
+  - nya project period-control routes
+- permissions/review-boundaries:
+  - reopen kräver dual control och senior finance/project review
+- audit/evidence/receipt-krav:
+  - reopen approval receipt
+  - rerun execution receipt
+- replay/recovery/dead-letter-regler:
+  - rerun-plan får bara kunna köras en gång per reopen execution
+- migrations-/cutover-/rollback-regler:
+  - imported closed periods måste bära explicit close source
+- officiella regler och källor:
+  - perioddisciplin och korrigeringar styrs av svensk bokföringspraxis och ledgerdomänen
+- tester:
+  - reopen impact tests
+  - rerun requirement tests
+
+### Delfas 12.6 WIP / revenue-recognition / accounting-policy
+
+- bygg:
+  - `ProjectAccountingPolicyProfile`
+  - `ProjectRevenueRecognitionPolicyDecision`
+  - `ProjectWipSnapshot`
+  - `ProjectWipLedgerBridge`
+  - `ProjectWipLedgerBridgeLine`
+  - `ProjectWipCorrectionChain`
+- state machines:
+  - `ProjectAccountingPolicyProfile: draft -> approved -> active | superseded`
+  - `ProjectWipLedgerBridge: draft -> posted -> reversed | superseded`
+- commands:
+  - `approveProjectAccountingPolicyProfile`
+  - `materializeProjectWipSnapshot`
+  - `bridgeProjectWipToLedger`
+  - `reverseProjectWipLedgerBridge`
+- events:
+  - `ProjectAccountingPolicyProfileApproved`
+  - `ProjectWipSnapshotMaterialized`
+  - `ProjectWipLedgerBridgePosted`
+  - `ProjectWipLedgerBridgeReversed`
+- invariants:
+  - bridge får inte postas utan aktiv policy profile
+  - bridge line måste bära dimensioner och source snapshot hash
+- blockerande valideringar:
+  - deny bridge om required accounts/policyrefs saknas
+  - deny overwrite av tidigare posted bridge
+- routes/API-kontrakt:
+  - befintlig WIP bridge route
+  - nya policy profile routes
+- permissions/review-boundaries:
+  - policy profile approval och manual corrections kräver high-risk review
+- audit/evidence/receipt-krav:
+  - bridge receipt med policy profile id, snapshot hash och journalEntryId
+- replay/recovery/dead-letter-regler:
+  - same `balanceStateHash` ska återanvända bridge id
+  - reopen/policy change ska skapa reversal + new bridge
+- migrations-/cutover-/rollback-regler:
+  - gamla bridge-poster utan policy profile markeras legacy och migreras före go-live
+- officiella regler och källor:
+  - BFN K2/K3 och svensk redovisningsvägledning för uppdrag/WIP/intäktsredovisning
+- tester:
+  - policy selection tests
+  - bridge idempotency and reversal tests
+
+### Delfas 12.7 build-VAT / omvänd byggmoms
+
+- bygg:
+  - `ProjectBuildVatServiceClassification`
+  - `ProjectBuildVatDecisionBasis`
+  - `ProjectBuildVatAssessment`
+  - `ProjectBuildVatReceipt`
+  - `ProjectBuildVatServiceCatalog`
+- state machines:
+  - `ProjectBuildVatAssessment: draft -> auto_decided | review_required -> approved | rejected`
+- commands:
+  - `classifyProjectBuildVatService`
+  - `createProjectBuildVatAssessment`
+  - `approveProjectBuildVatAssessment`
+- events:
+  - `ProjectBuildVatServiceClassified`
+  - `ProjectBuildVatAssessmentCreated`
+  - `ProjectBuildVatAssessmentApproved`
+- invariants:
+  - omvänd byggmoms får bara sättas med explicit decision basis
+  - review-required får inte falla igenom till auto-green
+- blockerande valideringar:
+  - deny auto decision om tjänsteklass eller köparstatus är ofullständig
+- routes/API-kontrakt:
+  - befintlig assessment route
+  - nya catalog- och review routes
+- permissions/review-boundaries:
+  - approve kräver VAT/review-role
+- audit/evidence/receipt-krav:
+  - decision receipt med serviceCatalogCode och officialSourceRef
+- replay/recovery/dead-letter-regler:
+  - samma source document ska inte skapa dubbla legal-effect decisions utan supersession
+- migrations-/cutover-/rollback-regler:
+  - gamla bool-baserade assessments remederas eller markeras legacy
+- officiella regler och källor:
+  - [Skatteverket: förteckning över bygg- och anläggningstjänster vid omvänd byggmoms](https://skatteverket.se/foretag/moms/sarskildamomsregler/byggverksamhet/omvandbetalningsskyldighetinombyggsektorn/forteckningoverbyggochanlaggningstjanster/b.4.b1014b415f3321c0de37c1.html)
+- tester:
+  - build-VAT classification tests
+  - review-required regression tests
+
+### Delfas 12.8 profitability / allocation / mission-control
+
+- bygg:
+  - `ProjectProfitabilitySnapshot`
+  - `ProjectProfitabilitySourceCoverage`
+  - `ProjectAllocationBatch`
+  - `ProjectAllocationLine`
+  - `ProjectAllocationCorrection`
+  - `ProjectProfitabilityAdjustment`
+  - `ProjectMissionControlSnapshot`
+- state machines:
+  - `ProjectAllocationBatch: draft -> posted -> corrected | reversed`
+  - `ProjectProfitabilityAdjustment: draft -> pending_review -> approved | rejected`
+- commands:
+  - `materializeProjectProfitabilitySnapshot`
+  - `postProjectAllocationBatch`
+  - `correctProjectAllocationBatch`
+  - `decideProjectProfitabilityAdjustment`
+- events:
+  - `ProjectProfitabilitySnapshotMaterialized`
+  - `ProjectAllocationBatchPosted`
+  - `ProjectAllocationBatchCorrected`
+  - `ProjectProfitabilityAdjustmentApproved`
+- invariants:
+  - varje belopp i snapshot ska ha source coverage
+  - correction får aldrig skriva över tidigare allocation batch
+- blockerande valideringar:
+  - deny mission-control green om source coverage är ofullständig över policygräns
+- routes/API-kontrakt:
+  - profitability snapshot routes
+  - mission control routes
+  - nya allocation correction routes
+- permissions/review-boundaries:
+  - manual adjustments kräver review/approval
+- audit/evidence/receipt-krav:
+  - allocation batch receipt
+  - source coverage receipt
+- replay/recovery/dead-letter-regler:
+  - re-materialization efter ny source ska skapa nytt snapshot hash
+- migrations-/cutover-/rollback-regler:
+  - imported profitability history ska märkas history-only tills full source coverage finns
+- officiella regler och källor:
+  - kostnadskontroll och controller-spårbarhet följer intern redovisnings- och auditlogik
+- tester:
+  - source coverage tests
+  - allocation correction tests
+
+### Delfas 12.9 field operational / offline / conflict
+
+- bygg:
+  - `OperationalCase`
+  - `WorkOrder`
+  - `FieldSyncEnvelope`
+  - `FieldOfflinePolicyMatrix`
+  - `FieldConflictRecord`
+  - `FieldConflictResolutionReceipt`
+  - `FieldFinanceHandoff`
+- state machines:
+  - `FieldSyncEnvelope: pending -> synced | conflicted | failed_terminal`
+  - `FieldConflictRecord: open -> review_pending -> resolved | dismissed`
+- commands:
+  - `syncOfflineEnvelope`
+  - `openFieldConflictRecord`
+  - `resolveFieldConflictRecord`
+  - `createFieldFinanceHandoff`
+- events:
+  - `FieldSyncEnvelopeReceived`
+  - `FieldConflictOpened`
+  - `FieldConflictResolved`
+  - `FieldFinanceHandoffCreated`
+- invariants:
+  - `financeTruthOwner` måste vara `projects`
+  - open conflict ska kunna blockera finance handoff
+- blockerande valideringar:
+  - deny unsupported offline mutation
+  - deny finance handoff on open conflicts
+- routes/API-kontrakt:
+  - befintliga field sync/resolve/handoff routes
+  - ny read route för policy matrix
+- permissions/review-boundaries:
+  - conflict resolution kräver stark MFA och review receipt
+- audit/evidence/receipt-krav:
+  - sync envelope receipt
+  - conflict resolution receipt
+- replay/recovery/dead-letter-regler:
+  - `clientMutationId` är absolut idempotency key
+- migrations-/cutover-/rollback-regler:
+  - migration av work orders kräver mapping av version numbers för offline conflict detection
+- officiella regler och källor:
+  - inga externa myndighetsregler, men operator- och finance-boundary är bindande krav
+- tester:
+  - duplicate mutation tests
+  - conflict and handoff blocking tests
+
+### Delfas 12.10 personalliggare rule-catalog / kiosk / correction
+
+- bygg:
+  - `PersonalliggareRuleCatalog`
+  - `PersonalliggareRuleVersion`
+  - `ConstructionSite`
+  - `AttendanceEvent`
+  - `AttendanceCorrection`
+  - `KioskDevice`
+  - `KioskDeviceAttestationReceipt`
+- state machines:
+  - `ConstructionSiteThreshold: threshold_pending -> threshold_not_met | registration_required | active`
+  - `KioskDevice: pending -> trusted | revoked`
+  - `AttendanceEvent: captured -> synced -> corrected | voided_by_correction`
+- commands:
+  - `publishPersonalliggareRuleVersion`
+  - `evaluateConstructionSiteThreshold`
+  - `trustKioskDevice`
+  - `revokeKioskDevice`
+  - `correctAttendanceEvent`
+- events:
+  - `PersonalliggareRuleVersionPublished`
+  - `ConstructionSiteThresholdEvaluated`
+  - `KioskDeviceTrusted`
+  - `AttendanceEventCorrected`
+- invariants:
+  - threshold måste alltid kunna härledas till rule version och source ref
+  - correction får aldrig radera originalevent
+- blockerande valideringar:
+  - deny kiosk attendance without trusted device
+  - deny registration-required site from bypassing registration status
+- routes/API-kontrakt:
+  - befintliga site/device/attendance/correction routes
+  - nya rule-catalog routes
+- permissions/review-boundaries:
+  - rule publication kräver high-risk review
+  - device trust/revoke kräver admin + strong MFA
+- audit/evidence/receipt-krav:
+  - rule publication receipt
+  - device attestation receipt
+  - correction receipt
+- replay/recovery/dead-letter-regler:
+  - attendance correction ska vara append-only och idempotent mot correction id
+- migrations-/cutover-/rollback-regler:
+  - gamla sites får en explicit applied rule version vid migrering
+- officiella regler och källor:
+  - [Skatteverket: personalliggare i byggbranschen](https://skatteverket.se/foretag/arbetsgivare/personalliggare/personalliggarebyggbranschen.4.7be5268414bea0646949797.html)
+- tester:
+  - threshold-by-year tests
+  - kiosk trust and correction chain tests
+
+### Delfas 12.11 personalliggare XML / export / secure transfer
+
+- bygg:
+  - `PersonalliggareXmlArtifact`
+  - `PersonalliggareXsdValidationResult`
+  - `PersonalliggareTransferProfile`
+  - `PersonalliggareTransferReceipt`
+- state machines:
+  - `PersonalliggareXmlArtifact: draft -> schema_validated -> ready_for_transfer | rejected`
+  - `PersonalliggareTransferReceipt: expected -> imported -> mapped | rejected`
+- commands:
+  - `buildPersonalliggareXmlArtifact`
+  - `validatePersonalliggareXml`
+  - `registerPersonalliggareTransfer`
+  - `importPersonalliggareTransferReceipt`
+- events:
+  - `PersonalliggareXmlArtifactBuilt`
+  - `PersonalliggareXmlValidated`
+  - `PersonalliggareTransferRegistered`
+  - `PersonalliggareTransferReceiptImported`
+- invariants:
+  - official export och internal audit export får inte blandas ihop
+  - schema validation måste vara versionbunden
+- blockerande valideringar:
+  - deny transfer om XML inte är validerad
+- routes/API-kontrakt:
+  - official export routes separata från internal audit export
+- permissions/review-boundaries:
+  - official transfer kräver särskild permission och strong MFA
+- audit/evidence/receipt-krav:
+  - schema validation receipt
+  - transfer receipt
+- replay/recovery/dead-letter-regler:
+  - same export checksum ska återanvända artifact där policy tillåter
+- migrations-/cutover-/rollback-regler:
+  - tidigare JSON-only exports märks `legacy_internal_only`
+- officiella regler och källor:
+  - [Skatteverket: schema/XML för personalliggare i byggbranschen](https://www.skatteverket.se/foretag/etjansterochblanketter/allaetjanster/schemalagerxml/personalliggareibyggbranschen.4.5a85666214dbad743ff34e0.html)
+- tester:
+  - XML serialization tests
+  - schema validation and transfer receipt tests
+
+### Delfas 12.12 ID06 provider / workplace / evidence
+
+- bygg:
+  - `Id06ProviderCapabilityManifest`
+  - `Id06CompanyVerificationRequest`
+  - `Id06PersonVerificationRequest`
+  - `Id06CardStatusReceipt`
+  - `Id06WorkplaceRegistryLink`
+  - `Id06WorkplaceBinding`
+  - `Id06EvidenceBundle`
+  - `Id06BindingRevocationEvent`
+- state machines:
+  - `Id06CompanyVerificationRequest: draft -> dispatched -> verified | failed | expired`
+  - `Id06PersonVerificationRequest: draft -> dispatched -> verified | failed | expired`
+  - `Id06WorkplaceBinding: pending -> active | suspended | revoked | expired`
+- commands:
+  - `dispatchId06CompanyVerification`
+  - `dispatchId06PersonVerification`
+  - `importId06CardStatusReceipt`
+  - `createId06WorkplaceBinding`
+  - `revokeId06WorkplaceBinding`
+  - `exportId06EvidenceBundle`
+- events:
+  - `Id06CompanyVerificationDispatched`
+  - `Id06PersonVerificationDispatched`
+  - `Id06CardStatusReceiptImported`
+  - `Id06WorkplaceBindingActivated`
+  - `Id06WorkplaceBindingRevoked`
+- invariants:
+  - live verification får aldrig uppstå utan provider receipt
+  - workplace måste finnas i verkligt workplace registry
+- blockerande valideringar:
+  - deny synthetic workplace in legal-effect mode
+  - deny active binding om company/person/card receipt saknas eller är expired
+- routes/API-kontrakt:
+  - befintliga verify/validate/binding/export-routes skrivs om till request/receipt semantics
+- permissions/review-boundaries:
+  - verification dispatch och binding create är high-risk
+- audit/evidence/receipt-krav:
+  - provider receipt refs
+  - revocation receipt
+  - export evidence hash
+- replay/recovery/dead-letter-regler:
+  - receipt import append-only
+  - refresh/revocation skapar ny lifecycle-event, aldrig overwrite
+- migrations-/cutover-/rollback-regler:
+  - befintliga lokala `verified`/`active` records migreras till legacy status tills provider receipts finns
+- officiella regler och källor:
+  - [ID06: ID06-kort](https://id06.se/id06-kort/)
+  - [ID06: ID06 loggningsindex](https://id06.se/id06-loggningsindex/)
+- tester:
+  - provider contract tests
+  - lifecycle tests för revocation and expiry
+
+### Delfas 12.13 route / support boundary / masking
+
+- bygg:
+  - `Domain12SupportMaskPolicy`
+  - `Domain12ReadSurfacePolicy`
+  - `Domain12HighRiskReviewReceipt`
+  - `Domain12ExportApproval`
+- state machines:
+  - `Domain12ExportApproval: requested -> approved -> active -> completed | rejected | expired`
+- commands:
+  - `publishDomain12SupportMaskPolicy`
+  - `approveDomain12Export`
+  - `expireDomain12ExportApproval`
+- events:
+  - `Domain12SupportMaskPolicyPublished`
+  - `Domain12ExportApproved`
+- invariants:
+  - support får bara se maskad version av personalliggare/ID06-identiteter och känsliga project refs där policy kräver det
+  - export kräver approval där policy kräver det
+- blockerande valideringar:
+  - deny export utan approval
+  - deny read surface utan required trust level
+- routes/API-kontrakt:
+  - alla export- och kontrollroutes i domänen ska bära explicit mask-policy
+- permissions/review-boundaries:
+  - support, compliance och admin ska ha olika read/write scopes
+- audit/evidence/receipt-krav:
+  - export approval receipt
+  - masked-view receipt
+- replay/recovery/dead-letter-regler:
+  - export approvals är tidsboxade och får inte återanvändas utanför sin scope
+- migrations-/cutover-/rollback-regler:
+  - äldre exports markeras legacy och får inte räknas som current evidence
+- officiella regler och källor:
+  - interna säkerhetsregler + domän 2-krav
+- tester:
+  - support masking tests
+  - route trust regression tests
+
+### Delfas 12.14 import / live-conversion / parallel-run
+
+- bygg:
+  - `ProjectImportBatch`
+  - `ProjectImportCollision`
+  - `CommercialDiffReport`
+  - `ProjectLiveConversionApproval`
+  - `ProjectRollbackReceipt`
+- state machines:
+  - `ProjectImportBatch: draft -> imported -> diff_ready -> conversion_pending -> converted | rejected`
+  - `ProjectRollbackReceipt: drafted -> approved -> executed`
+- commands:
+  - `importProjectBatch`
+  - `materializeCommercialDiffReport`
+  - `approveProjectLiveConversion`
+  - `executeProjectRollback`
+- events:
+  - `ProjectImportBatchImported`
+  - `CommercialDiffReportMaterialized`
+  - `ProjectLiveConversionApproved`
+  - `ProjectRollbackExecuted`
+- invariants:
+  - imported truth får inte bli governing utan diff signoff
+  - rollback måste kunna peka på exakt conversion approval
+- blockerande valideringar:
+  - deny live conversion om collisions eller unresolved diffs finns
+  - deny rollback om snapshot baseline saknas
+- routes/API-kontrakt:
+  - import, diff, conversion och rollback routes
+- permissions/review-boundaries:
+  - conversion approval kräver dual control
+- audit/evidence/receipt-krav:
+  - import receipt
+  - diff receipt
+  - conversion approval receipt
+  - rollback receipt
+- replay/recovery/dead-letter-regler:
+  - import replay måste vara idempotent per source batch checksum
+- migrations-/cutover-/rollback-regler:
+  - parallel run måste lagra både imported and current runtime facts för jämförelse
+- officiella regler och källor:
+  - inga direkta myndighetskällor, men migration/cutover måste hålla audit och determinism
+- tester:
+  - import collision tests
+  - conversion and rollback tests
+
+### Delfas 12.15 runbook / seed / fake-live / legacy purge
+
+- bygg:
+  - `Domain12RunbookClassification`
+  - `Domain12LegacyTruthRecord`
+  - `Domain12SeedIsolationReceipt`
+- state machines:
+  - `Domain12RunbookClassification: discovered -> classified -> replaced | archived | removed`
+  - `Domain12LegacyTruthRecord: open -> migrated | archived | removed`
+- commands:
+  - `classifyDomain12Runbook`
+  - `archiveDomain12LegacyDocument`
+  - `removeDomain12FakeLiveClaim`
+  - `isolateDomain12Seed`
+- events:
+  - `Domain12RunbookClassified`
+  - `Domain12LegacyDocumentArchived`
+  - `Domain12SeedIsolated`
+- invariants:
+  - ingen doc eller seed får påstå live capability som runtime inte stödjer
+  - demo seeds får aldrig nå protected/live bootstrap
+- blockerande valideringar:
+  - deny legal-effect boot om domain-12 demo seed aktiveras
+  - deny docs release om fake-live claim hittas
+- routes/API-kontrakt:
+  - inga publika routes; detta är repo- och driftstyrning
+- permissions/review-boundaries:
+  - endast platform owner / release owner får classa som `remove` eller `archive`
+- audit/evidence/receipt-krav:
+  - runbook classification receipt
+  - seed isolation receipt
+- replay/recovery/dead-letter-regler:
+  - legacy docs får aldrig återaktiveras som bindande utan ny rebuild-revision
+- migrations-/cutover-/rollback-regler:
+  - replacement-runbooks måste finnas innan purge slutförs
+- officiella regler och källor:
+  - rebuild-sanningen styr, men runbooks måste spegla verifierad runtime
+- tester:
+  - docs capability lint
+  - seed isolation boot deny tests
+
+## vilka bevis som krävs innan något märks som project-/field-/compliance-korrekt eller production-ready
+
+- durable truth mode i legal-effect environments
+- explicit class-mask och support-boundaries
+- immutable commercial lineage
+- canonical estimate/quote/budget-kedja
+- policybunden WIP och revenue recognition
+- official personalliggare export family
+- provider-backed ID06 lifecycle
+- import/live conversion med diff och rollback receipts
+- runbooks som speglar runtime och inga fake-live claims
+
+## vilka risker som kräver mänsklig flaggning
+
+- val mellan K2/K3 och policyprofil per bolag
+- slutlig byggmomskatalog där gränsfall kräver mänsklig tolkning
+- verkligt ID06-provideravtal, credentials och revocation-flöden
+- live conversion signoff och rollback-beslut
+- support/export-policy för personalliggare och ID06-identiteter

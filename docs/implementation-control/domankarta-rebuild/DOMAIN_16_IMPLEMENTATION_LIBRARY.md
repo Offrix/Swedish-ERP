@@ -1,0 +1,729 @@
+# DOMAIN_16_IMPLEMENTATION_LIBRARY
+
+## mål
+
+Fas 16 ska byggas så att:
+- support, incident, replay, drill och ops truth är first-class runtime
+- plattformen får en verklig super-admin / platform control plane, inte bara företagsscopeade cockpits
+- masked support blir verklig och reveal blir lika hårt modellerad som impersonation och break-glass
+- release evidence, runbook execution och drills bär samma receipts, lineage och provenancekedja
+
+## bindande tvärdomänsunderlag
+
+- `AUDIT_EVIDENCE_OCH_APPROVALS_BINDANDE_SANNING.md` är obligatorisk canonical source för support reveal, approvals, break-glass, evidence bundles och operator sign-off i denna domän.
+- `IDENTITET_AUTH_MFA_OCH_BEHORIGHET_BINDANDE_SANNING.md` är obligatorisk canonical source för impersonation, session, step-up och permission boundaries i denna domän.
+- `SECRETS_KMS_HSM_OCH_KRYPTERING_BINDANDE_SANNING.md` är obligatorisk canonical source för decrypt boundaries, secret access och key handling i denna domän.
+- `MIGRATION_PARALLELLKORNING_CUTOVER_OCH_ROLLBACK_BINDANDE_SANNING.md` är obligatorisk canonical source för cutover watch windows, rollback, fail-forward och migration incident truth i denna domän.
+- `STRESS_CHAOS_RECOVERY_OCH_ADVERSARIAL_BINDANDE_SANNING.md` är obligatorisk canonical source för drills, overload, recovery, chaos och readiness verdict i denna domän.
+- `SEARCH_ACTIVITY_NOTIFICATIONS_OCH_WORKBENCHES_BINDANDE_SANNING.md` är obligatorisk canonical source för operativa workbenches, activity, notifications, freshness och masking i denna domän.
+- `SUPPORT_BACKOFFICE_INCIDENTS_OCH_REPLAY_BINDANDE_SANNING.md` är obligatorisk canonical source för support cases, incidenter, replay, dead letters, no-go board och quarantine i denna domän.
+
+## Fas 16
+
+### Delfas 16.1 support-case / masked-view / reveal hardening
+
+- bygg:
+  - `SupportCase`
+  - `SupportCaseTransitionReceipt`
+  - `MaskedProjectionPolicy`
+  - `RevealRequest`
+  - `RevealApproval`
+  - `RevealSession`
+  - `RevealExpiryReceipt`
+- state machines:
+  - `SupportCase: open -> triaged -> in_progress -> waiting_input -> resolved -> closed`
+  - `RevealRequest: requested -> approved | denied | expired`
+  - `RevealSession: pending -> active -> expired | closed`
+- commands:
+  - `createSupportCase`
+  - `triageSupportCase`
+  - `transitionSupportCase`
+  - `requestReveal`
+  - `approveReveal`
+  - `activateRevealSession`
+  - `expireRevealSession`
+- events:
+  - `SupportCaseCreated`
+  - `SupportCaseTransitioned`
+  - `RevealRequested`
+  - `RevealApproved`
+  - `RevealSessionActivated`
+  - `RevealSessionExpired`
+- invariants:
+  - support read är maskad som default
+  - `RevealSession` måste bära exact object scope, field scope, reason code, requester, approver, watermark och expiresAt
+  - support case close kräver `SupportCaseTransitionReceipt`
+- blockerande valideringar:
+  - deny full read utan aktiv `RevealSession`
+  - deny close om case saknar resolution summary eller open follow-up items där policy kräver det
+- routes/API-kontrakt:
+  - `POST /v1/backoffice/support-cases`
+  - `POST /v1/backoffice/support-cases/:supportCaseId/status`
+  - `POST /v1/backoffice/reveal-requests`
+  - `POST /v1/backoffice/reveal-requests/:revealRequestId/approve`
+  - `POST /v1/backoffice/reveal-sessions/:revealSessionId/start`
+  - `POST /v1/backoffice/reveal-sessions/:revealSessionId/end`
+- permissions/review-boundaries:
+  - `surface.backoffice.read`
+  - `backoffice.support_case.manage`
+  - `backoffice.reveal.request`
+  - `backoffice.reveal.approve`
+- audit/evidence/receipt-krav:
+  - varje reveal ska ge evidence-exportbar receipt
+  - varje full view read ska bära reveal-session-id i audit trail
+- officiella regler och källor:
+  - privileged access separation principles från [Microsoft Entra emergency access](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-emergency-access)
+- tester:
+  - masked read by default
+  - reveal approval flow
+  - auto-expiry and remasking
+
+### Delfas 16.2 support-write / diagnostics / mutation-scope hardening
+
+- bygg:
+  - `BackofficeMutationScope`
+  - `BackofficeMutationScopeVersion`
+  - `SupportMutationReceipt`
+  - `AdminDiagnosticExecution`
+  - `StepUpReceipt`
+- state machines:
+  - `AdminDiagnosticExecution: requested -> approved -> executed | blocked | failed`
+- commands:
+  - `publishBackofficeMutationScope`
+  - `runAdminDiagnostic`
+  - `recordSupportMutationReceipt`
+  - `verifyStepUpReceipt`
+- events:
+  - `BackofficeMutationScopePublished`
+  - `AdminDiagnosticExecuted`
+  - `SupportMutationBlocked`
+- invariants:
+  - support write måste bära support-case-id, actor, approval ref, mutation scope ref och trust-level receipt
+  - allowlist får inte ligga som osignerad kodkonstant utan publicerad scope-version
+  - support write får inte skriva affärssanning direkt
+- blockerande valideringar:
+  - deny write diagnostic utan support-case-approved action
+  - deny action utanför aktiv scope-version
+  - deny mutation utan fresh `StepUpReceipt` när route-contract kräver `strong_mfa`
+- routes/API-kontrakt:
+  - `POST /v1/backoffice/support-cases/:supportCaseId/diagnostics`
+  - `GET /v1/backoffice/mutation-scopes`
+  - `POST /v1/backoffice/mutation-scopes`
+- permissions/review-boundaries:
+  - `backoffice.support_action.approve`
+  - `backoffice.mutation_scope.publish`
+  - `approval.approve`
+- audit/evidence/receipt-krav:
+  - receipt måste bära support case, incident link, trust level, request payload hash och outcome
+- tester:
+  - diagnostic allow/deny
+  - self-approval deny
+  - step-up expiry
+
+### Delfas 16.3 impersonation hardening
+
+- bygg:
+  - `ImpersonationSession`
+  - `ImpersonationActionScopeReceipt`
+  - `ImpersonationTerminationReceipt`
+  - `ImpersonationEvidenceBundle`
+- state machines:
+  - `ImpersonationSession: requested -> approved -> active -> ended | expired | revoked`
+- commands:
+  - `requestImpersonation`
+  - `approveImpersonation`
+  - `activateImpersonation`
+  - `terminateImpersonation`
+- events:
+  - `ImpersonationRequested`
+  - `ImpersonationApproved`
+  - `ImpersonationActivated`
+  - `ImpersonationEnded`
+- invariants:
+  - read-only och limited-write är separata modes
+  - limited-write scope måste matcha aktiv `BackofficeMutationScopeVersion`
+  - watermark krävs alltid
+- blockerande valideringar:
+  - deny limited-write utan explicit approved action scope
+  - deny activation efter expiry
+- routes/API-kontrakt:
+  - behåll befintliga `/v1/backoffice/impersonations/*`
+  - lägg till `GET /v1/backoffice/impersonations/:sessionId/scope`
+- permissions/review-boundaries:
+  - `backoffice.impersonation.request`
+  - `backoffice.impersonation.approve`
+  - `backoffice.impersonation.activate`
+- audit/evidence/receipt-krav:
+  - evidence bundle måste visa actor, approver, target user, TTL, scope och watermark
+- officiella regler och källor:
+  - [Microsoft Entra emergency access](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-emergency-access)
+- tester:
+  - read-only deny on writes
+  - limited-write scope enforcement
+  - expiry and evidence export
+
+### Delfas 16.4 break-glass / emergency-access hardening
+
+- bygg:
+  - `BreakGlassGrant`
+  - `BreakGlassApprovalReceipt`
+  - `EmergencyAccessAccountProfile`
+  - `EmergencyAccessUsageAlert`
+  - `BreakGlassReviewReceipt`
+- state machines:
+  - `BreakGlassGrant: requested -> partially_approved -> dual_approved -> active -> closed | expired | revoked`
+  - `EmergencyAccessUsageAlert: detected -> acknowledged -> reviewed`
+- commands:
+  - `requestBreakGlass`
+  - `approveBreakGlass`
+  - `activateBreakGlass`
+  - `closeBreakGlassSession`
+  - `recordEmergencyAccessUsageAlert`
+- events:
+  - `BreakGlassRequested`
+  - `BreakGlassDualApproved`
+  - `BreakGlassActivated`
+  - `EmergencyAccessUsed`
+  - `BreakGlassClosed`
+- invariants:
+  - `incidentId` är obligatoriskt
+  - två olika approvers krävs
+  - break-glass och impersonation får aldrig dela session-id eller governance-path
+  - emergency access-konton måste vara separat modellerade från ordinarie adminidentiteter
+- blockerande valideringar:
+  - deny activation utan dual approval
+  - deny incident close om linked break-glass saknar review receipt
+- routes/API-kontrakt:
+  - behåll `/v1/backoffice/break-glass/*`
+  - lägg till `/v1/ops/emergency-access-accounts`
+  - lägg till `/v1/ops/emergency-access-alerts`
+- permissions/review-boundaries:
+  - `backoffice.break_glass.request`
+  - `backoffice.break_glass.approve`
+  - `ops.emergency_access.read`
+- audit/evidence/receipt-krav:
+  - start och close måste ha immutable receipt
+  - usage alert måste skapa operator work item
+- officiella regler och källor:
+  - [Microsoft Entra emergency access](https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-emergency-access)
+  - [CISA incident playbooks](https://www.cisa.gov/sites/default/files/2023-01/federal_government_cybersecurity_incident_and_vulnerability_response_playbooks_508c_5.pdf)
+- tester:
+  - dual approval
+  - usage alert generation
+  - post-review blocker
+
+### Delfas 16.5 access-review / SoD hardening
+
+- bygg:
+  - `AccessReviewCase`
+  - `SoDViolationRecord`
+  - `DelegationRemediation`
+  - `AccessReviewSignoff`
+- state machines:
+  - `AccessReviewCase: generated -> in_review -> remediation_required -> signed_off | reopened`
+- commands:
+  - `generateAccessReview`
+  - `recordSoDViolation`
+  - `remediateDelegation`
+  - `signAccessReview`
+- events:
+  - `AccessReviewGenerated`
+  - `SoDViolationDetected`
+  - `AccessReviewSignedOff`
+- invariants:
+  - same actor cannot both create and sign where policy requires separation
+  - stale delegations must create remediation record
+- blockerande valideringar:
+  - deny signoff with open critical SoD violations
+- routes/API-kontrakt:
+  - behåll `/v1/backoffice/access-reviews*`
+  - lägg till `/v1/backoffice/sod-violations`
+- permissions/review-boundaries:
+  - `backoffice.access_review.generate`
+  - `backoffice.access_review.signoff`
+- audit/evidence/receipt-krav:
+  - remediation and signoff receipts must be exportable
+- tester:
+  - stale delegation detection
+  - signoff separation
+
+### Delfas 16.6 replay / dead-letter / correction-orchestration hardening
+
+- bygg:
+  - `ReplayOperation`
+  - `ReplayApprovalReceipt`
+  - `ReplayExecutionReceipt`
+  - `ReplayOutcomeVerification`
+  - `DeadLetterCase`
+  - `DeadLetterResolutionReceipt`
+  - `CorrectionCaseLink`
+  - `ReconciliationRerunRequest`
+- state machines:
+  - `ReplayOperation: requested -> approved -> executing -> awaiting_verification -> verified_completed | failed | cancelled`
+  - `DeadLetterCase: pending_triage -> acknowledged -> replay_planned -> replay_executing -> awaiting_verification -> verified_resolved -> closed`
+  - `ReconciliationRerunRequest: requested -> approved -> executed | denied`
+- commands:
+  - `registerReplayOperation`
+  - `approveReplayOperation`
+  - `executeReplayOperation`
+  - `verifyReplayOutcome`
+  - `linkCorrectionCase`
+  - `requestReconciliationRerun`
+- events:
+  - `ReplayOperationRegistered`
+  - `ReplayExecutionStarted`
+  - `ReplayOutcomeVerified`
+  - `DeadLetterVerifiedResolved`
+  - `CorrectionCaseLinked`
+- invariants:
+  - replay completion is not equal to business truth restored
+  - correction case must point to source-domain command or source-domain correction object
+  - dead-letter may not skip verification
+- blockerande valideringar:
+  - deny dead-letter `verified_resolved` without outcome verification
+  - deny correction masquerading as replay
+- routes/API-kontrakt:
+  - `/v1/backoffice/replays/*`
+  - `/v1/backoffice/dead-letters/*`
+  - `/v1/ops/corrections/*`
+- permissions/review-boundaries:
+  - `backoffice.replay.approve`
+  - `backoffice.replay.execute`
+  - `ops.correction.approve`
+- audit/evidence/receipt-krav:
+  - outcome verification must cite downstream receipts or provider receipts
+- tester:
+  - dead-letter transition suite
+  - replay verification suite
+  - correction-vs-replay separation
+
+### Delfas 16.7 incident-signal / incident / post-review / blast-radius hardening
+
+- bygg:
+  - `IncidentSignal`
+  - `RuntimeIncident`
+  - `IncidentImpactGraph`
+  - `IncidentAffectedDependency`
+  - `IncidentContainmentDecision`
+  - `IncidentPostReview`
+  - `CorrectiveActionReceipt`
+  - `PreventiveActionReceipt`
+- state machines:
+  - `RuntimeIncident: open -> investigating -> contained -> resolved -> post_review_completed -> closed`
+- commands:
+  - `recordIncidentSignal`
+  - `openIncident`
+  - `recordIncidentEvent`
+  - `updateIncidentStatus`
+  - `recordIncidentPostReview`
+  - `recordContainmentDecision`
+- events:
+  - `IncidentSignalRecorded`
+  - `IncidentOpened`
+  - `IncidentContained`
+  - `IncidentResolved`
+  - `IncidentPostReviewCompleted`
+- invariants:
+  - close requires post-review when policy says so
+  - linked break-glass sessions must be reviewed before close
+  - impact graph must enumerate affected tenants, providers, jobs, releases, cutovers and secret/cert decisions where present
+- blockerande valideringar:
+  - deny close without post-review
+  - deny close with unresolved critical containment actions
+- routes/API-kontrakt:
+  - move incidents to canonical `/v1/ops/incidents/*`
+  - keep transitional compatibility wrappers only until migration completes
+- permissions/review-boundaries:
+  - `ops.incident.open`
+  - `ops.incident.command`
+  - `ops.incident.post_review`
+- audit/evidence/receipt-krav:
+  - impact graph and post-review must be evidence-exportable
+- officiella regler och källor:
+  - [CISA response playbooks](https://www.cisa.gov/sites/default/files/2023-01/federal_government_cybersecurity_incident_and_vulnerability_response_playbooks_508c_5.pdf)
+- tester:
+  - incident close blocker
+  - blast radius materialization
+  - corrective/preventive action receipts
+
+### Delfas 16.8 queue / SLA / escalation / submission-monitor hardening
+
+- bygg:
+  - `OpsQueueAggregate`
+  - `SlaScanExecution`
+  - `EscalationDecision`
+  - `SubmissionMonitorFreshnessState`
+  - `QueueOwnerAssignment`
+- state machines:
+  - `EscalationDecision: pending -> acknowledged -> routed | resolved`
+- commands:
+  - `runSlaScan`
+  - `recordEscalationDecision`
+  - `materializeOpsQueueAggregate`
+- events:
+  - `SlaScanCompleted`
+  - `EscalationRaised`
+  - `QueueAggregateMaterialized`
+- invariants:
+  - queue aggregate must carry owner and freshness
+  - submission monitor may not be treated as green when stale
+- blockerande valideringar:
+  - deny no-go-board green state if stale queue aggregate exists
+- routes/API-kontrakt:
+  - `/v1/ops/queues`
+  - `/v1/ops/escalations`
+  - `/v1/backoffice/submissions/monitor`
+- permissions/review-boundaries:
+  - `ops.queue.read`
+  - `ops.escalation.decide`
+- audit/evidence/receipt-krav:
+  - every escalation decision requires actor, reason, linked queue items and linked incident/support refs
+- tester:
+  - stale queue detection
+  - escalation flow
+
+### Delfas 16.9 checkpoint / restore-drill / replay-drill hardening
+
+- bygg:
+  - `RollbackCheckpoint`
+  - `RestoreDrillExecution`
+  - `ReplayDrillExecution`
+  - `DrillVerificationReceipt`
+- state machines:
+  - `RestoreDrillExecution: planned -> started -> completed | failed`
+  - `ReplayDrillExecution: planned -> started -> completed | failed`
+- commands:
+  - `createRollbackCheckpoint`
+  - `sealRollbackCheckpoint`
+  - `startRestoreDrill`
+  - `completeRestoreDrill`
+  - `startReplayDrill`
+  - `completeReplayDrill`
+- events:
+  - `RollbackCheckpointCreated`
+  - `RestoreDrillFailed`
+  - `ReplayDrillCompleted`
+- invariants:
+  - drills must cite checkpoint, plan, actor and verification summary
+  - failed drills must create incident signal or no-go blocker
+- blockerande valideringar:
+  - deny drill pass without verification summary
+- routes/API-kontrakt:
+  - canonical `/v1/ops/drills/*`
+  - compatibility bridge from existing routes only during migration
+- permissions/review-boundaries:
+  - `ops.drill.plan`
+  - `ops.drill.execute`
+- audit/evidence/receipt-krav:
+  - drill receipts must be attachable to release evidence
+- officiella regler och källor:
+  - [NIST SP 800-34](https://csrc.nist.gov/pubs/sp/800/34/r1/upd1/final)
+- tester:
+  - checkpoint seal suite
+  - restore/replay drill lifecycle
+
+### Delfas 16.10 ops-feature-flag / emergency-disable / rotation / revoke hardening
+
+- bygg:
+  - `FeatureFlag`
+  - `EmergencyDisable`
+  - `GlobalKillSwitch`
+  - `SecretRotationPlan`
+  - `SecretRotationExecution`
+  - `CallbackSecretRevocation`
+  - `CertificateRevocationDecision`
+- state machines:
+  - `GlobalKillSwitch: requested -> approved -> active -> released`
+  - `SecretRotationPlan: planned -> executing -> verified | failed | revoked`
+- commands:
+  - `upsertFeatureFlag`
+  - `requestEmergencyDisable`
+  - `activateGlobalKillSwitch`
+  - `planSecretRotation`
+  - `executeSecretRotation`
+  - `revokeCallbackSecret`
+  - `revokeCertificateChain`
+- events:
+  - `FeatureFlagUpserted`
+  - `EmergencyDisableRequested`
+  - `GlobalKillSwitchActivated`
+  - `SecretRotationExecuted`
+  - `CertificateRevoked`
+- invariants:
+  - feature rollout is not a kill switch
+  - global kill switch must carry platform scope and incident/containment ref
+  - secret rotation must be verifiable, not just requested
+- blockerande valideringar:
+  - deny release of high-risk emergency action by same actor
+  - deny unresolved active global kill switch in GA readiness
+- routes/API-kontrakt:
+  - `/v1/ops/feature-flags/*`
+  - `/v1/ops/emergency-disables/*`
+  - `/v1/super-admin/kill-switches/*`
+  - `/v1/ops/secrets/*`
+  - `/v1/ops/callback-secrets/*`
+  - `/v1/ops/certificate-chains/*`
+- permissions/review-boundaries:
+  - `ops.flag.publish`
+  - `ops.emergency_disable.approve`
+  - `super_admin.kill_switch.activate`
+- audit/evidence/receipt-krav:
+  - every activate/release/revoke action must create containment receipt
+- officiella regler och källor:
+  - [AWS Secrets Manager rotation](https://docs.aws.amazon.com/secretsmanager/latest/userguide/rotating-secrets.html)
+- tester:
+  - dual control suite
+  - rotation lifecycle suite
+  - kill-switch activation suite
+
+### Delfas 16.11 platform-control-plane / super-admin / tenant-registry / quarantine / kill-switch hardening
+
+- bygg:
+  - `TenantRegistryEntry`
+  - `TenantBlockerSnapshot`
+  - `TenantFreezeDecision`
+  - `TenantQuarantineProfile`
+  - `NoGoBoardSnapshot`
+  - `ProviderRuntimeHealth`
+  - `PlatformControlPlaneSnapshot`
+- state machines:
+  - `TenantFreezeDecision: requested -> approved -> active -> released | expired`
+  - `TenantQuarantineProfile: active -> narrowed | lifted`
+- commands:
+  - `registerTenantRegistryEntry`
+  - `materializeNoGoBoard`
+  - `freezeTenantScope`
+  - `liftTenantFreeze`
+  - `recordProviderRuntimeHealth`
+- events:
+  - `TenantFreezeActivated`
+  - `TenantFreezeReleased`
+  - `NoGoBoardMaterialized`
+  - `ProviderRuntimeHealthRecorded`
+- invariants:
+  - every tenant must have a registry entry
+  - no-go board is global and cannot be derived only from one company view
+  - cross-tenant actions must be masked by default
+- blockerande valideringar:
+  - deny tenant-scope mutation when active freeze matches mutation family
+  - deny global green state when no-go board contains open critical blockers
+- routes/API-kontrakt:
+  - `/v1/super-admin/tenants`
+  - `/v1/super-admin/tenants/:tenantId/freeze`
+  - `/v1/super-admin/no-go-board`
+  - `/v1/super-admin/providers/health`
+- permissions/review-boundaries:
+  - `super_admin.read`
+  - `super_admin.tenant_freeze.manage`
+- audit/evidence/receipt-krav:
+  - every freeze/quarantine action must produce operator receipt
+- tester:
+  - freeze scope enforcement
+  - no-go board aggregation
+  - provider-health aggregation
+
+### Delfas 16.12 freshness / staleness / rebuild-control / cross-tenant-search hardening
+
+- bygg:
+  - `FreshnessSnapshot`
+  - `ReadModelLagRecord`
+  - `RebuildExecution`
+  - `CrossTenantSearchAudit`
+  - `SearchRevealRequest`
+- state machines:
+  - `RebuildExecution: requested -> running -> completed | failed`
+  - `FreshnessSnapshot: fresh | stale | blocked`
+- commands:
+  - `materializeFreshnessSnapshot`
+  - `startRebuildExecution`
+  - `recordCrossTenantSearch`
+  - `requestSearchReveal`
+- events:
+  - `FreshnessSnapshotMaterialized`
+  - `ReadModelMarkedStale`
+  - `RebuildExecutionCompleted`
+  - `CrossTenantSearchPerformed`
+- invariants:
+  - operator views must explicitly expose freshness state
+  - cross-tenant search results must be masked unless reveal approved
+- blockerande valideringar:
+  - deny green control-plane status when critical sources are stale
+  - deny raw sensitive field search without reveal
+- routes/API-kontrakt:
+  - `/v1/super-admin/freshness`
+  - `/v1/super-admin/rebuilds`
+  - `/v1/super-admin/search`
+- permissions/review-boundaries:
+  - `super_admin.search`
+  - `super_admin.rebuild.execute`
+- audit/evidence/receipt-krav:
+  - search audit must include actor, query hash, reveal ref and affected tenant scope
+- tester:
+  - freshness classification
+  - rebuild lifecycle
+  - masked cross-tenant search
+
+### Delfas 16.13 route / surface / policy / auth-boundary hardening
+
+- bygg:
+  - `RouteFamilyManifest`
+  - `SurfacePolicyBindingReceipt`
+  - `OperationTrustRequirement`
+  - `BackofficeRoleGrant`
+- state machines:
+  - `RouteFamilyManifest: draft -> published | superseded`
+- commands:
+  - `publishRouteFamilyManifest`
+  - `bindSurfacePolicy`
+  - `verifyOperationTrustRequirement`
+- events:
+  - `RouteFamilyManifestPublished`
+  - `SurfacePolicyBindingRecorded`
+  - `OperationTrustDenied`
+- invariants:
+  - canonical families are:
+    - `/v1/backoffice/*` för support case, reveal, impersonation, break-glass, access review
+    - `/v1/ops/*` för incidents, replays, drills, feature flags, emergency disables, rotations
+    - `/v1/super-admin/*` för tenant registry, no-go board, freeze/quarantine, cross-tenant search, provider health
+  - no high-risk route may rely only on `company.manage`
+- blockerande valideringar:
+  - deny route publish when manifest and actual router differ
+  - deny action when trust-level receipt does not satisfy route contract
+- tester:
+  - route truth lint
+  - policy drift lint
+  - trust-level enforcement
+
+### Delfas 16.14 support-export / audit / watermark / retention hardening
+
+- bygg:
+  - `SupportExportRequest`
+  - `AuditExportRequest`
+  - `WatermarkedExportReceipt`
+  - `OpsArtifactRetentionPolicy`
+  - `LegalHoldDecision`
+- state machines:
+  - `SupportExportRequest: requested -> approved -> generated | denied | expired`
+- commands:
+  - `requestSupportExport`
+  - `approveSupportExport`
+  - `applyLegalHold`
+  - `generateWatermarkedExport`
+- events:
+  - `SupportExportRequested`
+  - `SupportExportGenerated`
+  - `LegalHoldApplied`
+- invariants:
+  - every export must carry watermark id, retention profile and actor chain
+  - legal hold blocks purge
+- blockerande valideringar:
+  - deny export when approval is required and missing
+- routes/API-kontrakt:
+  - `/v1/backoffice/exports/support`
+  - `/v1/backoffice/exports/audit`
+  - `/v1/ops/legal-holds`
+- permissions/review-boundaries:
+  - `backoffice.export.request`
+  - `backoffice.export.approve`
+  - `ops.legal_hold.manage`
+- audit/evidence/receipt-krav:
+  - export receipts must be attachable to support case, incident or review lane
+- tester:
+  - export approval suite
+  - retention/legal hold suite
+
+### Delfas 16.15 runbook / release-evidence / provenance / hermetic-ci hardening
+
+- bygg:
+  - `RunbookExecution`
+  - `RunbookExecutionStep`
+  - `RunbookEvidenceAttachment`
+  - `ReleaseEvidenceBundleRef`
+  - `ReleaseProvenanceReceipt`
+- state machines:
+  - `RunbookExecution: started -> in_progress -> completed | failed | rerun_required`
+- commands:
+  - `startRunbookExecution`
+  - `attachRunbookEvidence`
+  - `completeRunbookExecution`
+  - `linkReleaseEvidenceBundle`
+- events:
+  - `RunbookExecutionStarted`
+  - `RunbookExecutionCompleted`
+  - `ReleaseEvidenceLinked`
+- invariants:
+  - `incident-response.md` and `release-evidence.md` are canonical runbooks
+  - every critical operation may link to runbook execution
+  - release evidence must include build ref, artifact digest, environment manifest, approvals and rollback path
+- blockerande valideringar:
+  - deny runbook completion without required evidence attachments
+  - deny release evidence green state when provenance mismatches artifact
+- routes/API-kontrakt:
+  - `/v1/ops/runbook-executions`
+  - `/v1/ops/release-evidence`
+- permissions/review-boundaries:
+  - `ops.runbook.execute`
+  - `ops.release_evidence.read`
+- officiella regler och källor:
+  - [NIST SP 800-218](https://csrc.nist.gov/pubs/sp/800/218/final)
+  - [SLSA Provenance](https://slsa.dev/spec/v1.0/provenance)
+- tester:
+  - runbook execution lifecycle
+  - release provenance mismatch blocker
+
+### Delfas 16.16 doc / seed / duplicate-runbook / legacy purge
+
+- bygg:
+  - `LegacyArtifactDecision`
+  - `LegacyArtifactArchiveReceipt`
+  - `DemoSeedIsolationReceipt`
+- commands:
+  - `archiveLegacyRunbook`
+  - `markDemoSeedTestOnly`
+  - `recordLegacyArtifactDecision`
+- invariants:
+  - no duplicate runbook set may remain canonical
+  - demo seeds may not load in protected or live mode
+- blockerande valideringar:
+  - deny protected-mode startup if demo seed loading is enabled
+- dokument som ska hanteras:
+  - keep/harden:
+    - `docs/runbooks/support-case-and-replay.md`
+    - `docs/runbooks/support-impersonation.md`
+    - `docs/runbooks/restore-drill.md`
+    - `docs/runbooks/feature-flag-rollout-and-emergency-disable.md`
+    - `docs/runbooks/secrets-certificates-and-key-rotation.md`
+  - rewrite:
+    - `docs/runbooks/support-backoffice-and-audit-review.md`
+    - `docs/runbooks/security-incident-response.md`
+    - `docs/runbooks/incident-response-and-production-hotfix.md`
+  - replace/create:
+    - `docs/runbooks/incident-response.md`
+    - `docs/runbooks/release-evidence.md`
+  - archive or merge:
+    - `docs/runbooks/async-job-retry-replay-and-dead-letter.md`
+    - `docs/runbooks/replay-and-dead-letter.md`
+    - `docs/runbooks/outbox-replay-and-dead-letter.md`
+  - migrate to test-only or archive:
+    - `packages/db/seeds/20260322191000_phase14_security_review_demo_seed.sql`
+    - `packages/db/seeds/20260322201000_phase14_resilience_demo_seed.sql`
+- tester:
+  - docs truth lint
+  - demo-seed deny in protected mode
+
+## vilka bevis som krävs innan något märks som operations-, support-, replay-, super-admin- eller backofficemässigt korrekt eller production-ready
+
+- runtimeobjekt finns och är durable där de måste vara durable
+- route-kontrakt, surface policy och runtime auth kräver samma trust level
+- evidence receipts finns för support, reveal, impersonation, break-glass, replay, incident, drill och export
+- global control plane finns och visar stale/blocker states, inte bara lokala dashboards
+- canonical runbooks finns och deras exekvering kan spåras
+- release evidence och provenance kan länkas till operationskedjan
+
+## vilka risker som kräver mänsklig flaggning
+
+- val av verkliga emergency access-konton, leverantörer och säkra förvaringsrutiner
+- val av KMS/HSM och hemlighetshanteringsplattform
+- beslutad kill-switch policy per operationsklass
+- retention/legal hold-policys för olika ops artifacts
+- acceptans av eventuella legacy-runbooks som endast råmaterial tills canonical ersättare finns

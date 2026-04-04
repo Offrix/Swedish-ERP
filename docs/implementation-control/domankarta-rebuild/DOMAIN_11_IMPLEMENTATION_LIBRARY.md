@@ -1,0 +1,782 @@
+# DOMAIN_11_IMPLEMENTATION_LIBRARY
+
+## mål
+
+Fas 11 ska byggas så att varje regulated objekt i domänen har:
+- canonical truth
+- canonical persistence
+- canonical security boundary
+- canonical receipt/evidence family
+- canonical replay/recovery-regler
+
+Domänen får inte längre luta på metadata, Map-state, prepared transport eller otydlig legal modell.
+
+## bindande tvärdomänsunderlag
+
+- `FAKTURAFLODET_BINDANDE_SANNING.md` styr seller-side invoice truth för HUS-fakturor, kundandel, kredit på kundsidan och sambandet mellan kundfaktura och HUS-fordran.
+- `ROT_RUT_HUS_FLODET_BINDANDE_SANNING.md` är obligatorisk canonical source för HUS-overlay, delad faktura, elektronisk kundbetalning, claim-version, XML/importregler, beslut, state payout, tax-account-offset, delavslag, avslag och recovery.
+- `GRON_TEKNIK_FLODET_BINDANDE_SANNING.md` är obligatorisk canonical source för grön-teknik-overlay, split invoice, installationstyper, rulepack-satser, elektronisk kundbetalning, claim-version, payout, tax-account-offset, cash-method VAT, delavslag, avslag och recovery.
+- `SKATTEKONTOMAPPNING_BINDANDE_SANNING.md` är obligatorisk canonical source för `1630`-offset för HUS eller grön teknik, authority-event-klassning, payout-vs-offset-resolution och blocked state-claim mismatches.
+- `LEGAL_REASON_CODES_OCH_SPECIALTEXTPOLICY_BINDANDE_SANNING.md` är obligatorisk canonical source för legal basis, specialtexter, reason-code-lineage och blockerade claims eller invoices utan tillracklig laglig förklaring.
+- `ARSBOKSLUT_ARSREDOVISNING_OCH_INK2_BINDANDE_SANNING.md` är obligatorisk canonical source för hard close, årsredovisning, fastställelseintyg, INK2, INK2R, INK2S, uppskjuten skatt, skatt på årets resultat och filing-truth mot Bolagsverket och Skatteverket.
+- `AGARUTTAG_UTDELNING_KU31_OCH_KUPONGSKATT_BINDANDE_SANNING.md` är obligatorisk canonical source för utdelningsbeslut, eget kapital-källor, skuld till ägare, utbetalning, KU31, kupongskatt, kupongskatteinbetalning, avstämningsbolag och owner-distribution-truth.
+- `AUDIT_EVIDENCE_OCH_APPROVALS_BINDANDE_SANNING.md` är obligatorisk canonical source för filing evidence, sign-off packages, break-glass lineage, support reveal och regulated approvals i denna domän.
+- Domän 11 får inte skapa egen kundfakturamodell som avviker från fakturabibeln.
+
+## Fas 11
+
+### Delfas 11.1 HUS truth / secrecy / canonical persistence
+
+- bygg följande objekt:
+  - `HusCaseRecord`
+  - `HusBuyerRecord`
+  - `HusServiceLineRecord`
+  - `HusCustomerPaymentRecord`
+  - `HusReadinessSnapshot`
+  - `HusClaimRecord`
+  - `HusAuthorityReceivableRecord`
+- state machines:
+  - `HusCase: draft -> invoiced -> payment_recorded -> claim_ready -> claimed -> decision_received -> reconciled | recovery_open | written_off`
+  - `HusBuyerValidation: draft -> internally_validated -> externally_verified | externally_rejected`
+- commands:
+  - `registerHusCase`
+  - `registerHusServiceLine`
+  - `registerHusBuyer`
+  - `recordHusCustomerPayment`
+  - `materializeHusReadinessSnapshot`
+  - `submitHusClaimRecord`
+- events:
+  - `HusCaseRegistered`
+  - `HusBuyerRegistered`
+  - `HusReadinessMaterialized`
+  - `HusClaimSubmitted`
+- invariants:
+  - `laborCostInclVatAmount = laborCostExVatAmount + vatAmount`
+  - `workedHours > 0` för avdragsgrundande line
+  - `sum(allocationPercent) = 100`
+  - full identitet får inte ligga i vanlig snapshot eller vanlig SQL-rad
+- valideringar som blockerar fel:
+  - deny readiness om buyer allocation inte summerar till 100
+  - deny persistence av rå identitet
+  - deny claim om line-model saknar canonical separation av labor/material/travel/admin/other
+- routes/API-kontrakt:
+  - `POST /v1/hus/cases`
+  - `POST /v1/hus/cases/:husCaseId/service-lines`
+  - `POST /v1/hus/cases/:husCaseId/buyers`
+  - `POST /v1/hus/cases/:husCaseId/payments`
+  - `POST /v1/hus/cases/:husCaseId/readiness/materialize`
+- permissions/review-boundaries:
+  - `hus.manage`
+  - `hus.review`
+  - `hus.readiness.materialize`
+- audit/evidence/receipt-krav:
+  - buyer validation receipt
+  - readiness materialization receipt
+  - canonical snapshot checksum
+- replay/recovery/dead-letter-regler:
+  - readiness materialization ska vara idempotent mot case checksum
+  - buyer validation replay får inte ändra canonical costs
+- migrations-/cutover-/rollback-regler:
+  - historiskt HUS-case måste importeras med samma canonical amount split
+  - imported raw identity ska blockeras eller migreras till secret-lager före accept
+- officiella regler och källor som styr delfasen:
+  - [Skatteverket: Så fungerar rotavdraget för företag](https://skatteverket.se/foretag/skatterochavdrag/rotochrut/safungerarrotavdraget.4.2ef18e6a125660db8b080002709.html)
+- tester:
+  - golden tests för labor inkl moms, hours, allocation, delbetalning och årsskifte
+  - repository round-trip test
+  - secret-state test
+
+### Delfas 11.2 HUS XML / official channel / receipt model
+
+- bygg följande objekt:
+  - `HusOfficialArtifact`
+  - `HusXmlVersion`
+  - `HusSubmissionChannel`
+  - `HusSubmissionReceipt`
+  - `HusOfficialDecisionFile`
+- state machines:
+  - `HusOfficialArtifact: draft -> schema_validated -> ready_for_manual_official_send | disabled`
+  - `HusSubmissionReceipt: expected -> imported -> mapped | rejected`
+- commands:
+  - `generateHusOfficialArtifact`
+  - `validateHusXmlAgainstSchema`
+  - `registerHusManualOfficialDispatch`
+  - `importHusOfficialReceipt`
+- events:
+  - `HusOfficialArtifactGenerated`
+  - `HusXmlValidated`
+  - `HusOfficialReceiptImported`
+- invariants:
+  - en XML-fil får inte blanda ROT och RUT
+  - en XML-fil får inte blanda betalningsår
+  - `sent` får inte sättas utan dispatch receipt eller manual official dispatch record
+- valideringar som blockerar fel:
+  - deny generation om faktiskt antal arbetade timmar saknas
+  - deny generation om laborbase innehåller material/resa/admin/other
+  - deny `direct_api` som live capability utan officiell adapter
+- routes/API-kontrakt:
+  - `POST /v1/hus/cases/:husCaseId/official-artifacts`
+  - `POST /v1/hus/official-artifacts/:artifactId/validate`
+  - `POST /v1/hus/official-artifacts/:artifactId/manual-dispatch`
+  - `POST /v1/hus/official-artifacts/:artifactId/receipts/import`
+- permissions/review-boundaries:
+  - `hus.submit.prepare`
+  - `hus.submit.dispatch`
+  - `hus.receipt.import`
+- audit/evidence/receipt-krav:
+  - schema-validation receipt
+  - artifact checksum
+  - dispatch evidence
+  - imported official decision/receipt file ref
+- replay/recovery/dead-letter-regler:
+  - artifact generation idempotent mot canonical claim checksum
+  - receipt import append-only
+- migrations-/cutover-/rollback-regler:
+  - historical HUS exports utan schema/version ska märkas `legacy_artifact` och inte återanvändas som live evidence
+- officiella regler och källor som styr delfasen:
+  - [Skatteverket: Så fungerar rotavdraget för företag](https://skatteverket.se/foretag/skatterochavdrag/rotochrut/safungerarrotavdraget.4.2ef18e6a125660db8b080002709.html)
+- tester:
+  - XSD validation suite
+  - negative tests för blandade claim types
+  - manual official receipt import tests
+
+### Delfas 11.3 HUS decision import / payout / recovery / tax-account offset
+
+- bygg följande objekt:
+  - `HusAuthorityDecisionImportBatch`
+  - `HusAuthorityDecisionReceipt`
+  - `HusDecisionDifferenceRecord`
+  - `HusPayoutSettlement`
+  - `HusRecoveryCase`
+  - `HusTaxAccountOffset`
+- state machines:
+  - `HusDecisionDifference: open -> reviewed -> settled | written_off`
+  - `HusRecoveryCase: draft -> review_pending -> approved -> recovered | offset | written_off`
+- commands:
+  - `importHusAuthorityDecisionBatch`
+  - `openHusDecisionDifference`
+  - `recordHusPayoutSettlement`
+  - `approveHusRecoveryCase`
+  - `recordHusTaxAccountOffset`
+- events:
+  - `HusAuthorityDecisionImported`
+  - `HusDecisionDifferenceOpened`
+  - `HusRecoveryApproved`
+  - `HusTaxAccountOffsetRecorded`
+- invariants:
+  - myndighetsbeslut får inte skriva över ursprunglig claim
+  - recovery får aldrig vara tyst mutation av payout
+  - tax-account offset måste bära authority reference
+- valideringar som blockerar fel:
+  - deny payout-settlement utan decision state
+  - deny write-off utan review chain
+  - deny offset utan tax-account source ref
+- routes/API-kontrakt:
+  - `POST /v1/hus/authority-decisions/import`
+  - `POST /v1/hus/decision-differences/:differenceId/review`
+  - `POST /v1/hus/recoveries/:recoveryId/approve`
+  - `POST /v1/hus/payouts/settle`
+- permissions/review-boundaries:
+  - `hus.recovery.review`
+  - `hus.recovery.approve`
+  - `hus.payout.record`
+- audit/evidence/receipt-krav:
+  - decision-import receipt
+  - payout settlement receipt
+  - recovery approval receipt
+- replay/recovery/dead-letter-regler:
+  - samma myndighetsbeslut får inte importeras två gånger som ny juridisk effekt
+- migrations-/cutover-/rollback-regler:
+  - historiska partial acceptances måste importeras med difference/open recovery lineage
+- officiella regler och källor som styr delfasen:
+  - [Skatteverket: Så fungerar rotavdraget för företag](https://skatteverket.se/foretag/skatterochavdrag/rotochrut/safungerarrotavdraget.4.2ef18e6a125660db8b080002709.html)
+- tester:
+  - partial acceptance golden test
+  - payout-via-tax-account test
+  - recovery and offset reconciliation test
+
+### Delfas 11.4 regulated submission repository / envelope / attempt / receipt durability
+
+- bygg följande objekt:
+  - `SubmissionEnvelopeRecord`
+  - `SubmissionAttemptRecord`
+  - `SubmissionReceiptRecord`
+  - `SubmissionCorrectionLinkRecord`
+  - `SubmissionEvidencePackRecord`
+  - `SubmissionActionQueueItemRecord`
+- state machines:
+  - `SubmissionEnvelope: draft -> signed -> queued | submitted -> acknowledged -> accepted | domain_rejected | transport_failed | superseded`
+  - `SubmissionAttempt: queued -> started -> provider_acknowledged | failed | timed_out`
+- commands:
+  - `createSubmissionEnvelope`
+  - `appendSubmissionAttempt`
+  - `appendSubmissionReceipt`
+  - `linkSubmissionCorrection`
+  - `updateSubmissionQueueItem`
+- events:
+  - `SubmissionEnvelopeCreated`
+  - `SubmissionAttemptAppended`
+  - `SubmissionReceiptAppended`
+  - `SubmissionCorrected`
+- invariants:
+  - payload hash + source version + idempotency key får högst ge en aktiv envelope
+  - receipts är append-only
+  - correction skapar ny envelope, aldrig overwrite
+- valideringar som blockerar fel:
+  - deny `accepted` utan mapped receipt
+  - deny `finalized` utan required receipt family
+- routes/API-kontrakt:
+  - `POST /v1/submissions`
+  - `POST /v1/submissions/:submissionId/sign`
+  - `POST /v1/submissions/:submissionId/submit`
+  - `POST /v1/submissions/:submissionId/receipts/import`
+- permissions/review-boundaries:
+  - `submission.prepare`
+  - `submission.sign`
+  - `submission.dispatch`
+  - `submission.receipt.import`
+- audit/evidence/receipt-krav:
+  - command receipt per state change
+  - evidence pack ref per envelope
+  - external provider reference family
+- replay/recovery/dead-letter-regler:
+  - attempts/receipts måste överleva restart
+  - dead-letter ska vara eget case, inte dold status
+- migrations-/cutover-/rollback-regler:
+  - gamla snapshot-only submissions måste migreras till tabellbackad lineage eller markeras legacy
+- officiella regler och källor som styr delfasen:
+  - family-specifika official sources i respektive delfas 11.5, 11.9 och 11.11
+- tester:
+  - crash/restart tests
+  - duplicate send tests
+  - correction-link persistence tests
+
+### Delfas 11.5 regulated transport capability / send / poll / finalize hardening
+
+- bygg följande objekt:
+  - `SubmissionTransportCapability`
+  - `SubmissionTransportPlan`
+  - `SubmissionDispatchReceipt`
+  - `SubmissionReceiptPollPlan`
+  - `SubmissionFinalizationDecision`
+- state machines:
+  - `SubmissionTransportCapability: disabled -> manual_official | live_provider | trial_only`
+  - `SubmissionFinalizationDecision: pending -> ready_to_finalize -> finalized | blocked`
+- commands:
+  - `prepareSubmissionTransportPlan`
+  - `dispatchSubmissionEnvelope`
+  - `pollSubmissionReceipt`
+  - `finalizeSubmissionEnvelope`
+- events:
+  - `SubmissionTransportPrepared`
+  - `SubmissionDispatched`
+  - `SubmissionReceiptPolled`
+  - `SubmissionFinalized`
+- invariants:
+  - `prepareTransport` är aldrig liktydigt med live submit
+  - live_provider kräver riktig credential class, provider environment och receipt mapping
+- valideringar som blockerar fel:
+  - deny live dispatch för capability `manual_official`, `trial_only` eller `disabled`
+  - deny finalize utan mapped receipt
+- routes/API-kontrakt:
+  - `POST /v1/submissions/:submissionId/dispatch`
+  - `POST /v1/submissions/:submissionId/poll`
+  - `POST /v1/submissions/:submissionId/finalize`
+- permissions/review-boundaries:
+  - `submission.dispatch`
+  - `submission.poll`
+  - `submission.finalize`
+- audit/evidence/receipt-krav:
+  - dispatch receipt
+  - receipt poll receipt
+  - finalization receipt
+- replay/recovery/dead-letter-regler:
+  - provider timeout utan receipt öppnar recovery/replay-policy, inte accepted state
+- migrations-/cutover-/rollback-regler:
+  - gamla capability claims i runbooks måste migreras till canonical manifest
+- officiella regler och källor som styr delfasen:
+  - [Bolagsverket: API för inlämning av digitala årsredovisningar](https://media.bolagsverket.se/diar/services/2.0/lamnaInArsredovisning-2.0.html)
+  - [Skatteverket: Information om filöverföringstjänst för SRU-uppgifter](https://www.skatteverket.se/foretag/etjansterochblanketter/allaetjanster/tjanster/filoverforing/informationomsruuppgifter.4.3dfca4f410f4fc63c86800020896.html)
+- tester:
+  - capability manifest tests
+  - dispatch/finalize deny tests
+  - live/manual/trial separation tests
+
+### Delfas 11.6 manual receipt / correction / replay / dead-letter hardening
+
+- bygg följande objekt:
+  - `SubmissionDeadLetterCase`
+  - `SubmissionReplayPolicy`
+  - `SubmissionManualReceiptImport`
+  - `SubmissionRecoveryDecision`
+  - `SubmissionCorrectionCase`
+- state machines:
+  - `SubmissionDeadLetterCase: open -> triaged -> replay_planned | correction_required | closed`
+  - `SubmissionCorrectionCase: open -> prepared -> signed -> submitted | abandoned`
+- commands:
+  - `openSubmissionDeadLetterCase`
+  - `planSubmissionReplay`
+  - `openSubmissionCorrectionCase`
+  - `importManualOfficialReceipt`
+- events:
+  - `SubmissionDeadLetterOpened`
+  - `SubmissionReplayPlanned`
+  - `SubmissionCorrectionOpened`
+  - `ManualOfficialReceiptImported`
+- invariants:
+  - replay får inte användas där correction juridiskt krävs
+  - manual receipt import är append-only
+- valideringar som blockerar fel:
+  - deny replay om receipt/error klassas material reject
+  - deny manual receipt overwrite
+- routes/API-kontrakt:
+  - `POST /v1/submissions/:submissionId/dead-letter/triage`
+  - `POST /v1/submissions/:submissionId/replay`
+  - `POST /v1/submissions/:submissionId/corrections`
+  - `POST /v1/submissions/:submissionId/manual-receipts`
+- permissions/review-boundaries:
+  - `submission.replay`
+  - `submission.correction`
+  - `submission.manual_receipt.import`
+- audit/evidence/receipt-krav:
+  - operator evidence ref per manual receipt
+  - replay approval receipt
+- replay/recovery/dead-letter-regler:
+  - dead-letter-fall ska vara synliga i operator queue och incident graph
+- migrations-/cutover-/rollback-regler:
+  - historiska felade sends måste klassas som replaybara eller correction-only före cutover
+- officiella regler och källor som styr delfasen:
+  - family-specifika official receipt-regler
+- tester:
+  - replay vs correction policy tests
+  - append-only manual receipt tests
+  - dead-letter lifecycle tests
+
+### Delfas 11.7 annual package / hard-close / version / evidence hardening
+
+- bygg följande objekt:
+  - `AnnualPackageRecord`
+  - `AnnualVersionRecord`
+  - `AnnualEvidencePackRecord`
+  - `AnnualSubmissionEventRecord`
+  - `AnnualSourceFingerprint`
+- state machines:
+  - `AnnualVersion: draft -> locked_for_sign -> signed -> filing_ready | superseded`
+- commands:
+  - `createAnnualPackage`
+  - `createAnnualVersion`
+  - `lockAnnualVersionForSign`
+  - `supersedeAnnualVersion`
+- events:
+  - `AnnualPackageCreated`
+  - `AnnualVersionCreated`
+  - `AnnualVersionLockedForSign`
+  - `AnnualVersionSuperseded`
+- invariants:
+  - source snapshot måste vara hard-closed
+  - signerad version får aldrig skrivas över
+  - supersede måste skapa ny version, inte mutation
+- valideringar som blockerar fel:
+  - deny annual version om accounting period inte är `hard_closed`
+  - deny sign/filing om checksum/signoff hash inte matchar
+- routes/API-kontrakt:
+  - `POST /v1/annual-reporting/packages`
+  - `POST /v1/annual-reporting/packages/:packageId/versions`
+  - `POST /v1/annual-reporting/packages/:packageId/versions/:versionId/lock`
+- permissions/review-boundaries:
+  - `annual.prepare`
+  - `annual.lock`
+- audit/evidence/receipt-krav:
+  - annual evidence pack
+  - source fingerprint
+  - signoff hash
+- replay/recovery/dead-letter-regler:
+  - recreate version med samma source fingerprint ska vara idempotent
+- migrations-/cutover-/rollback-regler:
+  - historiska annual packages måste importeras som immutable versions
+- officiella regler och källor som styr delfasen:
+  - [Årsredovisningslag (1995:1554)](https://www.riksdagen.se/sv/dokument-och-lagar/dokument/svensk-forfattningssamling/arsredovisningslag-19951554_sfs-1995-1554/)
+- tester:
+  - supersede chain tests
+  - hard-close requirement tests
+  - checksum/signoff consistency tests
+
+### Delfas 11.8 annual signatory chain / legal completeness / annual sign security
+
+- bygg följande objekt:
+  - `AnnualSignatoryRosterSnapshot`
+  - `AnnualSignatoryPerson`
+  - `AnnualSignoffRequirement`
+  - `AnnualSignSession`
+  - `AnnualSignApprovalReceipt`
+- state machines:
+  - `AnnualSignSession: opened -> step_up_verified -> signed | expired | rejected`
+- commands:
+  - `materializeAnnualSignatoryRoster`
+  - `openAnnualSignSession`
+  - `signAnnualVersion`
+- events:
+  - `AnnualSignatoryRosterMaterialized`
+  - `AnnualSignSessionOpened`
+  - `AnnualVersionSigned`
+- invariants:
+  - AB kräver samtliga styrelseledamöter och VD om sådan finns
+  - sign får inte baseras på rollklass ensam
+  - varje signering måste knytas till specific person och fresh step-up
+- valideringar som blockerar fel:
+  - deny sign om roster är ofullständig
+  - deny sign om required person saknas eller step-up är stale
+- routes/API-kontrakt:
+  - `POST /v1/annual-reporting/packages/:packageId/signatory-rosters/materialize`
+  - `POST /v1/annual-reporting/packages/:packageId/versions/:versionId/sign`
+- permissions/review-boundaries:
+  - `annual.sign`
+  - `annual.signatory.manage`
+- audit/evidence/receipt-krav:
+  - step-up receipt
+  - sign session receipt
+  - signer identity receipt
+- replay/recovery/dead-letter-regler:
+  - sign event är juridiskt effektobjekt och får aldrig replayas som mutation
+- migrations-/cutover-/rollback-regler:
+  - imported historical signoff måste märkas `historical_signoff_evidence`, inte live session
+- officiella regler och källor som styr delfasen:
+  - [Årsredovisningslag (1995:1554) 2 kap. 7 §](https://www.riksdagen.se/sv/dokument-och-lagar/dokument/svensk-forfattningssamling/arsredovisningslag-19951554_sfs-1995-1554/)
+- tester:
+  - legal-form signatory matrix tests
+  - stale step-up deny tests
+  - full roster sign e2e
+
+### Delfas 11.9 corporate tax declaration / SRU / iXBRL / taxonomy hardening
+
+- bygg följande objekt:
+  - `CorporateTaxDeclarationPackage`
+  - `SruArtifactFamily`
+  - `IxbrlArtifactFamily`
+  - `TaxonomyVersion`
+  - `TaxDeclarationSubmissionCase`
+  - `CurrentTaxComputationRecord`
+- state machines:
+  - `CorporateTaxDeclarationPackage: draft -> artifact_ready -> signing_ready -> filing_ready | superseded`
+- commands:
+  - `buildCorporateTaxDeclarationPackage`
+  - `materializeSruArtifacts`
+  - `materializeIxbrlArtifacts`
+  - `markTaxDeclarationFilingReady`
+- events:
+  - `CorporateTaxDeclarationPackageBuilt`
+  - `SruArtifactsMaterialized`
+  - `IxbrlArtifactsMaterialized`
+  - `TaxDeclarationMarkedFilingReady`
+- invariants:
+  - tax pack måste peka på exakt annual version checksum
+  - SRU artifacts ska ha INFO.SRU och BLÄNKETTER.SRU som separata artifacts
+  - taxonomy/version får inte vara löst metadatafält
+- valideringar som blockerar fel:
+  - deny filing-ready om annual version inte är signed
+  - deny filing-ready om SRU/iXBRL family saknar baseline och checksum
+- routes/API-kontrakt:
+  - `POST /v1/annual-reporting/packages/:packageId/tax-declaration-packages`
+  - `POST /v1/annual-reporting/tax-declaration-packages/:taxDeclarationPackageId/artifacts`
+  - `POST /v1/annual-reporting/tax-declaration-packages/:taxDeclarationPackageId/filing-ready`
+- permissions/review-boundaries:
+  - `tax_declaration.prepare`
+  - `tax_declaration.artifact.generate`
+  - `tax_declaration.filing_ready`
+- audit/evidence/receipt-krav:
+  - taxonomy baseline ref
+  - SRU artifact checksums
+  - annual version checksum
+- replay/recovery/dead-letter-regler:
+  - taxonomy-byte ska skapa ny package/version chain, inte skriva över artifacts
+- migrations-/cutover-/rollback-regler:
+  - imported historical SRU/iXBRL artifacts måste märkas legacy om full lineage saknas
+- officiella regler och källor som styr delfasen:
+  - [Skatteverket: Information om filöverföringstjänst för SRU-uppgifter](https://www.skatteverket.se/foretag/etjansterochblanketter/allaetjanster/tjanster/filoverforing/informationomsruuppgifter.4.3dfca4f410f4fc63c86800020896.html)
+  - [Bolagsverket: API för inlämning av digitala årsredovisningar](https://media.bolagsverket.se/diar/services/2.0/lamnaInArsredovisning-2.0.html)
+- tester:
+  - SRU artifact tests
+  - taxonomy version tests
+  - filing-ready gating tests
+
+### Delfas 11.10 owner-distribution repository / snapshot / free-equity hardening
+
+- bygg följande objekt:
+  - `ShareClassRecord`
+  - `ShareholderHoldingSnapshotRecord`
+  - `FreeEquitySnapshotRecord`
+  - `DividendDecisionRecord`
+  - `DividendPaymentInstructionRecord`
+  - `Ku31DraftRecord`
+  - `KupongskattRecord`
+- state machines:
+  - `DividendDecision: draft -> review_pending -> stamma_ready -> resolved -> payout_scheduled -> paid | reversed`
+- commands:
+  - `registerShareClass`
+  - `captureShareholderHoldingSnapshot`
+  - `captureFreeEquitySnapshot`
+  - `createDividendDecision`
+  - `resolveDividendAtStamma`
+- events:
+  - `ShareholderHoldingSnapshotCaptured`
+  - `FreeEquitySnapshotCaptured`
+  - `DividendDecisionResolved`
+- invariants:
+  - snapshot på beslutsdatum får aldrig muteras
+  - free-equity proof måste vara spårbar till annual/interimsbalans
+- valideringar som blockerar fel:
+  - deny stämmobeslut utan snapshot
+  - deny payout scheduling utan resolved decision
+- routes/API-kontrakt:
+  - `POST /v1/owner-distributions/share-classes`
+  - `POST /v1/owner-distributions/holding-snapshots`
+  - `POST /v1/owner-distributions/free-equity-snapshots`
+  - `POST /v1/owner-distributions/decisions`
+  - `POST /v1/owner-distributions/decisions/:decisionId/resolve`
+- permissions/review-boundaries:
+  - `owner_distribution.manage`
+  - `owner_distribution.resolve`
+- audit/evidence/receipt-krav:
+  - board/stämma evidence ref
+  - free-equity proof ref
+  - approval receipt
+- replay/recovery/dead-letter-regler:
+  - stämmobeslut får inte replayas som fri mutation
+- migrations-/cutover-/rollback-regler:
+  - historical shareholder snapshots måste importeras med source date och provenance
+- tester:
+  - immutable snapshot tests
+  - decision repository tests
+  - annual/free-equity linkage tests
+
+### Delfas 11.11 dividend payout / KU31 / kupongskatt / residency hardening
+
+- bygg följande objekt:
+  - `ResidencyEvidenceCase`
+  - `BeneficialOwnerEvidenceCase`
+  - `TreatyReductionReview`
+  - `Ku31FilingCase`
+  - `KupongskattFilingCase`
+  - `DividendWithholdingProfile`
+- state machines:
+  - `TreatyReductionReview: draft -> review_pending -> approved | rejected`
+  - `Ku31FilingCase: draft -> artifact_ready -> submitted | corrected | removed`
+  - `KupongskattFilingCase: draft -> filing_ready -> submitted | corrected`
+- commands:
+  - `registerDividendRecipientTaxProfile`
+  - `approveTreatyReductionReview`
+  - `buildKu31FilingCase`
+  - `buildKupongskattFilingCase`
+  - `recordDividendPayout`
+- events:
+  - `TreatyReductionApproved`
+  - `Ku31FilingCaseBuilt`
+  - `KupongskattFilingCaseBuilt`
+  - `DividendPayoutRecorded`
+- invariants:
+  - reducerad kupongskatt kräver treaty evidence och separat approval
+  - svensk fysisk person med utdelning kräver KU31-path
+  - due dates måste bäras per filing case
+- valideringar som blockerar fel:
+  - deny reduced withholding utan hemvist-/beneficial-owner evidence
+  - deny payout utan recipient tax profile
+- routes/API-kontrakt:
+  - `POST /v1/owner-distributions/decisions/:decisionId/payouts`
+  - `POST /v1/owner-distributions/decisions/:decisionId/payouts/record`
+  - `POST /v1/owner-distributions/decisions/:decisionId/ku31`
+  - `POST /v1/owner-distributions/kupongskatt-records/:kupongskattRecordId/filing`
+- permissions/review-boundaries:
+  - `owner_distribution.payout`
+  - `owner_distribution.ku31.prepare`
+  - `owner_distribution.kupongskatt.prepare`
+  - `owner_distribution.kupongskatt.reduce`
+- audit/evidence/receipt-krav:
+  - residency evidence receipt
+  - treaty approval receipt
+  - filing artifact receipt
+  - payment receipt
+- replay/recovery/dead-letter-regler:
+  - payout reversal ska skapa ny juridisk händelsekedja
+  - KU31 correction och removal ska bevara tidigare filing refs
+- migrations-/cutover-/rollback-regler:
+  - open kupongskatt liabilities måste migreras som separata authority liabilities
+- officiella regler och källor som styr delfasen:
+  - [Skatteverket: För dig som lämnat utdelning från ditt aktiebolag (kupongbolag)](https://www.skatteverket.se/foretag/internationellt/kupongskatt/fordigsomlamnatutdelningfrandittaktiebolagkupongbolag.4.6e8a1495181dad540842ee.html)
+- tester:
+  - withholding profile tests
+  - KU31 due-date tests
+  - kupongskatt reduction tests
+
+### Delfas 11.12 provider / signing archive / external receipt hardening
+
+- bygg följande objekt:
+  - `ProviderCapabilityManifest`
+  - `ProviderCredentialClass`
+  - `ExternalReferenceFamily`
+  - `SigningArchiveReceipt`
+  - `ProviderFailureClass`
+- state machines:
+  - `ProviderCapabilityManifest: draft -> verified -> active | revoked`
+- commands:
+  - `registerProviderCapabilityManifest`
+  - `verifyProviderCapabilityManifest`
+  - `archiveSignedEvidenceExternally`
+- events:
+  - `ProviderCapabilityManifestVerified`
+  - `SignedEvidenceArchivedExternally`
+- invariants:
+  - provider manifest måste bära capability class, credential class och receipt family
+  - signing archive får inte vara lokal Map i live/pilot
+- valideringar som blockerar fel:
+  - deny live manifest utan external reference family
+  - deny sign archive success utan archive receipt
+- routes/API-kontrakt:
+  - `POST /v1/ops/provider-capabilities`
+  - `POST /v1/ops/provider-capabilities/:providerCapabilityId/verify`
+- permissions/review-boundaries:
+  - `provider.manage`
+  - `provider.verify`
+- audit/evidence/receipt-krav:
+  - provider verification receipt
+  - external archive receipt
+- replay/recovery/dead-letter-regler:
+  - provider failure classes ska mata dead-letter och incident paths
+- migrations-/cutover-/rollback-regler:
+  - gamla false-live manifests måste revokeras och migreras
+- tester:
+  - manifest validation tests
+  - archive receipt tests
+  - false-live deny tests
+
+### Delfas 11.13 regulated route security / strong_mfa / dual-control hardening
+
+- bygg följande objekt:
+  - `RequiredTrustLevelPolicy`
+  - `FreshStepUpSession`
+  - `HighRiskApprovalReceipt`
+  - `RouteEnforcementDecision`
+- state machines:
+  - `FreshStepUpSession: opened -> active -> expired | revoked`
+- commands:
+  - `openFreshStepUpSession`
+  - `recordHighRiskApproval`
+  - `enforceRouteTrustLevel`
+- events:
+  - `FreshStepUpSessionOpened`
+  - `HighRiskApprovalRecorded`
+  - `RouteEnforcementDenied`
+- invariants:
+  - `strong_mfa` i route-contract måste enforce:as i server
+  - `annual_operations` och ändra surface policies ersätter inte trust enforcement
+- valideringar som blockerar fel:
+  - deny annual sign/send/payout om required trust level saknas
+  - deny same-actor flows där dual control krävs
+- permissions/review-boundaries:
+  - granular permissions per action
+- audit/evidence/receipt-krav:
+  - route enforcement receipt
+  - step-up receipt
+  - approval receipt
+- replay/recovery/dead-letter-regler:
+  - security-denied actions får inte skapa delvis committed regulated state
+- migrations-/cutover-/rollback-regler:
+  - gamla `company.manage` / `company.read` regulated handlers måste migreras till granular policy
+- tester:
+  - deny matrix tests
+  - session TTL tests
+  - dual-control tests
+
+### Delfas 11.14 migration / import / cutover / replay hardening
+
+- bygg följande objekt:
+  - `HusHistoryImportBatch`
+  - `AnnualImportBatch`
+  - `OwnerDistributionImportBatch`
+  - `RegulatedHistoryVarianceReport`
+  - `RegulatedCutoverBlocker`
+- state machines:
+  - `RegulatedImportBatch: draft -> validated -> applied | blocked | rejected`
+- commands:
+  - `validateRegulatedImportBatch`
+  - `applyRegulatedImportBatch`
+  - `openRegulatedCutoverBlocker`
+- events:
+  - `RegulatedImportBatchValidated`
+  - `RegulatedImportBatchApplied`
+  - `RegulatedCutoverBlocked`
+- invariants:
+  - regulated history utan receipts/evidence måste märkas som legacy eller blockerad, inte tyst accepterad
+- valideringar som blockerar fel:
+  - deny cutover om open filing cases eller unexplained authority liabilities finns
+- routes/API-kontrakt:
+  - `POST /v1/migration/regulatory-import-batches`
+  - `POST /v1/migration/regulatory-import-batches/:batchId/validate`
+  - `POST /v1/migration/regulatory-import-batches/:batchId/apply`
+- permissions/review-boundaries:
+  - `migration.regulatory.validate`
+  - `migration.regulatory.apply`
+- audit/evidence/receipt-krav:
+  - import batch receipt
+  - variance report
+  - cutover blocker receipt
+- replay/recovery/dead-letter-regler:
+  - imported regulated objects måste kunna replayas eller uttryckligen klassas som historical-locked
+- migrations-/cutover-/rollback-regler:
+  - explicit policy per regulated family om import stöds eller blockeras
+- tester:
+  - import validation tests
+  - cutover blocker tests
+  - variance report tests
+
+### Delfas 11.15 runbook / seed / fake-live / legacy purge
+
+- bygg följande objekt:
+  - `RunbookCapabilityRecord`
+  - `SeedIsolationDecision`
+  - `LegacyTruthClassification`
+- state machines:
+  - `RunbookCapabilityRecord: drafted -> verified -> active | archived`
+- commands:
+  - `classifyRunbookCapability`
+  - `archiveLegacyRunbook`
+  - `isolateRegulatedDemoSeed`
+- events:
+  - `RunbookCapabilityClassified`
+  - `LegacyRunbookArchived`
+  - `RegulatedDemoSeedIsolated`
+- invariants:
+  - inga runbooks får påstå live capability som provider manifest inte stöder
+  - demo seeds får inte nå protected/live bootstrap
+- valideringar som blockerar fel:
+  - deny protected/live boot om regulated demo seed aktiveras
+- permissions/review-boundaries:
+  - `ops.runbook.manage`
+  - `ops.seed.isolate`
+- audit/evidence/receipt-krav:
+  - runbook classification receipt
+  - seed isolation receipt
+- migrations-/cutover-/rollback-regler:
+  - gamla docs måste märkas `legacy`, `archive` eller `remove` uttryckligen
+- tester:
+  - protected/live seed deny tests
+  - docs capability lint
+
+## vilka bevis som krävs innan något märks som production-ready
+
+För Domän 11 gäller att inget får märkas production-ready innan följande samtidigt är sant:
+- canonical domain objects finns
+- canonical repository finns
+- official capabilityklassning är explicit
+- official artifact family finns där det krävs
+- receipts och evidence är immutable
+- strong_mfa/fresh step-up/dual control enforce:as på riktigt
+- regulatoriska golden tests är gröna
+- replay/recovery/dead-letter-policy är demonstrerad
+- demo/fake-live/legacy-teater är borttagen eller isolerad
+
+## vilka risker som kräver mänsklig flaggning
+
+- verkliga externa providerkonton, credentials, certifikat eller signeringslösningar som inte finns ännu
+- juridiska edge cases kring beneficial owner, hemvistintyg och treaty reduction där kundens dokumentunderlag saknas
+- import av historisk regulated data där receipts eller official filings inte kan rekonstrueras
+- bolagsspecifika signatory-/firmateckningsupplägg som inte kan härledas ur befintlig domändata

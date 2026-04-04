@@ -1,0 +1,81 @@
+# DOMAIN_00_REPO_PRUNE_MAP
+
+## Docs
+
+| path | status | varför | risk om kvar | rekommenderad åtgärd |
+|---|---|---|---|---|
+| [docs/implementation-control/domänkarta-rebuild/](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/domankarta-rebuild) | keep | Ny aktiv sanningskedja. | Ingen annan docs-hierarki kan vinna om denna hålls ren. | Behåll som enda aktiv docs-zon. |
+| [AGENTS.md](/Users/snobb/Desktop/Swedish%20ERP/AGENTS.md) | harden | Aktivt, men bär fortfarande absoluta paths. | Portabilitet och framtida repo-flytt blir onödigt skör. | Byt till repo-relativa eller sanningsalias i nästa cleanup-pass. |
+| [README.md](/Users/snobb/Desktop/Swedish%20ERP/README.md) | rewrite | Pekar fortfarande på gamla styrdokument. | Nya körningar startar i fel docs. | Skriv om så att bara rebuild-kedjan anges som sanning. |
+| [docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/GO_LIVE_ROADMAP_FINAL.md) | archive | Gammal sanning som inte längre får styra. | Fortsatt parallell sanning. | Flytta till legacy/historical efter att relevant innehåll migrerats. |
+| [docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/PHASE_IMPLEMENTATION_LIBRARY_FINAL.md) | archive | Gammal sanning som inte längre får styra. | Fortsatt parallell sanning. | Flytta till legacy/historical efter migrering. |
+| [docs/implementation-control/GO_LIVE_ROADMAP.md](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/GO_LIVE_ROADMAP.md) | archive | Äldre roadmapspår. | Fel byggordning kan återupplivas. | Arkivera. |
+| [docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/PHASE_IMPLEMENTATION_BIBLE.md) | archive | Äldre bibelspår. | Fel målbild kan återupplivas. | Arkivera. |
+| [docs/implementation-control/MASTER_BUILD_SEQUENCE_FINAL.md](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/MASTER_BUILD_SEQUENCE_FINAL.md) | archive | Gammal bindande byggordning. | Konkurrerar med rebuild-roadmapen. | Arkivera. |
+| [docs/implementation-control/MASTER_IMPLEMENTATION_BACKLOG.md](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/MASTER_IMPLEMENTATION_BACKLOG.md) | archive | Gammal backlog-sanning. | Fel backlogprioritet och dubbelsanning. | Arkivera. |
+| [docs/implementation-control/{ACCOUNTING_TAX_PAYROLL_AND_REGULATED_LOGIC.md,AUTH_IDENTITY_SCOPE_AND_BACKOFFICE.md,COMPETITOR_WIN_MATRIX.md,DOMAIN_OWNERSHIP_AND_SOURCE_OF_TRUTH.md,GOLDEN_SCENARIO_AND_ACCEPTANCE_MATRIX.md,HUS_ROT_RUT_XML_AND_SUBMISSION_SPEC.md,INTEGRATIONS_API_EVENTS_AND_WEBHOOKS.md,LEGACY_CODE_REMEDIATION_MAP.md,MIGRATION_IMPORT_AND_CUTOVER_DATA_SPEC.md,OBJECT_PROFILE_WORKBENCH_SEARCH_AND_COMMAND_CONTRACT_CATALOG.md,OPERATIONS_REVIEW_NOTIFICATIONS_ACTIVITY_WORK_ITEMS.md,PAYROLL_GARNISHMENT_AND_KRONOFOGDEN_SPEC.md,PERMISSION_AND_ACTION_CLASS_MATRIX.md,PROVIDER_PRIORITY_AND_REGULATORY_BASELINES.md,PUBLIC_PARTNER_API_AND_WEBHOOK_PAYLOAD_CATALOG.md,REGULATED_SUBMISSIONS_RECEIPTS_AND_RECOVERY.md,RULEPACK_IMPLEMENTATION_CATALOG.md,TENANT_SETUP_MODULE_ACTIVATION_AND_GO_LIVE_EXECUTION_SPEC.md,UI_READINESS_GATE.md}](/Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control) | migrate | Sakligt råmaterial finns kvar men de får inte längre vara sanning. | Gammal normativ modell fortsätter styra i skymundan. | Migrera konkret substans till nya domänlibraries och arkivera originalen. |
+| [docs/master-control/](/Users/snobb/Desktop/Swedish%20ERP/docs/master-control) | archive | Hela klustret är historiskt och bär fortfarande bindningsspråk. | Falsk governance och gammal domänkarta. | Flytta till tydlig `legacy`-zon. |
+| [docs/compliance/se/](/Users/snobb/Desktop/Swedish%20ERP/docs/compliance/se) | migrate | Viktigt regulatoriskt råmaterial, men inte längre bindande sanning. | Regelkrav kan läsas från fel dokument. | Mappa in per senare domän och arkivera klustret därefter. |
+| [docs/domain/](/Users/snobb/Desktop/Swedish%20ERP/docs/domain) | migrate | Användbart domänråmaterial men gammal bindning. | Gamla bounded context-gränser låser fel modell. | Migrera till nya domänlibraries och arkivera. |
+| [docs/policies/](/Users/snobb/Desktop/Swedish%20ERP/docs/policies) | migrate | Viktiga policyidéer, men fel sanningsträd. | Säkerhets- och SoD-regler riskerar att läsas från gammal kedja. | Migrera till rätt domänlibraries och arkivera originalen. |
+| [docs/test-plans/](/Users/snobb/Desktop/Swedish%20ERP/docs/test-plans) | migrate | Bra testidéer, men inte längre bindande testplan. | Fel testkrav kan låsas in. | Migrera till nya roadmap/library-sektioner och arkivera. |
+| [docs/ui/](/Users/snobb/Desktop/Swedish%20ERP/docs/ui) | archive | Stor del av klustret antar saknade ytor `apps/backoffice` och `apps/public-web`. | UI- och ops-domäner får fel surface map. | Arkivera eller skriv om fil för fil först när UI-domänerna revideras. |
+| [docs/runbooks/*-verification.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks) | archive | Flertalet är gamla verifieringsspår, flera med absoluta lokala paths. | Ops-sanning förorenas av stale verifiering. | Arkivera efter att nödvändiga delar flyttats till nya driftgates. |
+| [docs/runbooks/{incident-response-and-production-hotfix.md,async-job-retry-replay-and-dead-letter.md,backup-restore-and-disaster-recovery.md,fiscal-year-change-runbook.md,hus-submission-replay-and-recovery.md,mobile-offline-conflict-repair.md,payroll-migration-cutover.md,personalliggare-kiosk-device-trust.md,rulepack-release-rollback-and-hotfix.md,tax-account-reconciliation.md}](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks) | migrate | Operativt råmaterial finns, men gamla bindningsmarkörer gör dem farliga som aktiv sanning. | Support/ops kan styras av gamla runbooks. | Migrera verkligt användbara steg till nya operationsdomäner och arkivera originalen. |
+| [docs/ui/BACKOFFICE_OPERATIONS_SPEC.md](/Users/snobb/Desktop/Swedish%20ERP/docs/ui/BACKOFFICE_OPERATIONS_SPEC.md) | archive | Bygger på saknad appyta. | Falsk backoffice-yta. | Arkivera. |
+| [docs/ui/PUBLIC_SITE_AND_AUTH_SPEC.md](/Users/snobb/Desktop/Swedish%20ERP/docs/ui/PUBLIC_SITE_AND_AUTH_SPEC.md) | archive | Bygger på saknad `apps/public-web`. | Falsk public-web-yta. | Arkivera. |
+| [docs/ui/ENTERPRISE_UI_PLAN.md](/Users/snobb/Desktop/Swedish%20ERP/docs/ui/ENTERPRISE_UI_PLAN.md) | archive | Historisk UI-plan. | Driver fel UI-scope. | Arkivera. |
+| [docs/ui/ENTERPRISE_UI_RESET.md](/Users/snobb/Desktop/Swedish%20ERP/docs/ui/ENTERPRISE_UI_RESET.md) | archive | Historisk reset-spec med fel ytor. | Falsk UI-sanning. | Arkivera. |
+| [docs/ui/WORKBENCH_CATALOG.md](/Users/snobb/Desktop/Swedish%20ERP/docs/ui/WORKBENCH_CATALOG.md) | archive | Bygger på backoffice-surface som inte finns. | Falsk workbench-karta. | Arkivera tills UI-domän byggs om från grunden. |
+
+## Code
+
+| path | status | varför | risk om kvar | rekommenderad åtgärd |
+|---|---|---|---|---|
+| [apps/api/src/platform.mjs](/Users/snobb/Desktop/Swedish%20ERP/apps/api/src/platform.mjs) | rewrite | Flat merge, memory-defaults och shadowing bryter protected truth. | Cross-domain runtimefel och falsk capability-sanning. | Namespaca plattformen och eliminera collisioner. |
+| [apps/api/src/server.mjs](/Users/snobb/Desktop/Swedish%20ERP/apps/api/src/server.mjs) | harden | Verklig routeyta, men den översäljer ytkapacitet när separata appar saknas. | Falsk surface completeness. | Behåll, men märk routefamiljer med faktisk surface-realitet. |
+| [apps/worker/src/worker.mjs](/Users/snobb/Desktop/Swedish%20ERP/apps/worker/src/worker.mjs) | harden | Verklig worker men inte fullt protected/live-bevisad. | Kan felklassas som antingen dummy eller färdig driftkedja. | Behåll och märk korrekt. |
+| [apps/desktop-web/](/Users/snobb/Desktop/Swedish%20ERP/apps/desktop-web) | keep | Verifierad shell-yta. | Fel om den misstas för full produkt. | Behåll som `verified shell`. |
+| [apps/field-mobile/](/Users/snobb/Desktop/Swedish%20ERP/apps/field-mobile) | keep | Verifierad shell-yta. | Fel om den misstas för full produkt. | Behåll som `verified shell`. |
+| [packages/domain-org-auth/src/index.mjs](/Users/snobb/Desktop/Swedish%20ERP/packages/domain-org-auth/src/index.mjs) | rewrite | `Map`-truth, BankID-testhjälpmedel och auth-runtime i minne. | Security- och persistence-sanning blir fel. | Flytta truth till durable repos och separera testhjälpmedel från runtime. |
+| [packages/domain-core/src/crypto.mjs](/Users/snobb/Desktop/Swedish%20ERP/packages/domain-core/src/crypto.mjs) | replace | `software_kms` som default i protected produktion är otillräckligt. | Falsk bank-grade-säkerhet. | Kräv extern KMS/HSM i protected/live. |
+| [packages/domain-core/src/secrets.mjs](/Users/snobb/Desktop/Swedish%20ERP/packages/domain-core/src/secrets.mjs) | replace | Secret runtime godtar icke bank-grade posture. | Secretsrisk i protected/live. | Kräv extern KMS/HSM-backed secret runtime. |
+| [scripts/lib/runtime-diagnostics.mjs](/Users/snobb/Desktop/Swedish%20ERP/scripts/lib/runtime-diagnostics.mjs) | keep | Stark sanningsmotor för runtime blockers. | Cleanup blir blind om den tappas. | Behåll och använd som hård gate. |
+| [scripts/lib/repo.mjs](/Users/snobb/Desktop/Swedish%20ERP/scripts/lib/repo.mjs) | rewrite | Tvingar kvar legacy-docs och placeholderpaket som mandatory. | Cleanup blockeras och falsk completeness låses fast. | Skriv om till ny sannings- och pathklassning. |
+| [packages/integration-core/](/Users/snobb/Desktop/Swedish%20ERP/packages/integration-core) | archive | Placeholder-/kontraktsskal utan tydlig aktiv runtime-roll. | Ser aktivt ut utan att vara det. | Arkivera eller integrera på riktigt. |
+| [packages/test-fixtures/](/Users/snobb/Desktop/Swedish%20ERP/packages/test-fixtures) | archive | Placeholderkluster utan verklig central roll. | Falsk fixture-infrastruktur. | Arkivera eller integrera på riktigt. |
+| [pyproject.toml](/Users/snobb/Desktop/Swedish%20ERP/pyproject.toml) | archive | Pythonspår utan aktiv runtimekoppling. | Onödigt scope. | Arkivera. |
+| [src/swedish_erp_python/](/Users/snobb/Desktop/Swedish%20ERP/src/swedish_erp_python) | archive | Minimal scaffold utan aktiv roll. | Falsk multiruntime. | Arkivera. |
+| [infra/terraform/](/Users/snobb/Desktop/Swedish%20ERP/infra/terraform) | archive | Placeholder-IaC. | Falsk infra-mognad. | Arkivera tills verklig IaC byggs. |
+| [infra/ecs/](/Users/snobb/Desktop/Swedish%20ERP/infra/ecs) | archive | Placeholder-IaC. | Falsk deploymognad. | Arkivera tills verklig IaC byggs. |
+
+## Tests
+
+| path | status | varför | risk om kvar | rekommenderad åtgärd |
+|---|---|---|---|---|
+| [tests/helpers/demo-platform.mjs](/Users/snobb/Desktop/Swedish%20ERP/tests/helpers/demo-platform.mjs) | harden | Central helper för demo/test-runtime. | Demo-bevis kan förväxlas med live-bevis. | Behåll men märk alla beroende testfamiljer som demo/test-only. |
+| [tests/** som använder /Users/snobb/Desktop/Swedish%20ERP/docs/implementation-control/MASTER_IMPLEMENTATION_BACKLOG.md](/Users/snobb/Desktop/Swedish%20ERP/tests) | harden | 256 referenser gör detta till en egen testklass. | Testpyramiden ser mer produktionsnära ut än den är. | Bygg test-truth-registret och märk familjerna. |
+| [tests/unit/phase1-account-catalog.test.mjs](/Users/snobb/Desktop/Swedish%20ERP/tests/unit/phase1-account-catalog.test.mjs) | rewrite | Hårdkodad lokal repo-root. | Stale test som inte är portabelt. | Gör path repo-relativ eller injicerad. |
+| [tests/integration/phase3-api-edge-hardening.test.mjs](/Users/snobb/Desktop/Swedish%20ERP/tests/integration/phase3-api-edge-hardening.test.mjs) | harden | Viktigt runtime-test, men blockerades här av miljöns `spawn EPERM`. | Kan felaktigt klassas som repo-fel. | Märk som `environment-blocked until harness fixed` i denna miljö, inte som stale. |
+| [tests/e2e/apps-smoke.test.mjs](/Users/snobb/Desktop/Swedish%20ERP/tests/e2e/apps-smoke.test.mjs) | harden | Nyttigt smoke-test, men inte bred readiness. | Övertolkas som produktmognad. | Behåll som smoke only. |
+| [tests/integration/api-route-metadata.test.mjs](/Users/snobb/Desktop/Swedish%20ERP/tests/integration/api-route-metadata.test.mjs) | harden | Viktig route- och metadatakontroll, men inte domänriktighet. | Falsk completeness om den räknas bredare. | Behåll som metadata/contract-test. |
+
+## Scripts / Runbooks
+
+| path | status | varför | risk om kvar | rekommenderad åtgärd |
+|---|---|---|---|---|
+| [package.json](/Users/snobb/Desktop/Swedish%20ERP/package.json) | rewrite | Scripts pekar fortfarande på gammal verify-familj och PowerShell-bunden verifiering. | Fel signal om vad som är aktiv sanning. | Bygg om scriptkartan kring rebuild-gates. |
+| [scripts/lint.mjs](/Users/snobb/Desktop/Swedish%20ERP/scripts/lint.mjs) | harden | Strukturkontroll, inte full lint i klassisk mening. | Namnet översäljer. | Behåll men klassificera om bevisvärdet. |
+| [scripts/typecheck.mjs](/Users/snobb/Desktop/Swedish%20ERP/scripts/typecheck.mjs) | harden | Konsistenskontroll snarare än djup typkontroll. | Namnet översäljer. | Behåll men klassificera om bevisvärdet. |
+| [scripts/build.mjs](/Users/snobb/Desktop/Swedish%20ERP/scripts/build.mjs) | harden | Build baseline, inte full packaging/build-readiness. | Namnet översäljer. | Behåll men klassificera om bevisvärdet. |
+| [scripts/security-scan.mjs](/Users/snobb/Desktop/Swedish%20ERP/scripts/security-scan.mjs) | harden | Baseline secret-scan, inte bred säkerhetsverifiering. | Namnet översäljer. | Behåll men klassificera om bevisvärdet. |
+| [scripts/verify-*.ps1](/Users/snobb/Desktop/Swedish%20ERP/scripts) | replace | Gammal, PowerShell-bunden verify-familj som inte följer rebuild-sanningen. | Falsk readiness och dålig portabilitet. | Ersätt med ny rebuild-gatefamilj. |
+| [scripts/dev-up.ps1](/Users/snobb/Desktop/Swedish%20ERP/scripts/dev-up.ps1) | replace | Windows-wrapper kring lokal infra. | Onödig plattformsbindning. | Ersätt med neutral wrapper eller tydlig Windows-only etikett. |
+| [scripts/dev-down.ps1](/Users/snobb/Desktop/Swedish%20ERP/scripts/dev-down.ps1) | replace | Windows-wrapper kring lokal infra. | Onödig plattformsbindning. | Ersätt med neutral wrapper eller tydlig Windows-only etikett. |
+| [docs/runbooks/fas-14-7-project-trial-demo-verification.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/fas-14-7-project-trial-demo-verification.md) | archive | Verification-runbook med absoluta lokala paths och demo-scope. | Falsk aktiv verifieringssanning. | Arkivera. |
+| [docs/runbooks/payroll-tax-decisions-verification.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/payroll-tax-decisions-verification.md) | archive | Verification-runbook med absoluta lokala paths. | Falsk aktiv verifieringssanning. | Arkivera efter migrering av relevanta testkrav. |
+| [docs/runbooks/payroll-input-snapshots-verification.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/payroll-input-snapshots-verification.md) | archive | Verification-runbook med absoluta lokala paths. | Falsk aktiv verifieringssanning. | Arkivera efter migrering av relevanta testkrav. |
+| [docs/runbooks/phase3-security-risk-controls-verification.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/phase3-security-risk-controls-verification.md) | archive | Verification-runbook med absoluta lokala paths. | Falsk aktiv verifieringssanning. | Arkivera efter migrering av relevanta testkrav. |
+| [docs/runbooks/restore-drill.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/restore-drill.md) | rewrite | Aktivt relevant område men lokal absolut länk gör runbooken opålitlig. | Driftfel vid riktig användning. | Skriv om till repo-relativ och senare domänstyrd runbook. |
+| [docs/runbooks/workbench-compatibility.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/workbench-compatibility.md) | archive | Verification-runbook med lokala paths. | Falsk verifieringssanning. | Arkivera eller skriv om när workbench-domänen revideras. |
+| [docs/runbooks/work-item-queue-operations.md](/Users/snobb/Desktop/Swedish%20ERP/docs/runbooks/work-item-queue-operations.md) | rewrite | Reellt område men opålitliga lokala verificationpaths. | Ops-sanning förorenas. | Skriv om i senare operationsdomän. |

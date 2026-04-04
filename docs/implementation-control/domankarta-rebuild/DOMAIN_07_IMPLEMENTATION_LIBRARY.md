@@ -1,0 +1,792 @@
+# DOMAIN_07_IMPLEMENTATION_LIBRARY
+
+## mål
+
+Detta dokument beskriver exakt hur Domän 7 ska byggas om så att documents, OCR, classification, review, evidence, archive och exports blir revisionssäkra, regulatoriskt korrekta och go-live-mässiga. Libraryt speglar roadmapen 1:1.
+
+## bindande tvärdomänsunderlag
+
+- `DOKUMENTSCANNING_OCR_OCH_KLASSNING_BINDANDE_SANNING.md` är canonical source för alla objekt, state machines, blockerregler och expected outcomes som rör dokumentingest, OCR, AI fallback, confidence, review och downstream routing.
+- `PEPPOL_EDI_OCH_OFFENTLIG_EFAKTURA_BINDANDE_SANNING.md` är canonical source för structured-document-ingest via Peppol, offentlig e-faktura, endpoint binding, transport receipts, duplicate control och routing av strukturerade e-fakturor utan OCR.
+- `PARTNER_API_WEBHOOKS_OCH_ADAPTERKONTRAKT_BINDANDE_SANNING.md` är canonical source för generiska callback-, webhook-, schema-, signature- och adapterkontraktsscenarier i externa integrationskedjor som inte ägs av Peppol eller OCR-sparet.
+- Domän 7 ska implementera denna scanningtruth i dokumentmotorn, inte uppfinna en egen parallell sanning.
+
+## Fas 7
+
+### Delfas 7.1 inbox/email-ingest model
+
+- vad som ska byggas:
+  - `InboxTransportReceipt`
+  - `InboundMailProviderProfile`
+  - `InboundMessageEnvelope`
+  - `InboundMessageAcquisition`
+  - `RawMailStorageReceipt`
+- vilka objekt som ska finnas:
+  - `InboxTransportReceipt.status: received -> accepted | rejected | quarantined`
+  - `InboundMessageEnvelope` med normalized sender, recipient, message-id, raw mail hash, provider receipt id, provider source, receivedAt, acquisition mode
+  - `InboundMailProviderProfile.capabilityClass: internal_intake_api | real_mail_provider | migration_feed`
+- vilka state machines som ska finnas:
+  - `InboundMessageAcquisition.status: received -> routed | rejected | quarantined`
+  - `InboxTransportReceipt.verificationStatus: unverified -> technically_validated -> business_unverified`
+- vilka commands som ska finnas:
+  - `registerInboxTransportProfile`
+  - `recordInboundMessageAcquisition`
+  - `routeInboundMessageToAttachments`
+  - `rejectInboundMessage`
+- vilka events som ska finnas:
+  - `inbox.transport.receipt_recorded`
+  - `inbox.message.acquired`
+  - `inbox.message.routed`
+  - `inbox.message.rejected`
+- vilka invariants som måste hållas:
+  - inget e-postmeddelande får skapas utan acquisition source
+  - råmail måste kunna spåras till providerklass eller `internal_intake_api`
+  - teknisk transportvalidering får aldrig kallas affärsverifiering
+- vilka valideringar som blockerar fel:
+  - blockera `real_mail_provider` om verklig provider receipt och source receipt id saknas
+  - blockera cross-company routing
+  - blockera råmail utan storage receipt
+- vilka routes/API-kontrakt som ska finnas:
+  - separat route för acquisition receipt
+  - separat route för internal intake API
+  - read route som visar acquisition mode och providerklass
+- vilka permissions/review-boundaries som ska finnas:
+  - bara högbehörig operator får registrera eller ändra inbound providerprofiler
+  - intern intake API får bara användas i explicit internal ingestion scope
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - provider receipt id
+  - acquisition actor/system
+  - raw mail storage receipt
+  - correlation ids
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma acquisition receipt får inte skapa ny message envelope två gånger
+  - replay ska återanvända samma identity när content matchar
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - äldre meddelanden migreras till `internal_intake_api` om verklig providerkedja saknas
+  - rollback får inte ändra acquisition class retroaktivt
+- vilka officiella regler och källor som styr delfasen:
+  - NIST TN 1945 för teknisk e-postautenticitet
+- vilka tester som bevisar att delfasen är korrekt:
+  - ingest receipt tests
+  - duplicate acquisition tests
+  - cross-company denial tests
+
+### Delfas 7.2 attachment/malware/quarantine model
+
+- vad som ska byggas:
+  - `AttachmentScanReceipt`
+  - `AttachmentThreatAssessment`
+  - `AttachmentContainerInspection`
+  - `QuarantineDecision`
+  - `QuarantineRelease`
+- vilka objekt som ska finnas:
+  - scanner provider
+  - scanner version
+  - scan finished at
+  - verdict
+  - evidence refs
+  - container depth
+  - encryption flag
+  - archive bomb score
+- vilka state machines som ska finnas:
+  - `AttachmentThreatAssessment.status: pending_scan -> clean | malware | policy_violation | encrypted_container | archive_bomb`
+  - `QuarantineDecision.status: opened -> released | destroyed | retained_for_incident`
+- vilka commands som ska finnas:
+  - `recordAttachmentScanReceipt`
+  - `recordAttachmentContainerInspection`
+  - `quarantineAttachment`
+  - `releaseQuarantinedAttachment`
+  - `destroyQuarantinedAttachment`
+- vilka events som ska finnas:
+  - `attachment.scan.recorded`
+  - `attachment.container.inspected`
+  - `attachment.quarantined`
+  - `attachment.quarantine.released`
+- vilka invariants som måste hållas:
+  - dokument får inte skapas från attachment utan verifierad clean receipt
+  - encrypted/nested/archive-bomb attachments får inte auto-routas
+  - quarantine release måste peka på nytt beslut och ny operatorreceipt
+- vilka valideringar som blockerar fel:
+  - default `clean` är förbjudet
+  - saknat scanresultat är blockerande
+  - scanner provider/version måste finnas
+- vilka routes/API-kontrakt som ska finnas:
+  - create/read quarantine decision
+  - release route med approval där policy kräver det
+- vilka permissions/review-boundaries som ska finnas:
+  - endast särskild quarantine-roll får releasa
+  - release av malware/policyviolation ska kräva tvåpersonsgodkännande där policy kräver det
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - scanner receipt
+  - release receipt
+  - quarantine reason code
+  - related incident refs
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma attachmentscan får inte dubbelroute:a samma attachment
+  - releasad attachment måste återinmata kontrollerat med ny route receipt
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - äldre attachments utan scanner receipt markeras `untrusted_legacy`
+- vilka officiella regler och källor som styr delfasen:
+  - providerdokumentation och allmän filsäkerhetspraxis
+- vilka tester som bevisar att delfasen är korrekt:
+  - scan receipt required
+  - encrypted archive blocked
+  - malware quarantine release approval
+
+### Delfas 7.3 source-fingerprint/duplicate/chain-of-custödy model
+
+- vad som ska byggas:
+  - `MessageIdentity`
+  - `AttachmentIdentity`
+  - `DocumentIdentity`
+  - `DuplicateDecision`
+  - `ProvenanceReceipt`
+- vilka objekt som ska finnas:
+  - raw mail hash
+  - message-id
+  - normalized sender/recipient
+  - inbound address
+  - attachment index
+  - attachment content identity
+  - source reference set
+  - business verification refs
+  - technical sender signal refs
+- vilka state machines som ska finnas:
+  - `DuplicateDecision.status: detected -> confirmed_duplicate | dismissed | merged`
+  - `ProvenanceReceipt.status: captured -> confirmed -> exported`
+- vilka commands som ska finnas:
+  - `captureMessageIdentity`
+  - `captureAttachmentIdentity`
+  - `captureDocumentIdentity`
+  - `recordDuplicateDecision`
+  - `confirmProvenanceReceipt`
+- vilka events som ska finnas:
+  - `document.identity.captured`
+  - `document.duplicate.detected`
+  - `document.duplicate.decided`
+  - `document.provenance.confirmed`
+- vilka invariants som måste hållas:
+  - teknisk sender signal får aldrig uppgradera business verification
+  - attachment provenance ska ärvas till document identity
+  - duplicate lineage ska vara append-only
+- vilka valideringar som blockerar fel:
+  - blockera document identity utan source acquisition
+  - blockera saknad sender/recipient provenance i inboxvägen
+- vilka routes/API-kontrakt som ska finnas:
+  - read route för duplicate lineage
+  - read route för provenance receipt
+- vilka permissions/review-boundaries som ska finnas:
+  - duplicate merge/dismiss måste gå via reviewpolicy
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - duplicate reason
+  - compared fields
+  - operator receipt
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - replay av samma råmail eller samma attachmentcontent ska återanvända identity
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - äldre dokument får migrationsevidens som visar svagare provenance
+- vilka officiella regler och källor som styr delfasen:
+  - NIST TN 1945 för avsändarsignaler; BFN/BFL för bevarandespår
+- vilka tester som bevisar att delfasen är korrekt:
+  - cross-channel duplicate tests
+  - provenance inheritance tests
+  - duplicate decision replay tests
+
+### Delfas 7.4 original-binary/hash/provenance model
+
+- vad som ska byggas:
+  - `ContentIdentityRecord`
+  - `StorageReceipt`
+  - `HashPolicy`
+  - `HashRotationRecord`
+  - `OriginalBinaryCapture`
+- vilka objekt som ska finnas:
+  - content hash
+  - hash algorithm
+  - hash version
+  - file size
+  - byte source
+  - storage receipt ref
+  - capture actor/system
+  - capture timestamp
+- vilka state machines som ska finnas:
+  - `OriginalBinaryCapture.status: captured -> stored -> verified`
+  - `HashRotationRecord.status: planned -> executed -> verified`
+- vilka commands som ska finnas:
+  - `captureOriginalBinary`
+  - `recordStorageReceipt`
+  - `verifyContentIdentity`
+  - `rotateHashPolicy`
+- vilka events som ska finnas:
+  - `document.original.captured`
+  - `document.storage.receipt_recorded`
+  - `document.content_identity.verified`
+  - `document.hash_policy.rotated`
+- vilka invariants som måste hållas:
+  - originalbinärens hash får inte komma från klientinmatning i skyddade lägen
+  - storage migration får inte bryta identity
+  - verifierad content identity är immutable
+- vilka valideringar som blockerar fel:
+  - blockera originalvariant utan bytes
+  - blockera supplied hash när policy kräver plattformsberäkning
+- vilka routes/API-kontrakt som ska finnas:
+  - read route för content identity history
+  - verify route för checksum verification
+- vilka permissions/review-boundaries som ska finnas:
+  - bara drift-/migrationsroller får initiera hashrotation
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - capture receipt
+  - verification receipt
+  - storage receipt
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - replay av samma bytes ska ge samma content identity
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - migrerade original måste verifieras mot ny storage receipt innan go-live
+- vilka officiella regler och källor som styr delfasen:
+  - BFN/BFL om överföring utan risk för förvanskning/förlust
+- vilka tester som bevisar att delfasen är korrekt:
+  - content identity compute tests
+  - no-supplied-hash tests
+  - migration verification tests
+
+### Delfas 7.5 document-record/version-chain/redaction/export model
+
+- vad som ska byggas:
+  - `DocumentChainStatus`
+  - `DocumentVariantPolicy`
+  - `RedactionVariant`
+  - `DocumentExportPackage`
+  - `DocumentExportManifest`
+- vilka objekt som ska finnas:
+  - canonical variant registry
+  - chain completeness flags
+  - export scope
+  - included artifact ids
+  - export digest
+  - export actor
+- vilka state machines som ska finnas:
+  - `RedactionVariant.status: draft -> approved -> released`
+  - `DocumentExportPackage.status: prepared -> frozen -> released`
+- vilka commands som ska finnas:
+  - `appendDocumentVariant`
+  - `createRedactionVariant`
+  - `approveRedactionVariant`
+  - `prepareDocumentExport`
+  - `freezeDocumentExport`
+- vilka events som ska finnas:
+  - `document.variant.appended`
+  - `document.redaction.created`
+  - `document.redaction.approved`
+  - `document.export.prepared`
+  - `document.export.frozen`
+- vilka invariants som måste hållas:
+  - original muteras aldrig
+  - redaction pekar alltid på source version
+  - exportmanifest måste lista alla included artifacts
+- vilka valideringar som blockerar fel:
+  - blockera export utan manifest
+  - blockera redaction release utan approval där policy kräver det
+- vilka routes/API-kontrakt som ska finnas:
+  - redaction create/read/release
+  - export package read/download
+- vilka permissions/review-boundaries som ska finnas:
+  - redaction release och export av känslig variant kräver höjd boundary
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - chain digest
+  - export receipt
+  - redaction approval receipt
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - om samma exportscope exporteras igen ska samma digest återanvändas eller ny versionkedja skapas explicit
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - äldre exports utan manifest ska markeras legacy
+- vilka officiella regler och källor som styr delfasen:
+  - BFL/BFN för bevarandespår och verifikationsunderlag
+- vilka tester som bevisar att delfasen är korrekt:
+  - redaction immutability tests
+  - export manifest completeness tests
+  - chain completeness denial tests
+
+### Delfas 7.6 OCR runtime/callback/capability model
+
+- vad som ska byggas:
+  - `OcrCapabilityRecord`
+  - `OcrProviderReceipt`
+  - `OcrCallbackProfile`
+  - `OcrProviderAuthPolicy`
+  - `OcrBaselineRef`
+- vilka objekt som ska finnas:
+  - provider class
+  - legal/live status
+  - callback auth mode
+  - processor id
+  - processor version
+  - request/response receipt ids
+- vilka state machines som ska finnas:
+  - `OcrCapabilityRecord.status: stub | fake_live | manual_controlled | real_provider`
+  - `OcrProviderReceipt.status: started -> completed | failed`
+- vilka commands som ska finnas:
+  - `registerOcrCapability`
+  - `startOcrProviderExecution`
+  - `recordOcrProviderCallback`
+  - `completeOcrProviderExecution`
+- vilka events som ska finnas:
+  - `ocr.capability.registered`
+  - `ocr.provider.started`
+  - `ocr.provider.callback_received`
+  - `ocr.provider.completed`
+- vilka invariants som måste hållas:
+  - `real_provider` kräver verklig adapter och authmodell
+  - callbackroute har exakt en authmodell
+  - live claims måste överensstämma med faktisk adapter
+- vilka valideringar som blockerar fel:
+  - blockera `production_supported` när provider bara kan kasta `not_configured`
+  - blockera användarsession på ren providercallback-route
+- vilka routes/API-kontrakt som ska finnas:
+  - capability listing
+  - callback endpoint med signerad/tokeniserad providerprofil
+- vilka permissions/review-boundaries som ska finnas:
+  - operators får läsa capabilitystatus men inte ändra den utan approval
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - provider receipt
+  - callback trace
+  - adapter profile ref
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - callback replay får inte komplettera samma run två gånger
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - nuvarande google-provider migreras till `fake_live` tills verklig adapter finns
+- vilka officiella regler och källor som styr delfasen:
+  - Google Document AI docs
+- vilka tester som bevisar att delfasen är korrekt:
+  - capability truth tests
+  - callback auth mode tests
+  - provider replay tests
+
+### Delfas 7.7 OCR threshold/rerun/review-task model
+
+- vad som ska byggas:
+  - `OcrThresholdPolicy`
+  - `ReviewRequirementDecision`
+  - `ReviewTaskLifecycle`
+  - `OcrRerunDecision`
+  - `ReviewTaskDecisionReceipt`
+- vilka objekt som ska finnas:
+  - per-channel threshold policy
+  - per-field confidence
+  - policy version
+  - rerun reason
+  - review outcome
+- vilka state machines som ska finnas:
+  - `ReviewTaskLifecycle.status: open -> claimed -> corrected -> approved | rejected | requeued`
+  - `OcrRerunDecision.status: requested -> approved -> executed -> completed`
+- vilka commands som ska finnas:
+  - `evaluateOcrThresholdPolicy`
+  - `claimReviewTask`
+  - `correctReviewTask`
+  - `approveReviewTask`
+  - `rejectReviewTask`
+  - `requeueReviewTask`
+  - `requestOcrRerun`
+- vilka events som ska finnas:
+  - `ocr.review.required`
+  - `review_task.claimed`
+  - `review_task.corrected`
+  - `review_task.approved`
+  - `review_task.rejected`
+  - `review_task.requeued`
+  - `ocr.rerun.requested`
+- vilka invariants som måste hållas:
+  - varje OCR-run ska kunna förklara varför review krävdes eller inte krävdes
+  - rerun får aldrig mutera tidigare OCR- eller classificationversion
+- vilka valideringar som blockerar fel:
+  - blockera approve utan claim/decision where required
+  - blockera rerun utan reason code
+- vilka routes/API-kontrakt som ska finnas:
+  - full claim/correct/approve/reject/requeue
+  - rerun request/read
+- vilka permissions/review-boundaries som ska finnas:
+  - reject/requeue får kräva särskild operatörsroll
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - threshold decision receipt
+  - rerun receipt
+  - review decision receipt
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma rerun receipt får inte skapa dubbel rerun
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - äldre tasks i mellanlägen migreras till canonical lifecycle status
+- vilka officiella regler och källor som styr delfasen:
+  - provider docs och intern kontrollpolicy
+- vilka tester som bevisar att delfasen är korrekt:
+  - threshold reason tests
+  - reject/requeue tests
+  - rerun lineage tests
+
+### Delfas 7.8 classification/extraction/search-boundary model
+
+- vad som ska byggas:
+  - `ClassificationPolicyRecord`
+  - `ExtractionLineageRecord`
+  - `SearchExposureProfile`
+  - `ReviewQueueRegistry`
+  - `DispatchIntent`
+- vilka objekt som ska finnas:
+  - canonical queue code registry
+  - review boundary code
+  - sensitivity class
+  - extraction lineage per field
+  - downstream intent refs
+- vilka state machines som ska finnas:
+  - `ClassificationPolicyRecord.status: draft -> approved -> active -> superseded`
+  - `DispatchIntent.status: suggested -> approved -> dispatched | blocked`
+- vilka commands som ska finnas:
+  - `approveClassificationPolicy`
+  - `createDispatchIntent`
+  - `dispatchClassificationCase`
+- vilka events som ska finnas:
+  - `classification.policy.approved`
+  - `classification.dispatch_intent.created`
+  - `classification.dispatched`
+- vilka invariants som måste hållas:
+  - queue codes måste komma från canonical registry
+  - extraction lineage måste följa med till dispatch intent
+  - masked search och export måste dela exposure policy
+- vilka valideringar som blockerar fel:
+  - blockera okänd queue code
+  - blockera dispatch utan lineage för kritiska fält
+- vilka routes/API-kontrakt som ska finnas:
+  - read queue registry
+  - read classification lineage
+- vilka permissions/review-boundaries som ska finnas:
+  - policyaktivering kräver review/approval
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - policy receipt
+  - dispatch intent receipt
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma case och policyversion ska ge samma routing om input är oförändrad
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla queue codes normaliseras till registry
+- vilka officiella regler och källor som styr delfasen:
+  - interna policykrav; bokföringsnära säkerhetsprinciper
+- vilka tester som bevisar att delfasen är korrekt:
+  - queue registry tests
+  - extraction lineage tests
+  - masked exposure tests
+
+### Delfas 7.9 review-center/decision-effect model
+
+- vad som ska byggas:
+  - `ReviewDecisionEffect`
+  - `ReviewOutcomeReceipt`
+  - `ReviewRequeueReason`
+  - `ReviewEscalationReceipt`
+  - `ReviewCloseReceipt`
+- vilka objekt som ska finnas:
+  - decision code
+  - resulting command
+  - affected document or case refs
+  - escalation lineage
+  - close receipt
+- vilka state machines som ska finnas:
+  - `ReviewDecisionEffect.status: recorded -> applied -> verified`
+  - `ReviewCloseReceipt.status: prepared -> recorded`
+- vilka commands som ska finnas:
+  - `recordReviewDecisionEffect`
+  - `applyReviewDecisionEffect`
+  - `closeReviewItem`
+- vilka events som ska finnas:
+  - `review.effect.recorded`
+  - `review.effect.applied`
+  - `review.item.closed`
+- vilka invariants som måste hållas:
+  - varje finalt review decision måste ha effect record
+  - close får inte ske utan final outcome och effect record
+- vilka valideringar som blockerar fel:
+  - blockera close utan effect record
+  - blockera final outcome utan operatorreceipt
+- vilka routes/API-kontrakt som ska finnas:
+  - read route för decision effects
+  - close route med explicit receipt
+- vilka permissions/review-boundaries som ska finnas:
+  - close och override kräver särskild reviewroll
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - decision receipt
+  - effect receipt
+  - close receipt
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma decisioneffect får inte appliceras dubbelt
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla review items får backfillad effect-status innan go-live
+- vilka officiella regler och källor som styr delfasen:
+  - intern kontroll- och auditstyrning
+- vilka tester som bevisar att delfasen är korrekt:
+  - effect required tests
+  - close denial tests
+  - escalation lineage tests
+
+### Delfas 7.10 import-case/cross-domain-link model
+
+- vad som ska byggas:
+  - `ImportApplyExecution`
+  - `ImportApplyReceipt`
+  - `DownstreamCommandDispatch`
+  - `ImportApplyFailure`
+  - `TargetObjectSnapshot`
+- vilka objekt som ska finnas:
+  - import case id
+  - target domain
+  - dispatched command key
+  - target object id
+  - downstream receipt
+  - failure reason
+- vilka state machines som ska finnas:
+  - `ImportApplyExecution.status: prepared -> dispatched -> applied | failed`
+- vilka commands som ska finnas:
+  - `dispatchImportApply`
+  - `recordImportApplyReceipt`
+  - `recordImportApplyFailure`
+- vilka events som ska finnas:
+  - `import_case.apply.dispatched`
+  - `import_case.apply.applied`
+  - `import_case.apply.failed`
+- vilka invariants som måste hållas:
+  - applied betyder verklig downstream dispatch plus target snapshot
+  - idempotens ska bygga på execution receipt
+- vilka valideringar som blockerar fel:
+  - blockera applied-status utan target snapshot
+  - blockera mapping-only apply
+- vilka routes/API-kontrakt som ska finnas:
+  - apply route som returnerar execution receipt
+  - read route för target snapshot
+- vilka permissions/review-boundaries som ska finnas:
+  - apply kräver approved importcase och correct review boundary
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - downstream command receipt
+  - actor
+  - correlation id
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - replay med samma execution receipt är no-op
+  - failed execution måste kunna återköras med ny execution chain
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - äldre mapping-only fall märks legacy och får inte användas som go-live-evidens
+- vilka officiella regler och källor som styr delfasen:
+  - ingen extern regelkälla; detta är canonical integrationsgovernance
+- vilka tester som bevisar att delfasen är korrekt:
+  - target object created tests
+  - idempotent apply tests
+  - failed apply recovery tests
+
+### Delfas 7.11 evidence-bundle/snapshot/export/manifest model
+
+- vad som ska byggas:
+  - `EvidenceExportPackage`
+  - `EvidenceExportManifest`
+  - `EvidenceArtifactDigest`
+  - `EvidenceVerificationReceipt`
+  - `EvidenceArchiveLineage`
+- vilka objekt som ska finnas:
+  - bundle id
+  - artifact list
+  - digest list
+  - export actor
+  - export timestamp
+  - source bundle checksum
+- vilka state machines som ska finnas:
+  - `EvidenceExportPackage.status: prepared -> frozen -> released`
+  - `EvidenceVerificationReceipt.status: created -> verified | failed`
+- vilka commands som ska finnas:
+  - `prepareEvidenceExport`
+  - `freezeEvidenceExport`
+  - `verifyEvidenceExport`
+- vilka events som ska finnas:
+  - `evidence.export.prepared`
+  - `evidence.export.frozen`
+  - `evidence.export.verified`
+- vilka invariants som måste hållas:
+  - exportpaketets digest måste spegla bundleinnehållet exakt
+  - archiverad bundlevariant får inte muteras
+- vilka valideringar som blockerar fel:
+  - blockera export utan manifest
+  - blockera release när artifact checksum saknas
+- vilka routes/API-kontrakt som ska finnas:
+  - download manifest
+  - verify manifest
+- vilka permissions/review-boundaries som ska finnas:
+  - high-sensitivity evidence export kräver särskild boundary
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - export receipt
+  - verification receipt
+  - source bundle refs
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma export scope ska vara idempotent
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla exports utan manifest får legacy-markeras
+- vilka officiella regler och källor som styr delfasen:
+  - audit/integrity best practice och officiella retentionkrav
+- vilka tester som bevisar att delfasen är korrekt:
+  - export manifest tests
+  - checksum verification tests
+  - archived lineage tests
+
+### Delfas 7.12 retention/7-year/legal-hold/deletion model
+
+- vad som ska byggas:
+  - `RetentionPolicyRecord`
+  - `RetentionSchedule`
+  - `LegalHoldRecord`
+  - `DeletionCase`
+  - `ArchiveDisposition`
+  - `RetentionBlockReason`
+- vilka objekt som ska finnas:
+  - retention class
+  - retention start event
+  - retention expiry
+  - legal hold scope
+  - legal hold owner
+  - deletion approval chain
+- vilka state machines som ska finnas:
+  - `LegalHoldRecord.status: active -> released`
+  - `DeletionCase.status: requested -> review_pending -> approved -> executed | denied`
+- vilka commands som ska finnas:
+  - `assignRetentionClass`
+  - `placeLegalHold`
+  - `releaseLegalHold`
+  - `requestDeletion`
+  - `approveDeletion`
+  - `executeDeletion`
+- vilka events som ska finnas:
+  - `document.retention_class.assigned`
+  - `document.legal_hold.placed`
+  - `document.legal_hold.released`
+  - `document.deletion.requested`
+  - `document.deletion.executed`
+- vilka invariants som måste hållas:
+  - bokföringsnära dokument måste ha explicit retention class
+  - legal hold stoppar delete och blockerad export enligt policy
+  - deletion pending och deleted måste vara verkliga transitions med receipts
+- vilka valideringar som blockerar fel:
+  - blockera `unspecified` för ekonomiska, reglerade eller evidensbärande dokument
+  - blockera deletion under aktiv legal hold
+  - blockera deletion före retention expiry
+- vilka routes/API-kontrakt som ska finnas:
+  - read route för retention schedule
+  - legal hold create/release
+  - deletion case create/read/approve
+- vilka permissions/review-boundaries som ska finnas:
+  - legal hold release och deletion approval kräver särskild policy
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - legal hold receipt
+  - deletion receipt
+  - blocker reason
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma deletioncase får inte verkställas två gånger
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla dokument med `unspecified` måste backfillas före go-live
+- vilka officiella regler och källor som styr delfasen:
+  - Riksdagen BFL 7 kap.
+  - BFN arkivering
+- vilka tester som bevisar att delfasen är korrekt:
+  - retention-class-required tests
+  - legal hold block tests
+  - deletion approval tests
+
+### Delfas 7.13 security-classification/access/redaction model
+
+- vad som ska byggas:
+  - `DocumentAccessPolicy`
+  - `DocumentExposureBoundary`
+  - `DocumentExportProfile`
+  - `SupportDocumentView`
+  - `RedactionReleaseApproval`
+- vilka objekt som ska finnas:
+  - classification code
+  - sensitivity class
+  - exposure profile
+  - reveal approval refs
+  - support view profile
+- vilka state machines som ska finnas:
+  - `RedactionReleaseApproval.status: requested -> approved | denied -> executed`
+  - `SupportDocumentView.status: prepared -> released`
+- vilka commands som ska finnas:
+  - `resolveDocumentAccessPolicy`
+  - `requestRedactionRelease`
+  - `approveRedactionRelease`
+  - `prepareSupportDocumentView`
+- vilka events som ska finnas:
+  - `document.access_policy.resolved`
+  - `document.redaction_release.requested`
+  - `document.support_view.prepared`
+- vilka invariants som måste hållas:
+  - sök, read och export måste bygga på samma access policy
+  - supportexport får inte kringgå redactionvariant
+- vilka valideringar som blockerar fel:
+  - blockera råexport när exposure profile kräver redaction
+  - blockera reveal utan rätt approval/steg-up där policy kräver det
+- vilka routes/API-kontrakt som ska finnas:
+  - support view route
+  - redacted export route
+  - reveal request/approval routes
+- vilka permissions/review-boundaries som ska finnas:
+  - payroll, benefits och travel kräver stramare boundary
+  - support får inte få bredare access än policy tillåter
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - reveal receipt
+  - support export receipt
+  - used variant id
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - samma support export scope ska vara idempotent
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - gamla raw exports markeras legacy och spärras
+- vilka officiella regler och källor som styr delfasen:
+  - dataminimering och interna säkerhetspolicys
+- vilka tester som bevisar att delfasen är korrekt:
+  - policy-consistency tests
+  - redacted export tests
+  - unauthorized reveal denial tests
+
+### Delfas 7.14 runbook/legacy-doc/false-claim cleanup model
+
+- vad som ska byggas:
+  - `DocumentRunbookRegistry`
+  - `LegacyDocDisposition`
+  - `SupersessionNotice`
+  - `ClaimVerificationRegister`
+- vilka objekt som ska finnas:
+  - source document path
+  - disposition `keep | rewrite | archive | remove`
+  - replacement path
+  - claim verification status
+- vilka state machines som ska finnas:
+  - `LegacyDocDisposition.status: identified -> archived | rewritten | removed`
+- vilka commands som ska finnas:
+  - `registerLegacyDocument`
+  - `archiveLegacyDocument`
+  - `rewriteOperationalRunbook`
+  - `removeFalseClaim`
+- vilka events som ska finnas:
+  - `legacy_doc.registered`
+  - `legacy_doc.archived`
+  - `legacy_doc.rewritten`
+  - `legacy_doc.removed`
+- vilka invariants som måste hållas:
+  - inga gamla Domän 7-dokument får se bindande ut
+  - varje gammal live claim måste kunna mappas till verifierad runtime eller rensas bort
+- vilka valideringar som blockerar fel:
+  - blockera runbook utan supersession notice om den arkiveras
+  - blockera kvarvarande falsk live claim i dokument som inte är arkiverade
+- vilka routes/API-kontrakt som ska finnas:
+  - inget produktions-API krävs; detta är dokumentstyrningskedja
+- vilka permissions/review-boundaries som ska finnas:
+  - endast rebuild-styrning får sätta bindande dokumentstatus
+- vilka audit/evidence/receipt-krav som ska finnas:
+  - disposition receipt
+  - replacement path
+  - actor
+- vilka replay/recovery/dead-letter-regler som ska finnas:
+  - dispositionlogg ska vara append-only
+- vilka migrations-/cutover-/rollback-regler som ska finnas:
+  - arkiverade dokument får inte återupphöjas till sanning
+- vilka officiella regler och källor som styr delfasen:
+  - ingen extern regelkälla; rebuild-styrningen är enda sanning
+- vilka tester som bevisar att delfasen är korrekt:
+  - repo search för false claims
+  - legacy header verification
+  - rebuild path consistency tests
